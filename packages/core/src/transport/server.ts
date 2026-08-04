@@ -1,0 +1,143 @@
+// The BFF half of ProxyTransport. Framework-agnostic: it takes a `Request` and
+// returns a `Response`, so it drops into a Next.js route handler, a Hono route,
+// a Cloudflare Worker, or Bun.serve unchanged.
+//
+// Security posture, stated plainly: this handler holds your provider key and
+// forwards client-supplied paths. Without an allowlist that is an open relay —
+// anyone who can reach your route can spend your key on any endpoint. So:
+//   • providers must be registered explicitly, with their key and base URL;
+//   • every path is matched against a per-provider allowlist of patterns;
+//   • the client can never set Authorization (we drop inbound auth headers);
+//   • `authorize` gets the raw Request so you can attach your own session check.
+
+import type { ProxyEnvelope } from "./proxy.js";
+
+export type ProxyProviderConfig = {
+  baseUrl: string;
+  apiKey: string | (() => string | Promise<string>);
+  // Allowed provider paths. A single `*` matches one segment; a double `*`
+  // matches the remaining path.
+  // e.g. ["/responses", "/responses/*", "/responses/*/cancel", "/chat/completions"]
+  allowPaths: string[];
+  headers?: Record<string, string>;
+};
+
+export type ProxyHandlerConfig = {
+  providers: Record<string, ProxyProviderConfig>;
+  /**
+   * Called before anything is forwarded. Return `false` or a Response to reject.
+   * This is where your session/rate-limit/quota logic goes.
+   */
+  authorize?: (req: Request, envelope: ProxyEnvelope) => Promise<boolean | Response> | boolean | Response;
+  /** Observe every forwarded call (metering, audit log). */
+  onRequest?: (envelope: ProxyEnvelope, meta: { ok: boolean; status: number; ms: number }) => void | Promise<void>;
+  fetchImpl?: typeof fetch;
+};
+
+// Compile a wildcard pattern into a matcher. Anchored at both ends, so no
+// prefix tricks — "/responses" must not match "/responses-admin".
+export function pathMatches(pattern: string, path: string): boolean {
+  const source = pattern
+    .split("/")
+    .map((seg) => {
+      if (seg === "**") return "@@REST@@";
+      if (seg === "*") return "[^/]+";
+      return seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    })
+    .join("/")
+    .replace("@@REST@@", ".*");
+  return new RegExp(`^${source}$`).test(path);
+}
+
+const json = (body: unknown, status: number) =>
+  new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+export function createProxyHandler(config: ProxyHandlerConfig) {
+  const doFetch = config.fetchImpl ?? globalThis.fetch;
+
+  return async function handle(request: Request): Promise<Response> {
+    const startedAt = Date.now();
+    let envelope: ProxyEnvelope;
+    try {
+      envelope = (await request.json()) as ProxyEnvelope;
+    } catch {
+      return json({ error: { message: "Body must be a JSON proxy envelope." } }, 400);
+    }
+
+    const provider = config.providers[envelope.provider];
+    if (!provider) {
+      return json({ error: { message: `Unknown provider "${envelope.provider}".` } }, 404);
+    }
+
+    // Normalize before matching so "/responses/../files" can't slip past the
+    // allowlist and reach an endpoint the operator never opened up.
+    const path = normalizePath(envelope.path);
+    if (!path || !provider.allowPaths.some((p) => pathMatches(p, path))) {
+      return json({ error: { message: `Path "${envelope.path}" is not allowed for ${envelope.provider}.` } }, 403);
+    }
+
+    if (config.authorize) {
+      const verdict = await config.authorize(request, envelope);
+      if (verdict instanceof Response) return verdict;
+      if (verdict === false) return json({ error: { message: "Not authorized." } }, 401);
+    }
+
+    const url = new URL(`${provider.baseUrl.replace(/\/$/, "")}${path}`);
+    for (const [k, v] of Object.entries(envelope.query ?? {})) {
+      if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
+    }
+
+    const apiKey = typeof provider.apiKey === "function" ? await provider.apiKey() : provider.apiKey;
+    const headers: Record<string, string> = {
+      authorization: `Bearer ${apiKey}`,
+      ...provider.headers,
+    };
+    if (envelope.body !== undefined) headers["content-type"] = "application/json";
+    if (envelope.stream) headers["accept"] = "text/event-stream";
+
+    let upstream: Response;
+    try {
+      upstream = await doFetch(url.toString(), {
+        method: envelope.method,
+        headers,
+        body: envelope.body === undefined ? undefined : JSON.stringify(envelope.body),
+        signal: request.signal,
+      });
+    } catch (e) {
+      await config.onRequest?.(envelope, { ok: false, status: 502, ms: Date.now() - startedAt });
+      return json({ error: { message: e instanceof Error ? e.message : "Upstream fetch failed." } }, 502);
+    }
+
+    await config.onRequest?.(envelope, { ok: upstream.ok, status: upstream.status, ms: Date.now() - startedAt });
+
+    // Stream straight through — buffering an SSE body here would defeat the
+    // point of streaming and stall the first token behind the last one.
+    const outHeaders = new Headers();
+    const contentType = upstream.headers.get("content-type");
+    if (contentType) outHeaders.set("content-type", contentType);
+    const retryAfter = upstream.headers.get("retry-after");
+    if (retryAfter) outHeaders.set("retry-after", retryAfter);
+    if (envelope.stream) {
+      outHeaders.set("cache-control", "no-cache, no-transform");
+      outHeaders.set("connection", "keep-alive");
+    }
+
+    return new Response(upstream.body, { status: upstream.status, headers: outHeaders });
+  };
+}
+
+/** Resolve `.`/`..` segments and reject anything that escapes the root. */
+function normalizePath(input: string): string | null {
+  if (typeof input !== "string" || !input.startsWith("/")) return null;
+  const out: string[] = [];
+  for (const seg of input.split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") {
+      if (out.length === 0) return null;
+      out.pop();
+      continue;
+    }
+    out.push(seg);
+  }
+  return `/${out.join("/")}`;
+}

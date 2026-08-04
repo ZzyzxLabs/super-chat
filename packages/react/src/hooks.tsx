@@ -1,0 +1,195 @@
+"use client";
+
+// React bindings. Every hook is a selector over one `AgentClient` store, so a
+// component that only reads `status` does not re-render on every streamed token.
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
+import type { Card, CardAction, ContextTrace, Message, Skill, ToolDefinition } from "@agentloom/core";
+import { AgentClient, type AgentClientConfig, type ThreadState } from "./client.js";
+
+const AgentContext = createContext<AgentClient | null>(null);
+
+export function AgentProvider({ client, children }: { client: AgentClient; children: ReactNode }) {
+  return <AgentContext.Provider value={client}>{children}</AgentContext.Provider>;
+}
+
+export function useAgentClient(): AgentClient {
+  const client = useContext(AgentContext);
+  if (!client) throw new Error("useAgentClient must be used inside <AgentProvider>.");
+  return client;
+}
+
+/**
+ * Subscribe to a slice of thread state.
+ *
+ * `isEqual` defaults to `Object.is`. Selectors that build a new object each call
+ * must pass a comparator, or they re-render on every notify — which during a
+ * stream is every token.
+ */
+export function useAgentState<T>(selector: (state: ThreadState) => T, isEqual: (a: T, b: T) => boolean = Object.is): T {
+  const client = useAgentClient();
+  const lastRef = useRef<{ value: T } | null>(null);
+
+  const getSnapshot = useCallback(() => {
+    const next = selector(client.store.get());
+    if (lastRef.current && isEqual(lastRef.current.value, next)) return lastRef.current.value;
+    lastRef.current = { value: next };
+    return next;
+  }, [client, selector, isEqual]);
+
+  return useSyncExternalStore(client.store.subscribe, getSnapshot, getSnapshot);
+}
+
+const sameIds = (a: readonly { id: string }[], b: readonly { id: string }[]) =>
+  a.length === b.length && a.every((x, i) => x.id === b[i]?.id);
+
+export function useThread() {
+  const client = useAgentClient();
+  const messages = useAgentState((s) => s.messages);
+  const status = useAgentState((s) => s.status);
+  const error = useAgentState((s) => s.error);
+
+  return useMemo(
+    () => ({
+      messages,
+      status,
+      error,
+      send: (input: Parameters<AgentClient["send"]>[0], opts?: Parameters<AgentClient["send"]>[1]) => client.send(input, opts),
+      regenerate: () => client.regenerate(),
+      stop: () => client.stop(),
+      clear: () => client.clear(),
+      isRunning: status === "running" || status === "awaiting-user",
+    }),
+    [client, messages, status, error],
+  );
+}
+
+/** The in-flight assistant turn: streamed parts, usage, step count. */
+export function useRun() {
+  return useAgentState((s) => s.run);
+}
+
+/** Streamed text of the current turn, without re-rendering on tool events. */
+export function useStreamingText(): string {
+  return useAgentState((s) =>
+    s.run.parts
+      .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
+      .map((p) => p.text)
+      .join(""),
+  );
+}
+
+export function useCards(): Card[] {
+  return useAgentState((s) => s.cards, sameIds);
+}
+
+/**
+ * The card blocking the run, plus the responder.
+ *
+ * `respond` is what closes the human-in-the-loop: it resolves the suspended
+ * tool, and the agent loop continues with the user's answer as the result.
+ */
+export function useCardAction(): { pending: Card | undefined; respond: (action: Omit<CardAction, "at">) => void } {
+  const client = useAgentClient();
+  const pending = useAgentState((s) => s.run.pendingCard, (a, b) => a?.id === b?.id);
+
+  const respond = useCallback(
+    (action: Omit<CardAction, "at">) => client.respond({ ...action, at: Date.now() }),
+    [client],
+  );
+
+  return { pending, respond };
+}
+
+/** What actually went into the last request, and why. */
+export function useContextTrace(): ContextTrace | undefined {
+  return useAgentState((s) => s.run.trace);
+}
+
+/**
+ * All registered skills, plus which ones the last run actually loaded.
+ *
+ * The `matched` half is the useful part for a UI: it answers "why did the agent
+ * know that" without the user reading a system prompt.
+ */
+export function useSkills(): { skills: Skill[]; matched: string[]; index: string } {
+  const client = useAgentClient();
+  const registry = client.getConfig().contextBuilder.skillRegistry;
+  const detail = useAgentState((s) => s.run.trace?.entries.find((e) => e.id === "skills")?.detail ?? "");
+
+  return useMemo(() => {
+    const skills = registry?.list() ?? [];
+    const matched =
+      detail === "none matched"
+        ? []
+        : detail
+            .split(",")
+            .map((s) => s.trim().replace(/\(.*\)$/, ""))
+            .filter(Boolean);
+    return { skills, matched, index: registry?.manualIndex() ?? "" };
+  }, [registry, detail]);
+}
+
+/**
+ * Registered tools, and the set actually exposed.
+ *
+ * `active` prefers what the last run recorded, because a matched skill can
+ * unlock tools beyond the base presets — recomputing from the presets alone
+ * under-reports, which is misleading in an inspector whose whole job is to say
+ * what the model saw.
+ */
+export function useTools(): { all: ToolDefinition[]; active: string[]; presets: string[]; fromRun: boolean } {
+  const client = useAgentClient();
+  const recorded = useAgentState(
+    (s) => s.run.toolNames,
+    (a, b) => a?.length === b?.length && (a ?? []).every((n, i) => n === b?.[i]),
+  );
+  const config = client.getConfig();
+
+  return useMemo(() => {
+    const base = config.tools.resolve(config.toolResolution).map((t) => t.name);
+    const active = recorded?.length
+      ? config.tools.resolve({ ...config.toolResolution, allow: recorded }).map((t) => t.name)
+      : base;
+    return {
+      all: config.tools.list(),
+      active,
+      presets: [...config.toolResolution.presets],
+      fromRun: Boolean(recorded?.length),
+    };
+  }, [config, recorded]);
+}
+
+export function useJobs() {
+  const client = useAgentClient();
+  const jobs = useAgentState((s) => s.jobs, (a, b) => a.length === b.length && a.every((j, i) => j.status === b[i]?.status));
+
+  // Resume once on mount: a background job outlives the page, so a reload must
+  // pick it back up rather than orphan it.
+  const resumed = useRef(false);
+  useEffect(() => {
+    if (resumed.current) return;
+    resumed.current = true;
+    void client.resumeBackgroundJobs();
+  }, [client]);
+
+  return jobs;
+}
+
+/** Construct a client once and keep it stable across renders. */
+export function useAgentClientInstance(config: AgentClientConfig): AgentClient {
+  const ref = useRef<AgentClient | null>(null);
+  if (!ref.current) ref.current = new AgentClient(config);
+  return ref.current;
+}
+
+export type { Message, ThreadState };

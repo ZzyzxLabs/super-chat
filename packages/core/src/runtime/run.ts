@@ -1,0 +1,382 @@
+// The agent loop.
+//
+// One async generator drives all three modes (stream / sync / background) so
+// there is exactly one place where "call model → run tools → loop" lives. The
+// modes differ only in HOW a step's result is obtained:
+//
+//   stream     — SSE, deltas surface immediately
+//   sync       — one request/response
+//   background — provider-side job + polling; survives a closed tab
+//
+// Everything after that — tool dispatch, card suspension, stop conditions,
+// history append — is identical, which is the point.
+
+import { assistantMessage, nextId } from "../content/parts.js";
+import type { ContentPart, FinishReason, Message, Usage } from "../content/types.js";
+import { stripCardPayload, type Card, type CardAction, type CardSpec } from "../cards/types.js";
+import { makeCard } from "../cards/registry.js";
+import type { ContextBuilder } from "../context/builder.js";
+import { AgentError, toAgentError } from "../errors.js";
+import type { GenerateResult, NormalizedRequest, Provider, StreamEvent } from "../providers/types.js";
+import type { ToolRegistry } from "../tools/registry.js";
+import type { ToolResolution } from "../tools/types.js";
+import { awaitJob } from "./jobs.js";
+import { executeToolCalls, type ToolCallRequest } from "./execute-tools.js";
+import { EventChannel } from "./channel.js";
+import type { RunEvent, RunMode } from "./events.js";
+import { shouldStop, type StopCondition } from "./stop.js";
+
+export type RunConfig = {
+  provider: Provider;
+  model: string;
+  contextBuilder: ContextBuilder;
+  tools: ToolRegistry;
+  toolResolution: ToolResolution;
+  mode?: RunMode;
+  maxSteps?: number;
+  stopWhen?: StopCondition[];
+  vars?: Record<string, unknown>;
+  temperature?: number;
+  maxOutputTokens?: number;
+  reasoning?: NormalizedRequest["reasoning"];
+  toolTimeoutMs?: number;
+  signal?: AbortSignal;
+  /**
+   * Resolve an interactive card. The host shows it and returns the user's
+   * answer. Absent means interactive cards auto-decline rather than hang.
+   */
+  onUserDecision?: (callId: string, card: Card) => Promise<CardAction>;
+  /** Execute a tool that has no `execute` (browser-side capabilities). */
+  onHostTool?: (call: ToolCallRequest) => Promise<unknown>;
+  /** Persist a background job handle so a reload can resume it. */
+  onJobHandle?: (handle: NonNullable<GenerateResult["responseId"]> extends string ? unknown : never) => void;
+  /** Skills the user pinned in the UI. */
+  forceSkillIds?: string[];
+  /**
+   * Chain via the provider's stored response instead of resending history.
+   * Only used when the provider supports it; cuts input tokens dramatically on
+   * long tool loops.
+   */
+  useServerHistory?: boolean;
+};
+
+export async function* runAgent(
+  messages: readonly Message[],
+  config: RunConfig,
+): AsyncGenerator<RunEvent, void, unknown> {
+  const runId = nextId("run");
+  const mode = config.mode ?? "stream";
+  const maxSteps = config.maxSteps ?? 8;
+  const vars = config.vars ?? {};
+
+  yield { type: "run-start", runId, mode };
+
+  let history: Message[] = [...messages];
+  let totalUsage: Usage = {};
+  let finishReason: FinishReason = "unknown";
+  let step = 0;
+  let previousResponseId: string | undefined;
+
+  try {
+    // ── context, built once per run ────────────────────────────────────────
+    // Rebuilding per step would let skills flap in and out mid-turn and would
+    // break the cacheable prompt prefix. Tool RESULTS extend history within the
+    // loop; the instruction block stays fixed.
+    const baseTools = config.tools.resolve(config.toolResolution);
+    const context = await config.contextBuilder.build({
+      messages: history,
+      vars,
+      forceSkillIds: config.forceSkillIds,
+      baseTools: baseTools.map((t) => t.name),
+      signal: config.signal,
+    });
+
+    yield { type: "context-built", trace: context.trace, system: context.system, toolNames: context.toolNames };
+
+    // Skills may have unlocked tools beyond the base presets.
+    const activeTools = config.tools.resolve({ ...config.toolResolution, allow: context.toolNames });
+    const specs = config.tools.toSpecs(activeTools);
+
+    let working: Message[] = [...context.messages];
+
+    while (step < maxSteps) {
+      if (config.signal?.aborted) throw new AgentError("cancelled", "Run was cancelled.");
+      yield { type: "step-start", step };
+
+      const request: NormalizedRequest = {
+        model: config.model,
+        system: context.system,
+        messages: working,
+        ...(specs.length ? { tools: specs } : {}),
+        ...(config.temperature != null ? { temperature: config.temperature } : {}),
+        ...(config.maxOutputTokens != null ? { maxOutputTokens: config.maxOutputTokens } : {}),
+        ...(config.reasoning ? { reasoning: config.reasoning } : {}),
+        ...(config.useServerHistory && previousResponseId && config.provider.capabilities.serverSideHistory
+          ? { previousResponseId }
+          : {}),
+      };
+
+      // ── obtain this step's result ────────────────────────────────────────
+      let parts: ContentPart[] = [];
+      let stepFinish: FinishReason = "unknown";
+      let stepUsage: Usage | undefined;
+      let responseId: string | undefined;
+
+      if (mode === "stream" && config.provider.capabilities.streaming) {
+        const collected = collectStream(config.provider.stream(request, { signal: config.signal }));
+        for await (const event of collected.events()) {
+          if (event.type === "text-delta") yield { type: "text-delta", delta: event.delta };
+          else if (event.type === "reasoning-delta") yield { type: "reasoning-delta", delta: event.delta };
+          else if (event.type === "error") throw toAgentError(event.error, config.provider.id);
+        }
+        const done = collected.result();
+        parts = done.parts;
+        stepFinish = done.finishReason;
+        stepUsage = done.usage;
+        responseId = done.responseId;
+      } else if (mode === "background") {
+        if (!config.provider.startJob || !config.provider.capabilities.backgroundJobs) {
+          throw new AgentError(
+            "not-supported",
+            `Provider "${config.provider.id}" has no background mode. Use mode "stream" or "sync".`,
+          );
+        }
+        const handle = await config.provider.startJob({ ...request, background: true }, { signal: config.signal });
+        yield { type: "job-started", handle };
+
+        // Polling, not streaming: the entire value of background mode is that it
+        // survives a dropped connection, and a stream does not.
+        const snapshot = await awaitJob(config.provider, handle, { signal: config.signal });
+        yield { type: "job-status", handle, status: snapshot.status };
+
+        if (snapshot.status === "failed" || !snapshot.result) {
+          throw new AgentError("unknown", snapshot.error?.message ?? "Background job failed.", {
+            provider: config.provider.id,
+          });
+        }
+        parts = snapshot.result.parts;
+        stepFinish = snapshot.result.finishReason;
+        stepUsage = snapshot.result.usage;
+        responseId = snapshot.result.responseId;
+        // Deltas never streamed, so surface the text as one block.
+        const textParts = parts.filter((p) => p.type === "text");
+        if (textParts.length) yield { type: "message", parts: textParts };
+      } else {
+        const result = await config.provider.generate(request, { signal: config.signal });
+        parts = result.parts;
+        stepFinish = result.finishReason;
+        stepUsage = result.usage;
+        responseId = result.responseId;
+        const textParts = parts.filter((p) => p.type === "text");
+        if (textParts.length) yield { type: "message", parts: textParts };
+      }
+
+      previousResponseId = responseId;
+      if (stepUsage) {
+        totalUsage = addUsage(totalUsage, stepUsage);
+        yield { type: "usage", usage: stepUsage };
+      }
+      yield { type: "step-finish", step, finishReason: stepFinish, ...(stepUsage ? { usage: stepUsage } : {}) };
+
+      const assistant = assistantMessage(parts);
+      working = [...working, assistant];
+      history = [...history, assistant];
+
+      const calls: ToolCallRequest[] = parts
+        .filter((p): p is Extract<ContentPart, { type: "tool-call" }> => p.type === "tool-call")
+        .map((p) => ({ callId: p.callId, name: p.name, input: p.input }));
+
+      if (!calls.length) {
+        finishReason = stepFinish;
+        break;
+      }
+
+      for (const call of calls) {
+        const source = parts.find((p) => p.type === "tool-call" && p.callId === call.callId) as
+          | Extract<ContentPart, { type: "tool-call" }>
+          | undefined;
+        yield {
+          type: "tool-call",
+          callId: call.callId,
+          name: call.name,
+          input: call.input,
+          ...(source?.repaired ? { repaired: true } : {}),
+        };
+      }
+
+      // ── run tools ────────────────────────────────────────────────────────
+      // Tool execution is a plain async call and cannot yield into this loop, so
+      // it pushes into a channel that we drain CONCURRENTLY. Draining afterwards
+      // would deadlock the human-in-the-loop path: the tool waits on the user,
+      // the user waits to see the card, and the card waits on the tool.
+      const channel = new EventChannel<RunEvent>();
+      const running = executeToolCalls(calls, {
+        tools: activeTools,
+        vars,
+        signal: config.signal,
+        timeoutMs: config.toolTimeoutMs,
+        onCard: (card) => channel.push({ type: "card", card }),
+        onHostTool: config.onHostTool,
+        requestCard: config.onUserDecision
+          ? async (callId, spec: CardSpec) => {
+              const card = makeCard(spec, callId);
+              channel.push({ type: "awaiting-user", callId, card });
+              const action = await config.onUserDecision!(callId, card);
+              channel.push({ type: "user-responded", callId, action });
+              return action.type === "cancel" || action.type === "dismiss"
+                ? { cancelled: true, reason: "The user declined." }
+                : (action.value ?? { confirmed: true });
+            }
+          : undefined,
+      }).finally(() => channel.close());
+
+      for await (const event of channel) yield event;
+      const outcomes = await running;
+
+      // Two versions of each tool result, deliberately:
+      //   • the EVENT carries the full output, card payload included, so the UI
+      //     can render it and the host can persist it;
+      //   • the message fed back to the provider has the card stripped. The
+      //     model already read the surrounding data, and re-sending a chart
+      //     spec on every subsequent step of the same turn is pure waste.
+      const providerParts: ContentPart[] = [];
+      const persistedParts: ContentPart[] = [];
+      for (const outcome of outcomes) {
+        yield {
+          type: "tool-result",
+          callId: outcome.callId,
+          name: outcome.name,
+          output: outcome.output,
+          ...(outcome.failure ? { failure: outcome.failure } : {}),
+          ms: outcome.ms,
+        };
+        // No `card` event here: every card — emitted, returned, or embedded —
+        // already went out through the channel via `onCard`, ahead of this
+        // result. Re-yielding it would double-count in any host recording the
+        // stream (the reducer dedupes by id, so it looked harmless).
+
+        const base = {
+          type: "tool-result" as const,
+          callId: outcome.callId,
+          name: outcome.name,
+          ...(outcome.failure ? { failure: outcome.failure as never } : {}),
+        };
+        providerParts.push({ ...base, output: stripCardPayload(outcome.output) });
+        persistedParts.push({ ...base, output: outcome.output });
+      }
+
+      const createdAt = Date.now();
+      const toolId = nextId("tool");
+      working = [...working, { id: toolId, role: "tool", parts: providerParts, createdAt }];
+      history = [...history, { id: toolId, role: "tool", parts: persistedParts, createdAt }];
+
+      step += 1;
+      finishReason = stepFinish;
+
+      const stop = shouldStop(config.stopWhen, { step, finishReason: stepFinish, outcomes, usage: totalUsage });
+      if (stop) {
+        finishReason = "stop";
+        break;
+      }
+    }
+
+    // Hitting the cap with the model still wanting to act means the answer is
+    // truncated. Saying so is better than presenting half a task as finished.
+    if (step >= maxSteps && finishReason === "tool-calls") {
+      yield {
+        type: "message",
+        parts: [
+          {
+            type: "text",
+            text: `\n\n_(Reached the ${maxSteps}-step limit while still working — this may be incomplete. Ask me to continue.)_`,
+          },
+        ],
+      };
+    }
+
+    yield { type: "run-finish", runId, finishReason, usage: totalUsage, steps: step };
+  } catch (e) {
+    const error = toAgentError(e, config.provider.id);
+    yield { type: "error", error, recoverable: false };
+    yield { type: "run-finish", runId, finishReason: error.kind === "cancelled" ? "cancelled" : "error", usage: totalUsage, steps: step };
+  }
+}
+
+/**
+ * Tee a provider stream: forward deltas for live rendering while accumulating
+ * the parts that become the assistant message.
+ *
+ * Necessary because the loop needs BOTH — the UI wants tokens as they arrive,
+ * and the next step needs a complete, well-formed message.
+ */
+function collectStream(stream: AsyncIterable<StreamEvent>) {
+  const parts: ContentPart[] = [];
+  let finishReason: FinishReason = "unknown";
+  let usage: Usage | undefined;
+  let responseId: string | undefined;
+
+  async function* events(): AsyncGenerator<StreamEvent> {
+    for await (const event of stream) {
+      switch (event.type) {
+        case "start":
+          responseId = event.responseId;
+          break;
+        case "text-delta": {
+          const last = parts[parts.length - 1];
+          if (last?.type === "text") last.text += event.delta;
+          else parts.push({ type: "text", text: event.delta });
+          break;
+        }
+        case "reasoning-delta": {
+          const last = parts[parts.length - 1];
+          if (last?.type === "reasoning") last.text += event.delta;
+          else parts.push({ type: "reasoning", text: event.delta, ...(event.signature ? { signature: event.signature } : {}) });
+          break;
+        }
+        case "tool-call-end":
+          parts.push({
+            type: "tool-call",
+            callId: event.callId,
+            name: event.name,
+            input: event.input,
+            status: "pending",
+            ...(event.repaired ? { repaired: true } : {}),
+          });
+          break;
+        case "usage":
+          usage = event.usage;
+          break;
+        case "finish":
+          finishReason = event.finishReason;
+          if (event.usage) usage = event.usage;
+          if (event.responseId) responseId = event.responseId;
+          break;
+        default:
+          break;
+      }
+      yield event;
+    }
+  }
+
+  return {
+    events,
+    result: (): GenerateResult => ({
+      parts,
+      finishReason,
+      usage: usage ?? {},
+      modelId: "",
+      ...(responseId ? { responseId } : {}),
+    }),
+  };
+}
+
+function addUsage(a: Usage, b: Usage): Usage {
+  const add = (x?: number, y?: number) => (x == null && y == null ? undefined : (x ?? 0) + (y ?? 0));
+  return {
+    inputTokens: add(a.inputTokens, b.inputTokens),
+    outputTokens: add(a.outputTokens, b.outputTokens),
+    totalTokens: add(a.totalTokens, b.totalTokens),
+    cachedInputTokens: add(a.cachedInputTokens, b.cachedInputTokens),
+    reasoningTokens: add(a.reasoningTokens, b.reasoningTokens),
+  };
+}

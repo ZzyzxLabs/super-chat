@@ -1,0 +1,99 @@
+// @agentloom/core — public surface.
+
+// content
+export * from "./content/types.js";
+export * from "./content/parts.js";
+
+// errors
+export { AgentError, isAgentError, toAgentError, kindFromStatus, type AgentErrorKind } from "./errors.js";
+
+// transport
+export type { Transport, TransportRequest, RetryPolicy } from "./transport/types.js";
+export { DEFAULT_RETRY } from "./transport/types.js";
+export { createDirectTransport, buildUrl, type DirectTransportConfig } from "./transport/direct.js";
+export { createProxyTransport, type ProxyTransportConfig, type ProxyEnvelope } from "./transport/proxy.js";
+export { createProxyHandler, pathMatches, type ProxyHandlerConfig, type ProxyProviderConfig } from "./transport/server.js";
+export { withRetry, backoffDelay, errorFromResponse, parseRetryAfter } from "./transport/retry.js";
+export { parseSSE, parseSSEJson, SSEDecoder, type SSEMessage } from "./transport/sse.js";
+
+// providers
+export type {
+  Provider,
+  ProviderCapabilities,
+  NormalizedRequest,
+  GenerateResult,
+  StreamEvent,
+  JobHandle,
+  JobSnapshot,
+  JobStatus,
+  ToolSpec,
+  ToolChoice,
+  ModelInfo,
+  JSONSchema,
+  ResponseFormat,
+  ReasoningOptions,
+  CallOptions,
+} from "./providers/types.js";
+
+// tokens
+export { estimateTokens, estimateJsonTokens, MESSAGE_OVERHEAD_TOKENS, type TokenCounter } from "./tokens/estimate.js";
+export { createBudget, packByPriority, countMessageTokens, countMessagesTokens, totalAllocated, type TokenBudget, type BudgetShares } from "./tokens/budget.js";
+
+// skills
+export * from "./skills/types.js";
+export { SkillRegistry, renderSkill, type SkillRegistryOptions, type SkillMatcher } from "./skills/registry.js";
+export { matchSkills, scoreSkill, tokenize } from "./skills/match.js";
+
+// context
+export * from "./context/types.js";
+export { ContextBuilder, type ContextBuilderOptions } from "./context/builder.js";
+export { compactHistory, trimHistory, safeCutIndex, buildSummaryPrompt, type CompactionResult, type Summarizer } from "./context/compaction.js";
+
+// cards
+export * from "./cards/types.js";
+export { stripCardPayload } from "./cards/types.js";
+export { CardRegistry, makeCard, check, type CardKindDefinition, type CardValidation } from "./cards/registry.js";
+export {
+  BUILTIN_CARDS,
+  tableCard,
+  statsCard,
+  chartCard,
+  timelineCard,
+  keyValueCard,
+  progressCard,
+  mediaCard,
+  markdownCard,
+  codeCard,
+  diffCard,
+  comparisonCard,
+  checklistCard,
+  calloutCard,
+  citationsCard,
+  funnelCard,
+  gaugeCard,
+  treeCard,
+  choiceCard,
+  formCard,
+  confirmCard,
+} from "./cards/builtin.js";
+
+// tools
+export * from "./tools/types.js";
+export { ToolRegistry } from "./tools/registry.js";
+export { repairToolArguments, normalizeToolName, type RepairResult } from "./tools/repair.js";
+export { createVisualizeTool, createLoadSkillTool, createUpdateCardTool, createBuiltinTools } from "./tools/builtin.js";
+
+// runtime
+export * from "./runtime/events.js";
+export { runAgent, type RunConfig } from "./runtime/run.js";
+export { executeToolCall, executeToolCalls, compactError, type ToolCallRequest, type ToolCallOutcome, type ExecuteToolOptions } from "./runtime/execute-tools.js";
+export * from "./runtime/stop.js";
+export { createMemoryJobStore, createLocalJobStore, resumeJobs, reap, isTerminal, awaitJob, type JobStore, type StoredJob, type ResumeResult } from "./runtime/jobs.js";
+
+// providers — the OpenAI adapter is also available at "@agentloom/core/openai"
+// for hosts that want to keep it out of a bundle that never calls OpenAI.
+export { createOpenAIProvider, type OpenAIProviderConfig, type OpenAIDialect } from "./providers/openai/adapter.js";
+// The request builders are exported deliberately: they are pure functions, and
+// being able to assert on the exact bytes a dialect produces is the difference
+// between "we craft requests correctly" as a claim and as something you can test.
+export { buildResponsesRequest, buildChatRequest } from "./providers/openai/map-in.js";

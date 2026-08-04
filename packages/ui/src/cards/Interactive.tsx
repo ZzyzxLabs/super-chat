@@ -1,0 +1,249 @@
+"use client";
+
+// Interactive cards — the agent asking rather than assuming.
+//
+// Each of these blocks a suspended tool call. Two consequences the markup has to
+// respect:
+//   • they must never be rendered inside a collapsed group. A hidden confirm
+//     dialog is an unanswerable question, and the run just looks hung.
+//   • once answered they stay visible but disabled, so the transcript records
+//     what the user actually chose.
+
+import { useState } from "react";
+import type { ChoiceCard, ConfirmCard, FormCard, FormField } from "@agentloom/core";
+import type { CardRendererProps } from "../renderer-registry.js";
+import { formatValue, toneClass } from "../format.js";
+
+export function ChoiceCardView({ spec, card, respond, answered }: CardRendererProps<ChoiceCard>) {
+  const [selected, setSelected] = useState<string[]>([]);
+  const [submitted, setSubmitted] = useState<string[] | null>(null);
+  const done = answered || submitted !== null;
+
+  const toggle = (id: string) => {
+    if (done) return;
+    setSelected((prev) => (spec.multiple ? (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]) : [id]));
+  };
+
+  const submit = (ids: string[]) => {
+    if (done || !ids.length) return;
+    setSubmitted(ids);
+    respond?.({ cardId: card.id, callId: card.callId, kind: "choice", type: "select", value: { selected: ids } });
+  };
+
+  return (
+    <div className="al-card al-card--interactive">
+      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
+      {spec.prompt ? <p className="al-card__prompt">{spec.prompt}</p> : null}
+
+      <div className="al-choices" role={spec.multiple ? "group" : "radiogroup"}>
+        {spec.options.map((opt) => {
+          const isSelected = (submitted ?? selected).includes(opt.id);
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              className={`al-choice${isSelected ? " al-choice--selected" : ""}`}
+              disabled={done || opt.disabled}
+              title={opt.disabled ? opt.disabledReason : undefined}
+              aria-pressed={isSelected}
+              onClick={() => (spec.multiple ? toggle(opt.id) : submit([opt.id]))}
+            >
+              {opt.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img className="al-choice__img" src={opt.imageUrl} alt="" loading="lazy" />
+              ) : null}
+              <span className="al-choice__body">
+                <span className="al-choice__label">{opt.label}</span>
+                {opt.description ? <span className="al-muted al-choice__desc">{opt.description}</span> : null}
+                {opt.disabled && opt.disabledReason ? (
+                  <span className="al-choice__desc al-tone--warning">{opt.disabledReason}</span>
+                ) : null}
+              </span>
+              {opt.meta?.length ? (
+                <span className="al-choice__meta">
+                  {opt.meta.map((m, i) => (
+                    <span key={i} className="al-choice__metaitem">
+                      <span className="al-muted">{m.label}</span>
+                      <strong>{formatValue(m.value, m.format)}</strong>
+                    </span>
+                  ))}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+
+      {spec.multiple && !done ? (
+        <div className="al-card__actions">
+          <button type="button" className="al-btn al-btn--primary" disabled={!selected.length} onClick={() => submit(selected)}>
+            Confirm selection ({selected.length})
+          </button>
+          <button
+            type="button"
+            className="al-btn al-btn--ghost"
+            onClick={() => {
+              setSubmitted([]);
+              respond?.({ cardId: card.id, callId: card.callId, kind: "choice", type: "cancel" });
+            }}
+          >
+            Skip
+          </button>
+        </div>
+      ) : null}
+
+      {done ? <div className="al-muted al-card__footnote">Answered.</div> : null}
+    </div>
+  );
+}
+
+function initialValues(fields: FormField[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const f of fields) {
+    if (f.type === "boolean") out[f.name] = f.value ?? false;
+    else if (f.type === "number") out[f.name] = f.value ?? "";
+    else if (f.type === "select") out[f.name] = f.value ?? f.options[0]?.value ?? "";
+    else out[f.name] = f.value ?? "";
+  }
+  return out;
+}
+
+export function FormCardView({ spec, card, respond, answered }: CardRendererProps<FormCard>) {
+  const [values, setValues] = useState<Record<string, unknown>>(() => initialValues(spec.fields));
+  const [submitted, setSubmitted] = useState(false);
+  const done = answered || submitted;
+
+  const missing = spec.fields.filter(
+    (f) => "required" in f && f.required && (values[f.name] === "" || values[f.name] == null),
+  );
+
+  const set = (name: string, value: unknown) => setValues((v) => ({ ...v, [name]: value }));
+
+  return (
+    <form
+      className="al-card al-card--interactive"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (done || missing.length) return;
+        setSubmitted(true);
+        // Coerce number fields before handing them back — the model asked for a
+        // number and an input always yields a string.
+        const coerced: Record<string, unknown> = { ...values };
+        for (const f of spec.fields) if (f.type === "number" && coerced[f.name] !== "") coerced[f.name] = Number(coerced[f.name]);
+        respond?.({ cardId: card.id, callId: card.callId, kind: "form", type: "submit", value: coerced });
+      }}
+    >
+      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
+      {spec.description ? <p className="al-card__prompt">{spec.description}</p> : null}
+
+      <div className="al-form">
+        {spec.fields.map((f) => (
+          <label key={f.name} className="al-field">
+            <span className="al-field__label">
+              {f.label}
+              {"required" in f && f.required ? <span className="al-tone--negative"> *</span> : null}
+            </span>
+            {f.type === "textarea" ? (
+              <textarea
+                className="al-input"
+                rows={3}
+                disabled={done}
+                placeholder={f.placeholder}
+                value={String(values[f.name] ?? "")}
+                onChange={(e) => set(f.name, e.target.value)}
+              />
+            ) : f.type === "select" ? (
+              <select className="al-input" disabled={done} value={String(values[f.name] ?? "")} onChange={(e) => set(f.name, e.target.value)}>
+                {f.options.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            ) : f.type === "boolean" ? (
+              <input type="checkbox" disabled={done} checked={Boolean(values[f.name])} onChange={(e) => set(f.name, e.target.checked)} />
+            ) : (
+              <span className="al-input-group">
+                <input
+                  className="al-input"
+                  type={f.type === "number" ? "number" : "text"}
+                  disabled={done}
+                  placeholder={"placeholder" in f ? f.placeholder : undefined}
+                  min={f.type === "number" ? f.min : undefined}
+                  max={f.type === "number" ? f.max : undefined}
+                  step={f.type === "number" ? f.step : undefined}
+                  value={String(values[f.name] ?? "")}
+                  onChange={(e) => set(f.name, e.target.value)}
+                />
+                {f.type === "number" && f.suffix ? <span className="al-input-group__suffix">{f.suffix}</span> : null}
+              </span>
+            )}
+          </label>
+        ))}
+      </div>
+
+      {!done ? (
+        <div className="al-card__actions">
+          <button type="submit" className="al-btn al-btn--primary" disabled={missing.length > 0}>
+            {spec.submitLabel ?? "Submit"}
+          </button>
+          <button
+            type="button"
+            className="al-btn al-btn--ghost"
+            onClick={() => {
+              setSubmitted(true);
+              respond?.({ cardId: card.id, callId: card.callId, kind: "form", type: "cancel" });
+            }}
+          >
+            Cancel
+          </button>
+          {missing.length ? <span className="al-muted">{missing.length} required field(s) left.</span> : null}
+        </div>
+      ) : (
+        <div className="al-muted al-card__footnote">Submitted.</div>
+      )}
+    </form>
+  );
+}
+
+export function ConfirmCardView({ spec, card, respond, answered }: CardRendererProps<ConfirmCard>) {
+  const [decision, setDecision] = useState<"confirm" | "cancel" | null>(null);
+  const done = answered || decision !== null;
+
+  const decide = (type: "confirm" | "cancel") => {
+    if (done) return;
+    setDecision(type);
+    respond?.({ cardId: card.id, callId: card.callId, kind: "confirm", type, value: type === "confirm" ? { confirmed: true } : undefined });
+  };
+
+  return (
+    <div className={`al-card al-card--interactive${spec.danger ? " al-card--danger" : ""}`}>
+      <div className="al-card__title">{spec.title}</div>
+      {spec.description ? <p className="al-card__prompt">{spec.description}</p> : null}
+
+      <dl className="al-kv">
+        {spec.summary.map((row, i) => (
+          <div key={i} className="al-kv__row">
+            <dt>{row.label}</dt>
+            <dd className={`${row.mono ? "al-mono" : ""}${toneClass(row.tone)}`}>{formatValue(row.value)}</dd>
+          </div>
+        ))}
+      </dl>
+
+      {!done ? (
+        <div className="al-card__actions">
+          <button type="button" className={`al-btn ${spec.danger ? "al-btn--danger" : "al-btn--primary"}`} onClick={() => decide("confirm")}>
+            {spec.confirmLabel ?? "Confirm"}
+          </button>
+          <button type="button" className="al-btn al-btn--ghost" onClick={() => decide("cancel")}>
+            {spec.cancelLabel ?? "Cancel"}
+          </button>
+        </div>
+      ) : (
+        <div className={`al-card__footnote al-tone--${decision === "confirm" ? "positive" : "warning"}`}>
+          {decision === "confirm" ? "Confirmed." : "Declined."}
+        </div>
+      )}
+    </div>
+  );
+}
