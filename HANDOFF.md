@@ -19,7 +19,7 @@ apps/playground   Next.js dev panels. runs with NO API key.
 
 ```bash
 pnpm install && pnpm build && pnpm dev     # → http://localhost:3210
-pnpm test                                  # 160 tests, ~3s
+pnpm test                                  # 212 tests, ~3s
 ```
 
 The playground is **not a product**. It is six panels, one per capability, aimed
@@ -155,13 +155,20 @@ check the work instead of trusting a summary.
 
 ## Where to pick up
 
-Since the original handoff, three of the items here were built (file upload,
-thread persistence, MCP tool import — see the Status section of README.md), and
-the first two were removed as stale. What remains:
+Since the original handoff, the roadmap items were built (file upload, thread
+persistence + branching, MCP import + elicitation, the Anthropic adapter, the
+memory and retrieval seams — see README's Status section), and an integration
+audit fixed the seams that existed but didn't connect (loadSkill unlock,
+updateCard upsert, shared playground registry, thread-switch generation guard,
+job-resume routing, foreign-file degrade). What remains:
 
 1. **Streaming through the proxy under load.** The BFF streams the upstream body
    straight through, which is correct, but nothing has been tested with more than
    one concurrent stream.
+2. **Server-backed ThreadStore + provider-native tools** (web search, code
+   interpreter) are the next competitive gaps worth closing; the app-state seam
+   (agent ↔ host application state, CopilotKit-style) is the biggest thesis-level
+   one.
 
 Deliberately *not* done, and worth leaving alone unless asked: multi-agent
 orchestration, a plugin system, and any kind of visual builder. The framework's

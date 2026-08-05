@@ -260,9 +260,9 @@ the transport selector to **Server proxy**, or pick **BYOK direct** and paste a 
 pnpm test
 ```
 
-160 tests. The runtime suite drives the real OpenAI adapter against a mocked
-transport, so the tool loop, card suspension and background polling are all
-exercised with no key and no network.
+212 tests. The runtime suite drives the real OpenAI and Anthropic adapters
+against mocked transports, so the tool loop, card suspension, thinking replay
+and background polling are all exercised with no key and no network.
 
 ---
 
@@ -270,17 +270,20 @@ exercised with no key and no network.
 
 v0.1. Working and tested; API not frozen.
 
-**Built:** OpenAI adapter (Responses + Chat Completions + background jobs),
-transport layer (including multipart upload through the proxy), file upload to
-`/v1/files` with a cross-thread `FileStore`, thread persistence (`ThreadStore`,
-snapshot-per-thread, memory + localStorage), MCP tool import (hand-rolled
-Streamable HTTP client), skills, context assembly, tools + presets, 20 card
-kinds, React bindings, UI kit, dev panels.
+**Built:** OpenAI adapter (Responses + Chat Completions + background jobs) and
+Anthropic adapter (`/v1/messages`, thinking-signature replay), transport layer
+(multipart upload through the proxy, bearer or x-api-key auth), file upload to
+`/v1/files` with a cross-thread `FileStore`, thread persistence with message
+branching (`ThreadStore` v2 — parentId tree, fork-on-edit/regenerate, branch
+switcher), MCP tool import (hand-rolled Streamable HTTP client, elicitation via
+interactive form cards, `createMcpSkill` for the relevance half), memory seam
+(`MemoryStore` + context source + `remember` tool), retrieval seam (`Retriever`
++ cited-evidence context source + lexical reference impl), skills, context
+assembly, tools + presets, 20 card kinds, React bindings, UI kit, dev panels.
 
-**Not built yet:** an Anthropic/Gemini adapter (the `Provider` seam is designed
-for it — `capabilities` and `providerOptions` exist for exactly this), and a
-server-backed `ThreadStore` implementation (the interface supports it; a REST
-impl is four fetch calls).
+**Not built yet:** a Gemini adapter, a server-backed `ThreadStore`
+implementation (the interface supports it; a REST impl is four fetch calls),
+and provider-native web search / code-interpreter tools.
 
 Prior art read closely: Open WebUI's tools/functions/knowledge split, LibreChat's
 multi-provider handling, and the Sup Wallet agent in `zzyzx-full-repo` — whose
