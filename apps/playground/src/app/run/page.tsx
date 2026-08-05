@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AgentClient, AgentProvider, useAgentClient, useAgentState, useAttachments, useJobs, useThread, useThreadList } from "@agentloom/react";
-import { BUILTIN_RENDERERS, CardRendererProvider, ContextInspector, Composer, Thread } from "@agentloom/ui";
-import type { RunEvent, RunMode, StoredFile } from "@agentloom/core";
+import { AgentClient, AgentProvider, useAgentClient, useAgentState, useAttachments, useJobs, useThread, useThreadList } from "@superchat/react";
+import { BUILTIN_RENDERERS, CardRendererProvider, ContextInspector, Composer, Thread } from "@superchat/ui";
+import type { RunEvent, RunMode, StoredFile } from "@superchat/core";
 import {
   MODELS,
   WEB_SEARCH_TOOLS,
@@ -241,11 +241,11 @@ function ThreadsPanel({ backend }: { backend?: { value: ThreadBackend; onChange:
 
   return (
     <div className="dev__events">
-      <div className="al-panel__title">
+      <div className="sc-panel__title">
         Threads
         <button
           type="button"
-          className="al-btn al-btn--ghost al-btn--sm"
+          className="sc-btn sc-btn--ghost sc-btn--sm"
           style={{ float: "right" }}
           disabled={isRunning}
           onClick={create}
@@ -268,7 +268,7 @@ function ThreadsPanel({ backend }: { backend?: { value: ThreadBackend; onChange:
         </div>
       ) : null}
       {threads.length === 0 ? (
-        <p className="al-muted" style={{ fontSize: 12 }}>
+        <p className="sc-muted" style={{ fontSize: 12 }}>
           Threads persist to localStorage as you chat.
         </p>
       ) : (
@@ -276,20 +276,20 @@ function ThreadsPanel({ backend }: { backend?: { value: ThreadBackend; onChange:
           <div key={t.id} className="dev__event" style={{ alignItems: "center", gap: 6 }}>
             <button
               type="button"
-              className="al-btn al-btn--ghost al-btn--sm"
+              className="sc-btn sc-btn--ghost sc-btn--sm"
               style={{ flex: 1, textAlign: "left", ...(t.id === activeId ? { fontWeight: 600 } : {}) }}
               disabled={isRunning}
               onClick={() => void open(t.id)}
               title={t.id}
             >
               {t.title ?? "(untitled)"}
-              <span className="al-muted" style={{ display: "block", fontSize: 11 }}>
+              <span className="sc-muted" style={{ display: "block", fontSize: 11 }}>
                 {t.messageCount} message{t.messageCount === 1 ? "" : "s"}
               </span>
             </button>
             <button
               type="button"
-              className="al-btn al-btn--ghost al-btn--sm"
+              className="sc-btn sc-btn--ghost sc-btn--sm"
               aria-label={`Delete ${t.title ?? t.id}`}
               disabled={isRunning}
               onClick={() => void remove(t.id)}
@@ -351,7 +351,7 @@ function ReattachPicker({ providerId }: { providerId: string }) {
 function ClearButton() {
   const { clear, messages, isRunning } = useThread();
   return (
-    <button type="button" className="al-btn al-btn--ghost al-btn--sm" disabled={!messages.length || isRunning} onClick={clear}>
+    <button type="button" className="sc-btn sc-btn--ghost sc-btn--sm" disabled={!messages.length || isRunning} onClick={clear}>
       Clear
     </button>
   );
@@ -361,7 +361,7 @@ function Examples() {
   const { send } = useThread();
   return (
     <div className="dev__prompts">
-      <p className="al-muted" style={{ fontSize: 13, lineHeight: 1.6, marginTop: 0 }}>
+      <p className="sc-muted" style={{ fontSize: 13, lineHeight: 1.6, marginTop: 0 }}>
         One agent, three unrelated domains. Which skill loads — and which tools it unlocks — is decided per message by
         the registry, not by which app you opened.
       </p>
@@ -417,9 +417,9 @@ function EventStream() {
 
   return (
     <div className="dev__events">
-      <div className="al-panel__title">Run events</div>
+      <div className="sc-panel__title">Run events</div>
       {events.length === 0 ? (
-        <p className="al-muted" style={{ fontSize: 12 }}>
+        <p className="sc-muted" style={{ fontSize: 12 }}>
           Send a message to see the event stream.
         </p>
       ) : (

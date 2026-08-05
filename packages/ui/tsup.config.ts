@@ -7,6 +7,6 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   target: "es2022",
-  external: ["react", "@agentloom/core", "@agentloom/react"],
+  external: ["react", "@superchat/core", "@superchat/react"],
   loader: { ".css": "copy" },
 });

@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import "@agentloom/ui/styles.css";
+import "@superchat/ui/styles.css";
 import "./globals.css";
 import { Shell } from "@/components/Shell";
 
 export const metadata: Metadata = {
-  title: "agentloom — dev panels",
+  title: "superchat — dev panels",
   description: "Contexts, skills, tools and cards — assembled into provider-correct requests.",
 };
 

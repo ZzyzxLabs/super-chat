@@ -17,6 +17,7 @@
 
 import { linkLinear } from "../content/branching.js";
 import type { Message } from "../content/types.js";
+import { getItemWithLegacy } from "./storage.js";
 
 export type ThreadMeta = {
   id: string;
@@ -161,13 +162,13 @@ export function createMemoryThreadStore(): ThreadStore {
  * A version other than the current one also reads as absent: v2 migrates
  * deliberately, it does not crash v1 readers.
  */
-export function createLocalThreadStore(prefix = "agentloom:threads"): ThreadStore {
+export function createLocalThreadStore(prefix = "superchat:threads"): ThreadStore {
   const indexKey = `${prefix}:index`;
   const threadKey = (id: string) => `${prefix}:${id}`;
 
   const readIndex = (): ThreadMeta[] => {
     try {
-      const raw = globalThis.localStorage?.getItem(indexKey);
+      const raw = getItemWithLegacy(indexKey);
       const parsed = raw ? (JSON.parse(raw) as unknown) : [];
       return Array.isArray(parsed) ? (parsed as ThreadMeta[]).filter((m) => typeof m?.id === "string") : [];
     } catch {
@@ -190,7 +191,7 @@ export function createLocalThreadStore(prefix = "agentloom:threads"): ThreadStor
 
     async load(id) {
       try {
-        const raw = globalThis.localStorage?.getItem(threadKey(id));
+        const raw = getItemWithLegacy(threadKey(id));
         if (!raw) return undefined;
         return migrate(JSON.parse(raw) as StoredThread);
       } catch {

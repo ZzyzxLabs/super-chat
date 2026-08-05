@@ -27,9 +27,14 @@ at a developer evaluating the framework: `/cards` `/skills` `/tools` `/requests`
 `/run`. That framing was an explicit instruction — don't quietly turn it back
 into an app.
 
-**Naming**: the repo is `SuperChat`, the packages are `@agentloom/*`. That split
-is unresolved — nobody has decided whether the framework keeps the agentloom name.
-Ask before renaming; it touches every import.
+**Naming**: resolved. The framework was called `agentloom` and is now **superchat**,
+matching the repo — packages `@superchat/*`, CSS prefix `sc-`, storage keys
+`superchat:*`. Nothing in the tree answers to the old name except
+`runtime/storage.ts`, which is a deliberate shim: every read of a `superchat:`
+localStorage key falls back once to its `agentloom:` twin and promotes the value,
+so a browser that used the pre-rename build keeps its threads, memories, uploaded
+file refs and job handles. That file is removable — delete it and its four call
+sites when the old keys stop being worth carrying.
 
 ---
 
@@ -112,14 +117,14 @@ has a regression test now; the test names spell out the failure.
   while `next dev` is live corrupts the running server and the page goes blank.
   Stop the server first.
 - **`tsup --clean` wipes `dist` on every rebuild.** That is why
-  `@agentloom/ui`'s `styles.css` export points at `src/`, not `dist/` — a
+  `@superchat/ui`'s `styles.css` export points at `src/`, not `dist/` — a
   consuming dev server that compiles during the wipe fails on a missing
   stylesheet. Don't "tidy" it back into dist.
 - **Next's webpack does not resolve `.js` specifiers to `.ts`** in app source.
   Inside `apps/playground/src`, import without the extension. The workspace
   packages are fine because they resolve to built `dist`.
 - **Typecheck order matters.** `packages/react` and `packages/ui` resolve
-  `@agentloom/core` through its built `dist`, so build core before typechecking
+  `@superchat/core` through its built `dist`, so build core before typechecking
   them. `pnpm -r typecheck` after `pnpm build` is the safe order.
 - **G: is slow.** Scope searches; avoid unscoped recursive `find`/`du` here.
 - The one thing verified only by DOM inspection, never visually: the browser pane
@@ -171,8 +176,6 @@ and the app-state seam landed. What is genuinely open:
 2. **Nobody has driven the app-state panel against a live model.** The demo
    transport is scripted, so the board actions are exercised by tests and by
    hand — not by an actual model deciding to call them.
-3. **The `agentloom` / `SuperChat` naming split is still unresolved** (see
-   below). It touches every import; ask before renaming.
 
 Deliberately *not* done, and worth leaving alone unless asked: multi-agent
 orchestration, a plugin system, and any kind of visual builder. The framework's

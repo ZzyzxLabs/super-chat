@@ -7,8 +7,8 @@ export default defineConfig({
   resolve: {
     // Point at source, not dist, so tests never run against a stale build.
     alias: {
-      "@agentloom/core": r("./packages/core/src/index.ts"),
-      "@agentloom/react": r("./packages/react/src/index.ts"),
+      "@superchat/core": r("./packages/core/src/index.ts"),
+      "@superchat/react": r("./packages/react/src/index.ts"),
     },
   },
   esbuild: { jsx: "automatic" },

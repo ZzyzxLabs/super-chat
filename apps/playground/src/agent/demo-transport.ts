@@ -10,7 +10,7 @@
 // a check that the request we build is one a real endpoint would accept, since
 // the script reads the request to decide what to answer.
 
-import type { Transport, TransportRequest } from "@agentloom/core";
+import type { Transport, TransportRequest } from "@superchat/core";
 
 type ResponsesItem = {
   type: string;

@@ -25,7 +25,7 @@ import {
   createRetrievalSource,
   type Provider,
   type Transport,
-} from "@agentloom/core";
+} from "@superchat/core";
 import { createDemoTransport } from "./demo-transport";
 import { DOMAIN_TOOLS } from "./tools";
 import { LEGAL_TOOLS, MARKETING_TOOLS } from "./tools-domains";
@@ -37,7 +37,7 @@ export type Vendor = "openai" | "anthropic";
 export const cards = new CardRegistry(BUILTIN_CARDS);
 export const skills = new SkillRegistry(SKILLS, { maxMatched: 3 });
 // Declared before the tool registry singleton below — populate references it.
-export const memoryStore = createLocalMemoryStore("agentloom:playground:memory");
+export const memoryStore = createLocalMemoryStore("superchat:playground:memory");
 
 /**
  * Preset assignment. Note that `createAlert` is the only tool in `executor` —
@@ -119,7 +119,7 @@ const RETRIEVAL_DOCS = [
   {
     id: "contexts",
     title: "How context assembly works",
-    source: "agentloom docs",
+    source: "superchat docs",
     text: [
       "Context is derived, never accumulated. Every turn rebuilds the request from named sources under a token budget, and the trace records why each layer was included, truncated or dropped.",
       "Skills are prompt modules matched per message. A matched skill contributes instructions and may unlock the tools it documents — relevance, not authority.",
@@ -128,7 +128,7 @@ const RETRIEVAL_DOCS = [
   {
     id: "presets",
     title: "Presets and tool authority",
-    source: "agentloom docs",
+    source: "superchat docs",
     text: [
       "Presets are explicit allowlists. A newly registered tool is invisible until someone puts it in one, and deny is applied last so a kill switch cannot be re-granted.",
       "A skill naming a tool grants relevance only; a tool that belongs to a preset still requires that preset to be enabled. This is what stops any skill from handing out the executor tier.",
@@ -137,7 +137,7 @@ const RETRIEVAL_DOCS = [
   {
     id: "cards",
     title: "Cards and visual answers",
-    source: "agentloom docs",
+    source: "superchat docs",
     text: [
       "Cards are validated visual answers: the model picks a kind, the registry validates the spec, and the renderer registry guarantees every kind that can be emitted has somewhere to render.",
       "Interactive cards suspend the run until the user answers; actionable cards are never collapsed, because a hidden form is an unreachable form.",
@@ -159,17 +159,17 @@ export function buildContextBuilder(contextWindow = 128_000): ContextBuilder {
       createRetrievalSource(createKeywordRetriever(RETRIEVAL_DOCS), { limit: 3 }),
     ],
     identity: [
-      "You are the agentloom demo agent.",
+      "You are the superchat demo agent.",
       "Today is 3 August 2026. All market data comes from a synthetic demo feed — say so if the user asks whether it is real.",
     ].join("\n"),
   });
 }
 
-export const jobStore = createLocalJobStore("agentloom:playground:jobs");
-export const fileStore = createLocalFileStore("agentloom:playground:files");
+export const jobStore = createLocalJobStore("superchat:playground:jobs");
+export const fileStore = createLocalFileStore("superchat:playground:files");
 export type ThreadBackend = "local" | "server";
 
-const localThreads = createLocalThreadStore("agentloom:playground:threads");
+const localThreads = createLocalThreadStore("superchat:playground:threads");
 const serverThreads = createRestThreadStore({
   url: "/api/threads",
   // Surfacing the failure beats a silently un-saved thread; a real host would

@@ -13,7 +13,7 @@ import type {
   StatsCard,
   TableCard,
   TimelineCard,
-} from "@agentloom/core";
+} from "@superchat/core";
 import type { CardRendererProps } from "../renderer-registry.js";
 import { deltaTone, formatDelta, formatValue, toneClass } from "../format.js";
 
@@ -45,15 +45,15 @@ export function TableCardView({ spec }: CardRendererProps<TableCard>) {
   };
 
   return (
-    <div className="al-card">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      <div className="al-table-wrap">
-        <table className="al-table">
+    <div className="sc-card">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      <div className="sc-table-wrap">
+        <table className="sc-table">
           <thead>
             <tr>
               {spec.columns.map((c) => (
                 <th key={c.key} style={{ textAlign: c.align ?? "left" }}>
-                  <button type="button" className="al-th-btn" onClick={() => toggle(c.key)}>
+                  <button type="button" className="sc-th-btn" onClick={() => toggle(c.key)}>
                     {c.label}
                     {sortBy === c.key ? <span aria-hidden> {sortDir === "asc" ? "↑" : "↓"}</span> : null}
                   </button>
@@ -64,7 +64,7 @@ export function TableCardView({ spec }: CardRendererProps<TableCard>) {
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={spec.columns.length} className="al-muted">
+                <td colSpan={spec.columns.length} className="sc-muted">
                   No rows.
                 </td>
               </tr>
@@ -74,7 +74,7 @@ export function TableCardView({ spec }: CardRendererProps<TableCard>) {
                   {spec.columns.map((c) => (
                     <td key={c.key} style={{ textAlign: c.align ?? "left" }}>
                       {c.pill ? (
-                        <span className="al-pill">{formatValue(row[c.key], c.format)}</span>
+                        <span className="sc-pill">{formatValue(row[c.key], c.format)}</span>
                       ) : (
                         formatValue(row[c.key], c.format)
                       )}
@@ -86,26 +86,26 @@ export function TableCardView({ spec }: CardRendererProps<TableCard>) {
           </tbody>
         </table>
       </div>
-      {spec.caption ? <div className="al-muted al-card__caption">{spec.caption}</div> : null}
+      {spec.caption ? <div className="sc-muted sc-card__caption">{spec.caption}</div> : null}
     </div>
   );
 }
 
 export function StatsCardView({ spec }: CardRendererProps<StatsCard>) {
   return (
-    <div className="al-card">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      <div className="al-stats">
+    <div className="sc-card">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      <div className="sc-stats">
         {spec.items.map((item, i) => (
-          <div key={i} className="al-stat">
-            <div className="al-stat__label">{item.label}</div>
-            <div className={`al-stat__value${toneClass(item.tone)}`}>{formatValue(item.value, item.format)}</div>
+          <div key={i} className="sc-stat">
+            <div className="sc-stat__label">{item.label}</div>
+            <div className={`sc-stat__value${toneClass(item.tone)}`}>{formatValue(item.value, item.format)}</div>
             {item.delta != null ? (
-              <div className={`al-stat__delta al-tone--${deltaTone(item.delta)}`}>
+              <div className={`sc-stat__delta sc-tone--${deltaTone(item.delta)}`}>
                 {formatDelta(item.delta, item.deltaFormat ?? "percent")}
               </div>
             ) : null}
-            {item.hint ? <div className="al-muted al-stat__hint">{item.hint}</div> : null}
+            {item.hint ? <div className="sc-muted sc-stat__hint">{item.hint}</div> : null}
           </div>
         ))}
       </div>
@@ -115,13 +115,13 @@ export function StatsCardView({ spec }: CardRendererProps<StatsCard>) {
 
 export function KeyValueCardView({ spec }: CardRendererProps<KeyValueCard>) {
   return (
-    <div className="al-card">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      <dl className="al-kv">
+    <div className="sc-card">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      <dl className="sc-kv">
         {spec.items.map((item, i) => (
-          <div key={i} className="al-kv__row">
+          <div key={i} className="sc-kv__row">
             <dt>{item.label}</dt>
-            <dd className={`${item.mono ? "al-mono" : ""}${toneClass(item.tone)}`}>{formatValue(item.value, item.format)}</dd>
+            <dd className={`${item.mono ? "sc-mono" : ""}${toneClass(item.tone)}`}>{formatValue(item.value, item.format)}</dd>
           </div>
         ))}
       </dl>
@@ -131,16 +131,16 @@ export function KeyValueCardView({ spec }: CardRendererProps<KeyValueCard>) {
 
 export function TimelineCardView({ spec }: CardRendererProps<TimelineCard>) {
   return (
-    <div className="al-card">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      <ol className="al-timeline">
+    <div className="sc-card">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      <ol className="sc-timeline">
         {spec.events.map((e, i) => (
-          <li key={i} className={`al-timeline__item${toneClass(e.tone)}`}>
-            <span className="al-timeline__dot" aria-hidden />
+          <li key={i} className={`sc-timeline__item${toneClass(e.tone)}`}>
+            <span className="sc-timeline__dot" aria-hidden />
             <div>
-              <div className="al-timeline__label">{e.label}</div>
-              <div className="al-muted al-timeline__at">{formatValue(e.at, "datetime")}</div>
-              {e.detail ? <div className="al-timeline__detail">{e.detail}</div> : null}
+              <div className="sc-timeline__label">{e.label}</div>
+              <div className="sc-muted sc-timeline__at">{formatValue(e.at, "datetime")}</div>
+              {e.detail ? <div className="sc-timeline__detail">{e.detail}</div> : null}
             </div>
           </li>
         ))}
@@ -156,25 +156,25 @@ export function ProgressCardView({ spec }: CardRendererProps<ProgressCard>) {
   const fraction = spec.fraction ?? (spec.steps.length ? done / spec.steps.length : 0);
 
   return (
-    <div className="al-card">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
+    <div className="sc-card">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
       <div
-        className="al-progress"
+        className="sc-progress"
         role="progressbar"
         aria-valuenow={Math.round(fraction * 100)}
         aria-valuemin={0}
         aria-valuemax={100}
       >
-        <div className="al-progress__bar" style={{ width: `${Math.min(100, fraction * 100)}%` }} />
+        <div className="sc-progress__bar" style={{ width: `${Math.min(100, fraction * 100)}%` }} />
       </div>
-      <ul className="al-steps">
+      <ul className="sc-steps">
         {spec.steps.map((s, i) => (
-          <li key={i} className={`al-step al-step--${s.status}`}>
-            <span className="al-step__icon" aria-hidden>
+          <li key={i} className={`sc-step sc-step--${s.status}`}>
+            <span className="sc-step__icon" aria-hidden>
               {STEP_ICON[s.status] ?? "○"}
             </span>
-            <span className="al-step__label">{s.label}</span>
-            {s.detail ? <span className="al-muted al-step__detail">{s.detail}</span> : null}
+            <span className="sc-step__label">{s.label}</span>
+            {s.detail ? <span className="sc-muted sc-step__detail">{s.detail}</span> : null}
           </li>
         ))}
       </ul>
@@ -184,14 +184,14 @@ export function ProgressCardView({ spec }: CardRendererProps<ProgressCard>) {
 
 export function MediaCardView({ spec }: CardRendererProps<MediaCard>) {
   return (
-    <div className="al-card">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      <div className={spec.layout === "single" ? "al-media al-media--single" : "al-media"}>
+    <div className="sc-card">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      <div className={spec.layout === "single" ? "sc-media sc-media--single" : "sc-media"}>
         {spec.items.map((item, i) => (
-          <figure key={i} className="al-media__item">
+          <figure key={i} className="sc-media__item">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={item.url} alt={item.alt ?? item.caption ?? ""} loading="lazy" />
-            {item.caption ? <figcaption className="al-muted">{item.caption}</figcaption> : null}
+            {item.caption ? <figcaption className="sc-muted">{item.caption}</figcaption> : null}
           </figure>
         ))}
       </div>
@@ -231,9 +231,9 @@ function renderMarkdown(src: string): string {
 export function MarkdownCardView({ spec }: CardRendererProps<MarkdownCard>) {
   const html = useMemo(() => renderMarkdown(spec.body), [spec.body]);
   return (
-    <div className="al-card">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      <div className="al-prose" dangerouslySetInnerHTML={{ __html: html }} />
+    <div className="sc-card">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      <div className="sc-prose" dangerouslySetInnerHTML={{ __html: html }} />
     </div>
   );
 }
@@ -251,14 +251,14 @@ export function CodeCardView({ spec }: CardRendererProps<CodeCard>) {
   };
 
   return (
-    <div className="al-card">
-      <div className="al-card__head">
-        <span className="al-card__title">{spec.filename ?? spec.title ?? spec.language ?? "code"}</span>
-        <button type="button" className="al-btn al-btn--ghost" onClick={copy}>
+    <div className="sc-card">
+      <div className="sc-card__head">
+        <span className="sc-card__title">{spec.filename ?? spec.title ?? spec.language ?? "code"}</span>
+        <button type="button" className="sc-btn sc-btn--ghost" onClick={copy}>
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <pre className="al-pre">
+      <pre className="sc-pre">
         <code>{spec.code}</code>
       </pre>
     </div>
@@ -271,12 +271,12 @@ export function DiffCardView({ spec }: CardRendererProps<DiffCard>) {
   const rows = useMemo(() => diffLines(spec.before.split("\n"), spec.after.split("\n")), [spec.before, spec.after]);
 
   return (
-    <div className="al-card">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      <div className="al-diff">
+    <div className="sc-card">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      <div className="sc-diff">
         {rows.map((row, i) => (
-          <div key={i} className={`al-diff__line al-diff__line--${row.kind}`}>
-            <span className="al-diff__sign" aria-hidden>
+          <div key={i} className={`sc-diff__line sc-diff__line--${row.kind}`}>
+            <span className="sc-diff__sign" aria-hidden>
               {row.kind === "add" ? "+" : row.kind === "del" ? "−" : " "}
             </span>
             <span>{row.text || " "}</span>

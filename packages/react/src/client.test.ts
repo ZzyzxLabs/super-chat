@@ -11,7 +11,7 @@ import {
   threadSnapshot,
   type Transport,
   type TransportRequest,
-} from "@agentloom/core";
+} from "@superchat/core";
 import { AgentClient } from "./client.js";
 
 function mockTransport(responses: unknown[], opts: { delayMs?: number } = {}): Transport {

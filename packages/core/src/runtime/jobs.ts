@@ -12,6 +12,7 @@
 
 import { AgentError } from "../errors.js";
 import type { JobHandle, JobSnapshot, JobStatus, Provider } from "../providers/types.js";
+import { getItemWithLegacy } from "./storage.js";
 
 /**
  * Await a background job to a terminal state.
@@ -98,10 +99,10 @@ export function createMemoryJobStore(): JobStore {
  * Every read is defensive: a corrupted or hand-edited entry must not throw on
  * app start.
  */
-export function createLocalJobStore(key = "agentloom:jobs"): JobStore {
+export function createLocalJobStore(key = "superchat:jobs"): JobStore {
   const read = (): Record<string, StoredJob> => {
     try {
-      const raw = globalThis.localStorage?.getItem(key);
+      const raw = getItemWithLegacy(key);
       const parsed = raw ? (JSON.parse(raw) as unknown) : {};
       return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, StoredJob>) : {};
     } catch {

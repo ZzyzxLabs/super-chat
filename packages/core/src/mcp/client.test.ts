@@ -47,7 +47,7 @@ describe("McpClient", () => {
     expect(sent[0]?.rpc).toMatchObject({
       jsonrpc: "2.0",
       method: "initialize",
-      params: { protocolVersion: "2025-06-18", clientInfo: { name: "agentloom" } },
+      params: { protocolVersion: "2025-06-18", clientInfo: { name: "superchat" } },
     });
     expect(sent[1]?.rpc).toMatchObject({ method: "notifications/initialized" });
     expect(sent[1]?.rpc.id).toBeUndefined();

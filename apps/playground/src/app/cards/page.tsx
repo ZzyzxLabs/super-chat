@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { BUILTIN_CARDS, type CardAction, type CardSpec } from "@agentloom/core";
-import { BUILTIN_RENDERERS, CardRenderer, CardRendererProvider } from "@agentloom/ui";
+import { BUILTIN_CARDS, type CardAction, type CardSpec } from "@superchat/core";
+import { BUILTIN_RENDERERS, CardRenderer, CardRendererProvider } from "@superchat/ui";
 import { PanelHeader, SpecSplit } from "@/components/Shell";
 import { CARD_SAMPLES } from "@/agent/card-samples";
 
@@ -19,7 +19,7 @@ export default function CardsPanel() {
       <div className="dev__page">
         <PanelHeader title="Agent cards">
           A card is a structured tool output the host renders as UI. Two ways one appears: a domain tool attaches it to
-          its result, or the agent calls <code className="al-mono">visualize</code> and picks a presentation itself —
+          its result, or the agent calls <code className="sc-mono">visualize</code> and picks a presentation itself —
           which is what makes it visually flexible rather than limited to what someone pre-built. Each kind below is
           shown with the exact spec that produced it.
         </PanelHeader>
@@ -36,7 +36,7 @@ export default function CardsPanel() {
           <h2 className="dev__section-title">How the agent chooses</h2>
           <p className="dev__section-note">
             The model never sees this page. It sees the one-line summary under each name below, embedded in the{" "}
-            <code className="al-mono">visualize</code> tool description — so those summaries, not the schemas, are what
+            <code className="sc-mono">visualize</code> tool description — so those summaries, not the schemas, are what
             actually steer the choice. Kinds are registered with their validator and renderer together; a test asserts
             the two sets match exactly, so a card can never validate with nowhere to render.
           </p>
@@ -62,11 +62,11 @@ export default function CardsPanel() {
             never collapsed, because a hidden question is an unanswerable one.
           </p>
           {log.length ? (
-            <div className="al-card">
-              <div className="al-card__title">Actions received</div>
-              <ul className="al-list">
+            <div className="sc-card">
+              <div className="sc-card__title">Actions received</div>
+              <ul className="sc-list">
                 {log.map((line, i) => (
-                  <li key={i} className="al-mono">
+                  <li key={i} className="sc-mono">
                     {line}
                   </li>
                 ))}
@@ -79,7 +79,7 @@ export default function CardsPanel() {
           <section key={def.kind} id={def.kind} className="dev__section dev__kind">
             <div className="dev__kind-head">
               <span className="dev__kind-name">{def.kind}</span>
-              <span className="al-pill al-pill--info">interactive</span>
+              <span className="sc-pill sc-pill--info">interactive</span>
             </div>
             <p className="dev__kind-summary">{def.summary}</p>
             <SpecSplit spec={CARD_SAMPLES[def.kind] ?? { kind: def.kind }} label={`visualize({ kind: "${def.kind}", spec })`}>

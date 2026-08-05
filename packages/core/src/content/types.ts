@@ -1,4 +1,4 @@
-// The normalized content model. EVERYTHING in agentloom — history, tool output,
+// The normalized content model. EVERYTHING in superchat — history, tool output,
 // attachments, provider replies — is expressed as `Message[]` of `ContentPart[]`.
 //
 // Why a normalized model at all: each provider has its own wire shape for the

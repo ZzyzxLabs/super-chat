@@ -16,6 +16,7 @@
 // preferences, standing facts, corrections.
 
 import { estimateTokens } from "../tokens/estimate.js";
+import { getItemWithLegacy } from "../runtime/storage.js";
 import type { ContextSource } from "../context/types.js";
 import type { ToolDefinition } from "../tools/types.js";
 
@@ -49,10 +50,10 @@ export function createMemoryMemoryStore(): MemoryStore {
 }
 
 /** localStorage-backed store — same defensiveness as the job/file stores. */
-export function createLocalMemoryStore(storageKey = "agentloom:memory"): MemoryStore {
+export function createLocalMemoryStore(storageKey = "superchat:memory"): MemoryStore {
   const read = (): Record<string, MemoryEntry> => {
     try {
-      const raw = globalThis.localStorage?.getItem(storageKey);
+      const raw = getItemWithLegacy(storageKey);
       const parsed = raw ? (JSON.parse(raw) as unknown) : {};
       return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, MemoryEntry>) : {};
     } catch {

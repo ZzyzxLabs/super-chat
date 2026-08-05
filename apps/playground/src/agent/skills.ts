@@ -5,7 +5,7 @@
 // about. A single-domain demo hides that entirely — and worse, it makes the
 // framework look like it was built for that domain.
 
-import type { Skill } from "@agentloom/core";
+import type { Skill } from "@superchat/core";
 
 export const SKILLS: Skill[] = [
   {

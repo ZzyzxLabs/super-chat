@@ -141,7 +141,7 @@ export async function compactHistory(
         text: `[Earlier conversation summary — ${older.length} messages]\n${summary}`,
       },
     ],
-    metadata: { agentloom: "compaction-summary", replaced: older.length },
+    metadata: { superchat: "compaction-summary", replaced: older.length },
   };
 
   const out = [summaryMessage, ...recent];

@@ -1,5 +1,5 @@
 {
-  "name": "@agentloom/core",
+  "name": "@superchat/core",
   "version": "0.1.0",
   "description": "Provider-agnostic agent core: content model, skills, context assembly, tools, runtime, and hand-rolled provider adapters.",
   "type": "module",

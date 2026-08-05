@@ -6,7 +6,7 @@ import {
   buildResponsesRequest,
   type Message,
   type NormalizedRequest,
-} from "@agentloom/core";
+} from "@superchat/core";
 import { PanelHeader } from "@/components/Shell";
 
 // Scenarios chosen to expose the places the two dialects actually disagree.
@@ -151,7 +151,7 @@ export default function RequestsPanel() {
 
       <section className="dev__section" style={{ marginTop: 18 }}>
         <h2 className="dev__section-title">Input — NormalizedRequest</h2>
-        <pre className="al-pre dev__code" style={{ maxHeight: 300 }}>
+        <pre className="sc-pre dev__code" style={{ maxHeight: 300 }}>
           {JSON.stringify(normalized, null, 2)}
         </pre>
       </section>
@@ -159,18 +159,18 @@ export default function RequestsPanel() {
       <div className="dev__split" style={{ marginTop: 22 }}>
         <div className="dev__spec">
           <div className="dev__spec-label">POST /v1/responses</div>
-          <pre className="al-pre dev__code" style={{ maxHeight: 560 }}>
+          <pre className="sc-pre dev__code" style={{ maxHeight: 560 }}>
             {JSON.stringify(responses, null, 2)}
           </pre>
         </div>
         <div className="dev__spec">
           <div className="dev__spec-label">POST /v1/chat/completions</div>
           {chatError ? (
-            <div className="al-card al-card--error">
+            <div className="sc-card sc-card--error">
               <strong>Rejected:</strong> {chatError}
             </div>
           ) : (
-            <pre className="al-pre dev__code" style={{ maxHeight: 560 }}>
+            <pre className="sc-pre dev__code" style={{ maxHeight: 560 }}>
               {JSON.stringify(chat, null, 2)}
             </pre>
           )}
@@ -179,8 +179,8 @@ export default function RequestsPanel() {
 
       <section className="dev__section">
         <h2 className="dev__section-title">Where they disagree</h2>
-        <div className="al-table-wrap">
-          <table className="al-table">
+        <div className="sc-table-wrap">
+          <table className="sc-table">
             <thead>
               <tr>
                 <th />
@@ -209,10 +209,10 @@ export default function RequestsPanel() {
                 <tr key={k}>
                   <td>{k}</td>
                   <td>
-                    <code className="al-mono">{a}</code>
+                    <code className="sc-mono">{a}</code>
                   </td>
                   <td>
-                    <code className="al-mono">{b}</code>
+                    <code className="sc-mono">{b}</code>
                   </td>
                 </tr>
               ))}

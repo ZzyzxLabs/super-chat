@@ -34,7 +34,7 @@ import {
   siblingsOf,
   threadSnapshot,
   userMessage,
-} from "@agentloom/core";
+} from "@superchat/core";
 import { Store } from "./store.js";
 
 export type ThreadState = {

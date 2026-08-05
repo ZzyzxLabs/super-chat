@@ -7,8 +7,8 @@
 // collapse — a turn that made six lookups should not push the answer off screen.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { isCardCarrier, type Card, type ContentPart, type MediaSource, type Message } from "@agentloom/core";
-import { useAgentClient, useAttachments, useBranches, useCardAction, useCards, useRun, useThread } from "@agentloom/react";
+import { isCardCarrier, type Card, type ContentPart, type MediaSource, type Message } from "@superchat/core";
+import { useAgentClient, useAttachments, useBranches, useCardAction, useCards, useRun, useThread } from "@superchat/react";
 import { CardRenderer, useCardRenderers } from "./renderer-registry.js";
 
 function partsOf(message: Message) {
@@ -47,9 +47,9 @@ const PROVIDER_TOOL_LABELS: Record<string, string> = {
 /** "Searched the web" chips — provider-side work, shown so answers aren't magic. */
 function ProviderToolChips({ items }: { items: { id: string; kind: string }[] }) {
   return (
-    <div className="al-providertools" style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "4px 0" }}>
+    <div className="sc-providertools" style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "4px 0" }}>
       {items.map((t) => (
-        <span key={t.id} className="al-pill" title={t.kind}>
+        <span key={t.id} className="sc-pill" title={t.kind}>
           ⚙ {PROVIDER_TOOL_LABELS[t.kind] ?? t.kind.replace(/_/g, " ")}
         </span>
       ))}
@@ -78,7 +78,7 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
 
   if (message.role === "user") {
     return (
-      <div className="al-msg al-msg--user">
+      <div className="sc-msg sc-msg--user">
         {media.length ? <MediaParts parts={media} /> : null}
         <UserBubble message={message} text={text} />
         <BranchNav messageId={message.id} />
@@ -91,7 +91,7 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
   }
 
   return (
-    <div className="al-msg al-msg--assistant">
+    <div className="sc-msg sc-msg--assistant">
       {reasoning ? <ReasoningBlock text={reasoning} /> : null}
       {media.length ? <MediaParts parts={media} /> : null}
       {providerTools.length ? <ProviderToolChips items={providerTools} /> : null}
@@ -102,8 +102,8 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
       {interactive.map((c) => (
         <CardRenderer key={c.id} card={c} respond={respond} answered />
       ))}
-      {text ? <div className="al-prose al-msg__text">{text}</div> : null}
-      {!text && !cards.length && !calls.length ? <div className="al-muted">(no response)</div> : null}
+      {text ? <div className="sc-prose sc-msg__text">{text}</div> : null}
+      {!text && !cards.length && !calls.length ? <div className="sc-muted">(no response)</div> : null}
       <BranchNav messageId={message.id} />
     </div>
   );
@@ -115,14 +115,14 @@ function BranchNav({ messageId }: { messageId: string }) {
   const { isRunning } = useThread();
   if (count < 2) return null;
   return (
-    <div className="al-branchnav" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
-      <button type="button" className="al-btn al-btn--ghost al-btn--sm" disabled={isRunning} onClick={prev} aria-label="Previous branch">
+    <div className="sc-branchnav" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+      <button type="button" className="sc-btn sc-btn--ghost sc-btn--sm" disabled={isRunning} onClick={prev} aria-label="Previous branch">
         ‹
       </button>
-      <span className="al-muted">
+      <span className="sc-muted">
         {index + 1}/{count}
       </span>
-      <button type="button" className="al-btn al-btn--ghost al-btn--sm" disabled={isRunning} onClick={next} aria-label="Next branch">
+      <button type="button" className="sc-btn sc-btn--ghost sc-btn--sm" disabled={isRunning} onClick={next} aria-label="Next branch">
         ›
       </button>
     </div>
@@ -139,11 +139,11 @@ function UserBubble({ message, text }: { message: Message; text: string }) {
   if (!text && !editing) return null;
   if (!editing) {
     return (
-      <div className="al-bubble" style={{ position: "relative" }}>
+      <div className="sc-bubble" style={{ position: "relative" }}>
         {text}
         <button
           type="button"
-          className="al-btn al-btn--ghost al-btn--sm"
+          className="sc-btn sc-btn--ghost sc-btn--sm"
           style={{ marginLeft: 6 }}
           disabled={isRunning}
           aria-label="Edit message"
@@ -159,9 +159,9 @@ function UserBubble({ message, text }: { message: Message; text: string }) {
     );
   }
   return (
-    <div className="al-bubble" style={{ width: "100%" }}>
+    <div className="sc-bubble" style={{ width: "100%" }}>
       <textarea
-        className="al-composer__input"
+        className="sc-composer__input"
         rows={2}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -170,7 +170,7 @@ function UserBubble({ message, text }: { message: Message; text: string }) {
       <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
         <button
           type="button"
-          className="al-btn al-btn--primary al-btn--sm"
+          className="sc-btn sc-btn--primary sc-btn--sm"
           disabled={!draft.trim() || isRunning}
           onClick={() => {
             setEditing(false);
@@ -179,7 +179,7 @@ function UserBubble({ message, text }: { message: Message; text: string }) {
         >
           Send edited
         </button>
-        <button type="button" className="al-btn al-btn--ghost al-btn--sm" onClick={() => setEditing(false)}>
+        <button type="button" className="sc-btn sc-btn--ghost sc-btn--sm" onClick={() => setEditing(false)}>
           Cancel
         </button>
       </div>
@@ -203,14 +203,14 @@ const mediaSrc = (source: MediaSource, mediaType?: string): string | null => {
  */
 function MediaParts({ parts }: { parts: Extract<ContentPart, { type: "image" | "file" | "audio" }>[] }) {
   return (
-    <div className="al-media">
+    <div className="sc-media">
       {parts.map((p, i) => {
         if (p.type === "image") {
           const src = mediaSrc(p.source, p.mediaType);
           return src ? (
-            <img key={i} className="al-media__img" src={src} alt="attached image" style={{ maxWidth: "min(100%, 360px)", borderRadius: 8 }} />
+            <img key={i} className="sc-media__img" src={src} alt="attached image" style={{ maxWidth: "min(100%, 360px)", borderRadius: 8 }} />
           ) : (
-            <span key={i} className="al-pill" title={(p.source as { id?: string }).id}>
+            <span key={i} className="sc-pill" title={(p.source as { id?: string }).id}>
               🖼 attached image
             </span>
           );
@@ -218,13 +218,13 @@ function MediaParts({ parts }: { parts: Extract<ContentPart, { type: "image" | "
         if (p.type === "file") {
           const name = p.filename ?? (p.source.kind === "providerFile" ? p.source.id : "attachment");
           return (
-            <span key={i} className="al-pill" title={p.mediaType}>
+            <span key={i} className="sc-pill" title={p.mediaType}>
               📄 {name}
             </span>
           );
         }
         return (
-          <span key={i} className="al-pill">
+          <span key={i} className="sc-pill">
             🔊 audio{p.transcript ? ` — “${p.transcript.slice(0, 60)}${p.transcript.length > 60 ? "…" : ""}”` : ""}
           </span>
         );
@@ -236,11 +236,11 @@ function MediaParts({ parts }: { parts: Extract<ContentPart, { type: "image" | "
 function ReasoningBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="al-reasoning">
-      <button type="button" className="al-btn al-btn--ghost al-btn--sm" onClick={() => setOpen((o) => !o)}>
+    <div className="sc-reasoning">
+      <button type="button" className="sc-btn sc-btn--ghost sc-btn--sm" onClick={() => setOpen((o) => !o)}>
         {open ? "Hide reasoning" : "Show reasoning"}
       </button>
-      {open ? <pre className="al-pre al-reasoning__body">{text}</pre> : null}
+      {open ? <pre className="sc-pre sc-reasoning__body">{text}</pre> : null}
     </div>
   );
 }
@@ -258,25 +258,25 @@ function ToolActivity({
   const failures = results.filter((r) => r.failure).length;
 
   return (
-    <div className="al-tools">
-      <button type="button" className="al-tools__head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-        <span className="al-tools__icon" aria-hidden>
+    <div className="sc-tools">
+      <button type="button" className="sc-tools__head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <span className="sc-tools__icon" aria-hidden>
           {open ? "▾" : "▸"}
         </span>
         {items.length} tool {items.length === 1 ? "call" : "calls"}
-        {failures ? <span className="al-pill al-pill--negative">{failures} failed</span> : null}
+        {failures ? <span className="sc-pill sc-pill--negative">{failures} failed</span> : null}
       </button>
       {open ? (
-        <ul className="al-tools__list">
+        <ul className="sc-tools__list">
           {items.map((c) => {
             const result = byId.get(c.callId);
             return (
-              <li key={c.callId} className="al-tools__item">
-                <code className="al-mono">{c.name}</code>
-                {result?.failure ? <span className="al-pill al-pill--negative">{result.failure}</span> : null}
-                {c.input !== undefined ? <pre className="al-pre al-pre--sm">{JSON.stringify(c.input, null, 2)}</pre> : null}
+              <li key={c.callId} className="sc-tools__item">
+                <code className="sc-mono">{c.name}</code>
+                {result?.failure ? <span className="sc-pill sc-pill--negative">{result.failure}</span> : null}
+                {c.input !== undefined ? <pre className="sc-pre sc-pre--sm">{JSON.stringify(c.input, null, 2)}</pre> : null}
                 {result ? (
-                  <pre className="al-pre al-pre--sm">
+                  <pre className="sc-pre sc-pre--sm">
                     {JSON.stringify(isCardCarrier(result.output) ? { ...result.output, $card: "[card]" } : result.output, null, 2).slice(0, 1200)}
                   </pre>
                 ) : null}
@@ -306,11 +306,11 @@ export function LiveTurn() {
     .map((p) => ({ id: p.id, kind: p.kind.slice("provider-tool:".length) }));
 
   return (
-    <div className="al-msg al-msg--assistant">
+    <div className="sc-msg sc-msg--assistant">
       {run.job ? (
-        <div className="al-jobchip">
-          <span className="al-spinner" aria-hidden /> Background job <code className="al-mono">{run.job.handle.id.slice(0, 18)}…</code>{" "}
-          <span className="al-pill">{run.job.status}</span>
+        <div className="sc-jobchip">
+          <span className="sc-spinner" aria-hidden /> Background job <code className="sc-mono">{run.job.handle.id.slice(0, 18)}…</code>{" "}
+          <span className="sc-pill">{run.job.status}</span>
         </div>
       ) : null}
       {reasoning ? <ReasoningBlock text={reasoning} /> : null}
@@ -324,10 +324,10 @@ export function LiveTurn() {
       {/* The blocking card renders last and un-collapsed — it is the thing the
           user must act on, so nothing may hide it. */}
       {pending ? <CardRenderer key={pending.id} card={pending} respond={respond} /> : null}
-      {text ? <div className="al-prose al-msg__text">{text}</div> : null}
+      {text ? <div className="sc-prose sc-msg__text">{text}</div> : null}
       {run.status === "running" && !text && !calls.length ? (
-        <div className="al-muted">
-          <span className="al-spinner" aria-hidden /> Thinking…
+        <div className="sc-muted">
+          <span className="sc-spinner" aria-hidden /> Thinking…
         </div>
       ) : null}
     </div>
@@ -349,13 +349,13 @@ export function Thread({ empty }: { empty?: ReactNode }) {
 
   return (
     <div
-      className="al-thread"
+      className="sc-thread"
       onScroll={(e) => {
         const el = e.currentTarget;
         setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
       }}
     >
-      {messages.length === 0 && run.status === "idle" ? <div className="al-empty">{empty}</div> : null}
+      {messages.length === 0 && run.status === "idle" ? <div className="sc-empty">{empty}</div> : null}
       {messages.map((m) => (
         <MessageView key={m.id} message={m} respond={respond} />
       ))}
@@ -401,21 +401,21 @@ export function Composer({ placeholder = "Ask anything…", onAttachFile }: Comp
 
   return (
     <form
-      className="al-composer"
+      className="sc-composer"
       onSubmit={(e) => {
         e.preventDefault();
         submit();
       }}
     >
       {attachments.length ? (
-        <div className="al-composer__attachments" style={{ display: "flex", flexWrap: "wrap", gap: 6, width: "100%" }}>
+        <div className="sc-composer__attachments" style={{ display: "flex", flexWrap: "wrap", gap: 6, width: "100%" }}>
           {attachments.map((p, i) => (
-            <span key={i} className="al-pill">
+            <span key={i} className="sc-pill">
               {p.type === "image" ? "🖼" : p.type === "audio" ? "🔊" : "📄"}{" "}
               {(p as { filename?: string }).filename ?? p.type}
               <button
                 type="button"
-                className="al-btn al-btn--ghost al-btn--sm"
+                className="sc-btn sc-btn--ghost sc-btn--sm"
                 aria-label="Remove attachment"
                 onClick={() => remove(i)}
               >
@@ -426,7 +426,7 @@ export function Composer({ placeholder = "Ask anything…", onAttachFile }: Comp
         </div>
       ) : null}
       {onAttachFile ? (
-        <label className="al-btn al-btn--ghost" title="Attach a file" aria-disabled={attaching || isRunning}>
+        <label className="sc-btn sc-btn--ghost" title="Attach a file" aria-disabled={attaching || isRunning}>
           {attaching ? "…" : "📎"}
           <input
             type="file"
@@ -441,7 +441,7 @@ export function Composer({ placeholder = "Ask anything…", onAttachFile }: Comp
         </label>
       ) : null}
       <textarea
-        className="al-composer__input"
+        className="sc-composer__input"
         rows={1}
         value={value}
         placeholder={placeholder}
@@ -456,11 +456,11 @@ export function Composer({ placeholder = "Ask anything…", onAttachFile }: Comp
         }}
       />
       {isRunning ? (
-        <button type="button" className="al-btn al-btn--ghost" onClick={stop}>
+        <button type="button" className="sc-btn sc-btn--ghost" onClick={stop}>
           Stop
         </button>
       ) : (
-        <button type="submit" className="al-btn al-btn--primary" disabled={!value.trim() && !attachments.length}>
+        <button type="submit" className="sc-btn sc-btn--primary" disabled={!value.trim() && !attachments.length}>
           Send
         </button>
       )}

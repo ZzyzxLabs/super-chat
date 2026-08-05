@@ -7,7 +7,7 @@
 // thing this deliberately omits: per-user scoping in `authorize`, so thread ids
 // are not a shared namespace.
 
-import type { StoredThread, ThreadMeta } from "@agentloom/core";
+import type { StoredThread, ThreadMeta } from "@superchat/core";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

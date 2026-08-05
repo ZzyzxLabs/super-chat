@@ -1,4 +1,4 @@
-// @agentloom/core — public surface.
+// @superchat/core — public surface.
 
 // content
 export * from "./content/types.js";
@@ -114,7 +114,7 @@ export * from "./app-state/index.js";
 // mcp
 export * from "./mcp/index.js";
 
-// providers — the OpenAI adapter is also available at "@agentloom/core/openai"
+// providers — the OpenAI adapter is also available at "@superchat/core/openai"
 // for hosts that want to keep it out of a bundle that never calls OpenAI.
 export { createOpenAIProvider, type OpenAIProviderConfig, type OpenAIDialect } from "./providers/openai/adapter.js";
 export { createAnthropicProvider, type AnthropicProviderConfig } from "./providers/anthropic/adapter.js";

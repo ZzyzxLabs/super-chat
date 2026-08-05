@@ -1,7 +1,7 @@
 {
-  "name": "@agentloom/ui",
+  "name": "@superchat/ui",
   "version": "0.1.0",
-  "description": "Card renderers and chat primitives for agentloom. Bring your own styling; ships a self-contained CSS baseline.",
+  "description": "Card renderers and chat primitives for superchat. Bring your own styling; ships a self-contained CSS baseline.",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -22,8 +22,8 @@
     "react": "^18.0.0 || ^19.0.0"
   },
   "dependencies": {
-    "@agentloom/core": "workspace:*",
-    "@agentloom/react": "workspace:*"
+    "@superchat/core": "workspace:*",
+    "@superchat/react": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.0.2",

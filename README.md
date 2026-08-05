@@ -1,4 +1,4 @@
-# agentloom
+# superchat
 
 A frontend framework for agent services. It assembles **contexts**, **skills** and
 **I/O content** into requests that are correct on the wire for each provider, and
@@ -10,9 +10,9 @@ Not a chat app. The thing chat apps leave to you.
 > decisions, bugs already fixed, and what will bite you.
 
 ```
-@agentloom/core    provider-agnostic engine — no React, isomorphic
-@agentloom/react   thread state, run control, card actions
-@agentloom/ui      card renderers, chat primitives, context inspector
+@superchat/core    provider-agnostic engine — no React, isomorphic
+@superchat/react   thread state, run control, card actions
+@superchat/ui      card renderers, chat primitives, context inspector
 apps/playground    Next.js dev panels — one per capability, no API key needed
 ```
 
@@ -32,7 +32,7 @@ production:
 | **Capability scoping** | Tools accumulate. The day you add a destructive one, it is already live on every key you ever minted. |
 | **Agent cards** | A hand-maintained parser/renderer dispatch chain drifts, and a card silently degrades to a "ran ✓" chip. |
 
-agentloom takes a position on all four.
+superchat takes a position on all four.
 
 ---
 
@@ -82,7 +82,7 @@ orphaned tool calls dropped before they poison the thread.
 
 ### 2. Context assembly — derived, budgeted, inspectable
 
-Most chat apps *accumulate* an array. agentloom *derives* the context every turn
+Most chat apps *accumulate* an array. superchat *derives* the context every turn
 from named sources under an explicit token budget, and records why each layer was
 included, truncated or dropped.
 

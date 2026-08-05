@@ -24,7 +24,7 @@ export function Shell({ children }: { children: ReactNode }) {
     <div className="dev">
       <aside className="dev__nav">
         <div className="dev__brand">
-          agentloom
+          superchat
           <span>dev panels</span>
         </div>
         <nav>
@@ -39,9 +39,9 @@ export function Shell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="dev__foot">
-          <code className="al-mono">@agentloom/core</code>
-          <code className="al-mono">@agentloom/react</code>
-          <code className="al-mono">@agentloom/ui</code>
+          <code className="sc-mono">@superchat/core</code>
+          <code className="sc-mono">@superchat/react</code>
+          <code className="sc-mono">@superchat/ui</code>
         </div>
       </aside>
       <main className="dev__main">{children}</main>
@@ -64,7 +64,7 @@ export function SpecSplit({ spec, children, label }: { spec: unknown; children: 
     <div className="dev__split">
       <div className="dev__spec">
         {label ? <div className="dev__spec-label">{label}</div> : null}
-        <pre className="al-pre dev__code">{JSON.stringify(spec, null, 2)}</pre>
+        <pre className="sc-pre dev__code">{JSON.stringify(spec, null, 2)}</pre>
       </div>
       <div className="dev__preview">{children}</div>
     </div>

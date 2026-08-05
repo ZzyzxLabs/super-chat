@@ -72,7 +72,7 @@ export class McpClient {
     this.provider = config.provider ?? "mcp";
     this.path = config.path ?? "/";
     this.protocolVersion = config.protocolVersion ?? DEFAULT_PROTOCOL;
-    this.clientInfo = config.clientInfo ?? { name: "agentloom", version: "0.1.0" };
+    this.clientInfo = config.clientInfo ?? { name: "superchat", version: "0.1.0" };
     this.onElicit = config.onElicit;
   }
 

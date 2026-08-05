@@ -16,8 +16,8 @@ import {
   useAppState,
   useContextTrace,
   useThread,
-} from "@agentloom/react";
-import { BUILTIN_RENDERERS, CardRendererProvider, Composer, Thread } from "@agentloom/ui";
+} from "@superchat/react";
+import { BUILTIN_RENDERERS, CardRendererProvider, Composer, Thread } from "@superchat/ui";
 import {
   ContextBuilder,
   ToolRegistry,
@@ -25,7 +25,7 @@ import {
   createAppStateSource,
   createBuiltinTools,
   type AppStateBinding,
-} from "@agentloom/core";
+} from "@superchat/core";
 import { PanelHeader } from "@/components/Shell";
 import { buildProvider, buildTransport, cards, skills } from "@/agent/setup";
 
@@ -158,9 +158,9 @@ export default function AppStatePanel() {
     <div className="dev__page">
       <PanelHeader title="App state">
         The agent reads and operates the board below. State enters context through a{" "}
-        <code className="al-mono">ContextSource</code> — budgeted and traced like every other layer, re-read every turn
+        <code className="sc-mono">ContextSource</code> — budgeted and traced like every other layer, re-read every turn
         so it can never contradict the screen — and actions are ordinary{" "}
-        <code className="al-mono">ToolDefinition</code>s, so they inherit presets, confirm-suspension and deny-last for
+        <code className="sc-mono">ToolDefinition</code>s, so they inherit presets, confirm-suspension and deny-last for
         free. The board is plain React state: drive it by hand, then ask the agent to, and watch the same state change.
       </PanelHeader>
 
@@ -198,8 +198,8 @@ function Board({
   return (
     <div className="dev__split" style={{ gap: 12, marginBottom: 12 }}>
       {COLUMNS.map((column) => (
-        <div key={column} className="al-panel" style={{ flex: 1, padding: 10 }}>
-          <div className="al-panel__title">{column}</div>
+        <div key={column} className="sc-panel" style={{ flex: 1, padding: 10 }}>
+          <div className="sc-panel__title">{column}</div>
           {board
             .filter((c) => c.column === column)
             .map((c) => (
@@ -207,17 +207,17 @@ function Board({
                 key={c.id}
                 type="button"
                 className="dev__prompt"
-                style={{ width: "100%", textAlign: "left", ...(c.id === selectedId ? { outline: "2px solid var(--al-accent, #58a6ff)" } : {}) }}
+                style={{ width: "100%", textAlign: "left", ...(c.id === selectedId ? { outline: "2px solid var(--sc-accent, #58a6ff)" } : {}) }}
                 onClick={() => onSelect(c.id)}
               >
                 <strong>{c.title}</strong>
                 <span>
-                  <code className="al-mono">{c.id}</code> · {c.assignee ?? "unassigned"}
+                  <code className="sc-mono">{c.id}</code> · {c.assignee ?? "unassigned"}
                 </span>
               </button>
             ))}
           {board.filter((c) => c.column === column).length === 0 ? (
-            <p className="al-muted" style={{ fontSize: 12 }}>
+            <p className="sc-muted" style={{ fontSize: 12 }}>
               empty
             </p>
           ) : null}
@@ -236,7 +236,7 @@ function Prompts() {
   ];
   return (
     <div className="dev__prompts">
-      <p className="al-muted" style={{ fontSize: 13, marginTop: 0 }}>
+      <p className="sc-muted" style={{ fontSize: 13, marginTop: 0 }}>
         The agent already knows the board — it is in the context layer, not the conversation.
       </p>
       {examples.map((e) => (
@@ -254,7 +254,7 @@ function StateLayer() {
   const entry = trace?.entries.find((e) => e.id === "app-state");
   return (
     <div className="dev__events">
-      <div className="al-panel__title">App state in context</div>
+      <div className="sc-panel__title">App state in context</div>
       {entry ? (
         <div className="dev__event">
           <span className="dev__event-body">
@@ -265,7 +265,7 @@ function StateLayer() {
           </span>
         </div>
       ) : (
-        <p className="al-muted" style={{ fontSize: 12 }}>
+        <p className="sc-muted" style={{ fontSize: 12 }}>
           Send a message to see the board enter the context budget.
         </p>
       )}
