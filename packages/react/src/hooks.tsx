@@ -14,7 +14,18 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import { siblingsOf, type Card, type CardAction, type ContentPart, type ContextTrace, type Message, type Skill, type ThreadMeta, type ToolDefinition } from "@agentloom/core";
+import {
+  siblingsOf,
+  type AppStateBinding,
+  type Card,
+  type CardAction,
+  type ContentPart,
+  type ContextTrace,
+  type Message,
+  type Skill,
+  type ThreadMeta,
+  type ToolDefinition,
+} from "@agentloom/core";
 import { AgentClient, type AgentClientConfig, type ThreadState } from "./client.js";
 
 const AgentContext = createContext<AgentClient | null>(null);
@@ -214,6 +225,40 @@ export function useJobs() {
   }, [client]);
 
   return jobs;
+}
+
+/**
+ * Bind a piece of React state so the agent can SEE it.
+ *
+ * The binding reads through a ref that this hook keeps current, so the source
+ * always observes the latest render's value rather than the value captured
+ * when the binding was created — the stale-closure bug this seam would
+ * otherwise walk into every time.
+ *
+ * Returns a stable `AppStateBinding`; pass the array of them to
+ * `createAppStateSource()` when constructing the ContextBuilder.
+ */
+export function useAppState<T>(
+  id: string,
+  value: T,
+  description: string,
+  opts: { serialize?: (v: T) => string; when?: (v: T) => boolean } = {},
+): AppStateBinding<T> {
+  const latest = useRef(value);
+  latest.current = value;
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
+
+  return useMemo(
+    () => ({
+      id,
+      description,
+      read: () => latest.current,
+      serialize: (v: T) => (optsRef.current.serialize ?? ((x: T) => JSON.stringify(x, null, 2)))(v),
+      when: (v: T) => (optsRef.current.when ? optsRef.current.when(v) : true),
+    }),
+    [id, description],
+  );
 }
 
 /** Parts staged for the next send, plus the stage/unstage actions. */

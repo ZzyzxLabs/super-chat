@@ -106,9 +106,10 @@ export {
   type RestThreadStoreConfig,
 } from "./runtime/threads.js";
 
-// memory & retrieval seams
+// memory, retrieval & app-state seams
 export * from "./memory/index.js";
 export * from "./retrieval/index.js";
+export * from "./app-state/index.js";
 
 // mcp
 export * from "./mcp/index.js";

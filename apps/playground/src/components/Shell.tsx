@@ -13,6 +13,7 @@ const PANELS = [
   { href: "/skills", label: "Skills", hint: "Modes, matching, live scoring" },
   { href: "/tools", label: "Tools & presets", hint: "Schemas, capability gating" },
   { href: "/requests", label: "Wire requests", hint: "Responses vs Chat Completions" },
+  { href: "/app-state", label: "App state", hint: "Agent reads & drives your UI" },
   { href: "/run", label: "Run & events", hint: "Live chat + event stream" },
 ];
 
