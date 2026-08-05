@@ -16,7 +16,11 @@ function partsOf(message: Message) {
   const rest: ContentPart[] = [];
   for (const p of message.parts) {
     if (p.type === "artifact" && p.kind.startsWith("card:")) {
-      cards.push({ id: p.id, spec: p.data as Card["spec"] });
+      // A persisted thread may have shed this card's payload under storage
+      // quota; the stub carries `expired` so the renderer says so instead of
+      // rendering an empty shell.
+      const expired = (p.data as { expired?: boolean } | null)?.expired === true;
+      cards.push({ id: p.id, spec: p.data as Card["spec"], ...(expired ? { expired: true } : {}) });
       continue;
     }
     rest.push(p);

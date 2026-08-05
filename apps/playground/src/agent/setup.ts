@@ -13,6 +13,7 @@ import {
   createDirectTransport,
   createLocalFileStore,
   createLocalJobStore,
+  createLocalThreadStore,
   createOpenAIProvider,
   createProxyTransport,
   type Provider,
@@ -90,5 +91,6 @@ export function buildContextBuilder(contextWindow = 128_000): ContextBuilder {
 
 export const jobStore = createLocalJobStore("agentloom:playground:jobs");
 export const fileStore = createLocalFileStore("agentloom:playground:files");
+export const threadStore = createLocalThreadStore("agentloom:playground:threads");
 
 export const MODELS = ["gpt-5.2", "gpt-5.2-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"];

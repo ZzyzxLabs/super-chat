@@ -21,11 +21,14 @@ import {
   type RunMode,
   type RunState,
   type StoredJob,
+  type ThreadMeta,
+  type ThreadStore,
   type ToolCallRequest,
   type ToolRegistry,
   type ToolResolution,
   assistantMessage,
   nextId,
+  threadSnapshot,
   userMessage,
 } from "@agentloom/core";
 import { Store } from "./store.js";
@@ -54,6 +57,8 @@ export type AgentClientConfig = {
   maxOutputTokens?: number;
   reasoning?: RunConfig["reasoning"];
   jobStore?: JobStore;
+  /** When set, the thread is saved after each user and assistant turn. */
+  threadStore?: ThreadStore;
   onHostTool?: (call: ToolCallRequest) => Promise<unknown>;
   /** Persisted thread to hydrate from. */
   initialMessages?: Message[];
@@ -68,6 +73,8 @@ export class AgentClient {
   private config: AgentClientConfig;
   private controller: AbortController | null = null;
   private pending = new Map<string, PendingDecision>();
+  /** Meta of the last snapshot saved, so createdAt/title survive re-saves. */
+  private threadMeta: ThreadMeta | undefined;
 
   constructor(config: AgentClientConfig) {
     this.config = config;
@@ -100,6 +107,8 @@ export class AgentClient {
     if (this.isRunning) throw new Error("A run is already in progress. Call stop() first.");
     const message = userMessage(input);
     this.store.set((s) => ({ ...s, messages: [...s.messages, message] }));
+    // Persist the user turn before running — a reload mid-run keeps it.
+    this.persist();
     await this.run([...this.store.get().messages], opts);
   }
 
@@ -213,6 +222,67 @@ export class AgentClient {
         status: s.run.status,
       };
     });
+    this.persist();
+  }
+
+  /**
+   * Fire-and-forget save, the same posture as the job store put: persistence
+   * must not stall the run, and a failed save degrades to "not saved", never
+   * to a broken thread.
+   */
+  private persist(): void {
+    const store = this.config.threadStore;
+    if (!store) return;
+    const s = this.store.get();
+    if (this.threadMeta && this.threadMeta.id !== s.id) this.threadMeta = undefined;
+    void (async () => {
+      // A client hydrated via config (threadId/initialMessages) has no meta in
+      // hand; read the stored one so createdAt and title survive the reload.
+      const prior = this.threadMeta ?? (await store.load(s.id))?.meta;
+      const snapshot = threadSnapshot(s.id, s.messages, prior);
+      this.threadMeta = snapshot.meta;
+      await store.save(snapshot);
+    })().catch(() => {
+      // Fire-and-forget: a failed save degrades to "not saved", never a crash.
+    });
+  }
+
+  /**
+   * Load a stored thread and replace the current one. Returns false when the
+   * id is unknown (the current thread is left untouched).
+   */
+  async openThread(id: string): Promise<boolean> {
+    const store = this.config.threadStore;
+    if (!store) return false;
+    const stored = await store.load(id);
+    if (!stored) return false;
+    this.stop();
+    this.threadMeta = stored.meta;
+    this.store.set((s) => ({
+      ...s,
+      id: stored.meta.id,
+      messages: stored.messages,
+      cards: [],
+      run: initialRunState("", this.config.mode ?? "stream"),
+      status: "idle",
+      error: undefined,
+    }));
+    return true;
+  }
+
+  /** Start a fresh thread under a new id (`clear()` keeps the id; this doesn't). */
+  newThread(): void {
+    this.stop();
+    this.threadMeta = undefined;
+    this.store.set((s) => ({
+      ...s,
+      id: nextId("thread"),
+      messages: [],
+      cards: [],
+      run: initialRunState("", this.config.mode ?? "stream"),
+      status: "idle",
+      error: undefined,
+    }));
   }
 
   /** Answer an interactive card. Unblocks the suspended tool. */

@@ -10,10 +10,11 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import type { Card, CardAction, ContextTrace, Message, Skill, ToolDefinition } from "@agentloom/core";
+import type { Card, CardAction, ContextTrace, Message, Skill, ThreadMeta, ToolDefinition } from "@agentloom/core";
 import { AgentClient, type AgentClientConfig, type ThreadState } from "./client.js";
 
 const AgentContext = createContext<AgentClient | null>(null);
@@ -183,6 +184,54 @@ export function useJobs() {
   }, [client]);
 
   return jobs;
+}
+
+/**
+ * Stored threads, for a thread picker.
+ *
+ * Refreshes whenever the ACTIVE thread id changes (open/new/switch) and after
+ * every save-worthy status transition, so the list tracks reality without the
+ * host wiring anything. No `threadStore` configured → empty list, inert actions.
+ */
+export function useThreadList(): {
+  threads: ThreadMeta[];
+  activeId: string;
+  refresh: () => Promise<void>;
+  open: (id: string) => Promise<boolean>;
+  create: () => void;
+  remove: (id: string) => Promise<void>;
+} {
+  const client = useAgentClient();
+  const activeId = useAgentState((s) => s.id);
+  const status = useAgentState((s) => s.status);
+  const [threads, setThreads] = useState<ThreadMeta[]>([]);
+
+  const refresh = useCallback(async () => {
+    const store = client.getConfig().threadStore;
+    setThreads(store ? await store.list() : []);
+  }, [client]);
+
+  useEffect(() => {
+    // `status` is a dependency on purpose: a run finishing is when the client
+    // saves, so it is exactly when the list's metadata goes stale.
+    void refresh();
+  }, [refresh, activeId, status]);
+
+  return useMemo(
+    () => ({
+      threads,
+      activeId,
+      refresh,
+      open: (id: string) => client.openThread(id),
+      create: () => client.newThread(),
+      remove: async (id: string) => {
+        await client.getConfig().threadStore?.remove(id);
+        if (id === client.store.get().id) client.newThread();
+        await refresh();
+      },
+    }),
+    [client, threads, activeId, refresh],
+  );
 }
 
 /** Construct a client once and keep it stable across renders. */

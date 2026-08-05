@@ -93,6 +93,15 @@ export { executeToolCall, executeToolCalls, compactError, type ToolCallRequest, 
 export * from "./runtime/stop.js";
 export { createMemoryJobStore, createLocalJobStore, resumeJobs, reap, isTerminal, awaitJob, type JobStore, type StoredJob, type ResumeResult } from "./runtime/jobs.js";
 export { createMemoryFileStore, createLocalFileStore, type FileStore, type StoredFile } from "./runtime/files.js";
+export {
+  createMemoryThreadStore,
+  createLocalThreadStore,
+  threadSnapshot,
+  THREAD_SCHEMA_VERSION,
+  type ThreadStore,
+  type StoredThread,
+  type ThreadMeta,
+} from "./runtime/threads.js";
 
 // providers — the OpenAI adapter is also available at "@agentloom/core/openai"
 // for hosts that want to keep it out of a bundle that never calls OpenAI.

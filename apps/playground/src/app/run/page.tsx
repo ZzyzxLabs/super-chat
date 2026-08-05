@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AgentClient, AgentProvider, useAgentState, useThread } from "@agentloom/react";
+import { AgentClient, AgentProvider, useAgentState, useThread, useThreadList } from "@agentloom/react";
 import { BUILTIN_RENDERERS, CardRendererProvider, ContextInspector, Composer, Thread } from "@agentloom/ui";
 import type { RunEvent, RunMode, StoredFile } from "@agentloom/core";
 import {
@@ -12,6 +12,7 @@ import {
   buildTransport,
   fileStore,
   jobStore,
+  threadStore,
   type TransportMode,
 } from "@/agent/setup";
 
@@ -55,6 +56,7 @@ export default function RunPanel() {
       mode,
       maxSteps: 8,
       jobStore,
+      threadStore,
     });
     // Splice pending attachments into the next send. The ui Composer passes
     // text only; the client's send already accepts ContentPart[], so the panel
@@ -107,6 +109,20 @@ export default function RunPanel() {
   useEffect(() => {
     client.configure({ model, mode, toolResolution: { presets } });
   }, [client, model, mode, presets]);
+
+  // Reopen the live thread whenever the client is rebuilt (reload, transport
+  // switch) — before this, both silently discarded the conversation.
+  const lastThreadId = useRef<string | null>(null);
+  useEffect(() => {
+    const unsub = client.store.subscribe(() => {
+      lastThreadId.current = client.store.get().id;
+    });
+    void (async () => {
+      const target = lastThreadId.current ?? (await threadStore.list())[0]?.id;
+      if (target && target !== client.store.get().id) await client.openThread(target);
+    })();
+    return unsub;
+  }, [client]);
 
   return (
     <AgentProvider client={client}>
@@ -193,12 +209,71 @@ export default function RunPanel() {
           </div>
 
           <aside className="dev__runside">
+            <ThreadsPanel />
             <EventStream />
             <ContextInspector />
           </aside>
         </div>
       </CardRendererProvider>
     </AgentProvider>
+  );
+}
+
+/**
+ * The thread picker — the ThreadStore demo. Snapshot-per-thread in
+ * localStorage: reload the page and the conversation is still here.
+ */
+function ThreadsPanel() {
+  const { threads, activeId, open, create, remove } = useThreadList();
+  const { isRunning } = useThread();
+
+  return (
+    <div className="dev__events">
+      <div className="al-panel__title">
+        Threads
+        <button
+          type="button"
+          className="al-btn al-btn--ghost al-btn--sm"
+          style={{ float: "right" }}
+          disabled={isRunning}
+          onClick={create}
+        >
+          + New
+        </button>
+      </div>
+      {threads.length === 0 ? (
+        <p className="al-muted" style={{ fontSize: 12 }}>
+          Threads persist to localStorage as you chat.
+        </p>
+      ) : (
+        threads.map((t) => (
+          <div key={t.id} className="dev__event" style={{ alignItems: "center", gap: 6 }}>
+            <button
+              type="button"
+              className="al-btn al-btn--ghost al-btn--sm"
+              style={{ flex: 1, textAlign: "left", ...(t.id === activeId ? { fontWeight: 600 } : {}) }}
+              disabled={isRunning}
+              onClick={() => void open(t.id)}
+              title={t.id}
+            >
+              {t.title ?? "(untitled)"}
+              <span className="al-muted" style={{ display: "block", fontSize: 11 }}>
+                {t.messageCount} message{t.messageCount === 1 ? "" : "s"}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="al-btn al-btn--ghost al-btn--sm"
+              aria-label={`Delete ${t.title ?? t.id}`}
+              disabled={isRunning}
+              onClick={() => void remove(t.id)}
+            >
+              ×
+            </button>
+          </div>
+        ))
+      )}
+    </div>
   );
 }
 
