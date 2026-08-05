@@ -5,19 +5,22 @@ import { describe, expect, it } from "vitest";
 import {
   ContextBuilder,
   ToolRegistry,
+  createMemoryJobStore,
   createMemoryThreadStore,
   createOpenAIProvider,
+  threadSnapshot,
   type Transport,
   type TransportRequest,
 } from "@agentloom/core";
 import { AgentClient } from "./client.js";
 
-function mockTransport(responses: unknown[]): Transport {
+function mockTransport(responses: unknown[], opts: { delayMs?: number } = {}): Transport {
   let i = 0;
   return {
     kind: "custom",
     credentialSafe: true,
     async fetch(): Promise<Response> {
+      if (opts.delayMs) await new Promise((r) => setTimeout(r, opts.delayMs));
       const body = responses[Math.min(i, responses.length - 1)];
       i += 1;
       return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
@@ -35,9 +38,13 @@ const respondText = (text: string, id = "resp_1") => ({
   usage: { input_tokens: 100, output_tokens: 20, total_tokens: 120 },
 });
 
-function makeClient(responses: unknown[], over: Partial<ConstructorParameters<typeof AgentClient>[0]> = {}) {
+function makeClient(
+  responses: unknown[],
+  over: Partial<ConstructorParameters<typeof AgentClient>[0]> = {},
+  transportOpts: { delayMs?: number } = {},
+) {
   return new AgentClient({
-    provider: createOpenAIProvider({ transport: mockTransport(responses), dialect: "responses" }),
+    provider: createOpenAIProvider({ transport: mockTransport(responses, transportOpts), dialect: "responses" }),
     model: "gpt-5.2",
     contextBuilder: new ContextBuilder({ identity: "You are a test agent.", contextWindow: 32_000 }),
     tools: new ToolRegistry(),
@@ -156,6 +163,70 @@ describe("AgentClient + ThreadStore", () => {
     client.clear();
     await flush();
     expect((await store.load(id))?.messages).toEqual([]);
+  });
+});
+
+describe("thread-switch safety", () => {
+  it("a run dying from openThread cannot write into the newly opened thread", async () => {
+    const store = createMemoryThreadStore();
+    // Seed a stored thread to switch to.
+    await store.save(threadSnapshot("t_target", [{ id: "u1", role: "user", parts: [{ type: "text", text: "old" }] }]));
+
+    const client = makeClient([respondText("slow answer")], { threadStore: store }, { delayMs: 60 });
+    const running = client.send("go"); // in-flight; transport answers in 60ms
+
+    await new Promise((r) => setTimeout(r, 10));
+    expect(await client.openThread("t_target")).toBe(true);
+
+    await running; // let the dying run finish unwinding
+    await flush();
+
+    const s = client.store.get();
+    expect(s.id).toBe("t_target");
+    // The dying run must leak NOTHING: no error, no status, no committed parts.
+    expect(s.error).toBeUndefined();
+    expect(s.status).toBe("idle");
+    expect(s.messages.map((m) => m.role)).toEqual(["user"]);
+    // And nothing was persisted against the target thread either.
+    expect((await store.load("t_target"))?.messages).toHaveLength(1);
+  });
+});
+
+describe("background job resume routing", () => {
+  const completedJob = (id: string) => ({
+    id,
+    object: "response",
+    created_at: 0,
+    model: "gpt-5.2",
+    status: "completed",
+    output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "job answer" }] }],
+    usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+  });
+
+  it("lands another thread's job result in ITS stored snapshot, not the open thread", async () => {
+    const jobStore = createMemoryJobStore();
+    const threadStore = createMemoryThreadStore();
+    await threadStore.save(
+      threadSnapshot("t_away", [{ id: "u1", role: "user", parts: [{ type: "text", text: "long question" }] }]),
+    );
+    await jobStore.put({
+      handle: { provider: "openai", id: "resp_bg", model: "gpt-5.2", createdAt: Date.now() },
+      status: "in_progress",
+      threadId: "t_away",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+
+    // The mock transport answers the poll GET with a completed response.
+    const client = makeClient([completedJob("resp_bg")], { jobStore, threadStore });
+    await client.resumeBackgroundJobs();
+
+    // Current (fresh) thread got nothing.
+    expect(client.store.get().messages).toEqual([]);
+    // The away thread got the answer appended to its snapshot.
+    const away = await threadStore.load("t_away");
+    expect(away?.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(JSON.stringify(away?.messages[1]?.parts)).toContain("job answer");
   });
 });
 

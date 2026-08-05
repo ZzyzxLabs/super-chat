@@ -89,6 +89,13 @@ export class AgentClient {
   private pending = new Map<string, PendingDecision>();
   /** Meta of the last snapshot saved, so createdAt/title survive re-saves. */
   private threadMeta: ThreadMeta | undefined;
+  /**
+   * Bumped by every thread switch. A run captures the value it started under
+   * and stops writing to the store the moment they diverge — so a run dying
+   * from `openThread()`'s stop() cannot leak its error/status/commit into the
+   * thread the user just opened.
+   */
+  private generation = 0;
 
   constructor(config: AgentClientConfig) {
     this.config = config;
@@ -162,6 +169,7 @@ export class AgentClient {
   }
 
   private async run(messages: Message[], opts: { forceSkillIds?: string[] }): Promise<void> {
+    const gen = this.generation;
     this.controller = new AbortController();
     const mode = this.config.mode ?? "stream";
     this.store.set((s) => ({
@@ -206,13 +214,14 @@ export class AgentClient {
 
     try {
       for await (const event of runAgent(messages, runConfig)) {
+        if (gen !== this.generation) return; // thread switched under us — drop the rest
         this.apply(event);
       }
     } catch (e) {
-      this.store.set((s) => ({ ...s, status: "error", error: e }));
+      if (gen === this.generation) this.store.set((s) => ({ ...s, status: "error", error: e }));
     } finally {
       this.controller = null;
-      this.commitRun();
+      if (gen === this.generation) this.commitRun();
     }
   }
 
@@ -299,6 +308,7 @@ export class AgentClient {
     if (!store) return false;
     const stored = await store.load(id);
     if (!stored) return false;
+    this.generation += 1; // invalidate any in-flight run before replacing state
     this.stop();
     this.threadMeta = stored.meta;
     this.store.set((s) => ({
@@ -316,6 +326,7 @@ export class AgentClient {
 
   /** Start a fresh thread under a new id (`clear()` keeps the id; this doesn't). */
   newThread(): void {
+    this.generation += 1;
     this.stop();
     this.threadMeta = undefined;
     this.store.set((s) => ({
@@ -345,6 +356,13 @@ export class AgentClient {
 
   stop(): void {
     this.controller?.abort();
+    // A background job keeps running (and billing) server-side after a local
+    // abort — cancel it there too, best-effort.
+    const job = this.store.get().run.job;
+    if (job && this.config.provider.cancelJob && !["completed", "failed", "cancelled"].includes(job.status)) {
+      void this.config.provider.cancelJob(job.handle).catch(() => {});
+      void this.config.jobStore?.remove(job.handle.id);
+    }
     // Release any suspended tool so the run can unwind instead of hanging.
     for (const [callId, entry] of this.pending) {
       entry.resolve({ cardId: entry.card.id, callId, kind: "cancel", type: "cancel", at: Date.now() });
@@ -353,6 +371,7 @@ export class AgentClient {
   }
 
   clear(): void {
+    this.generation += 1;
     this.stop();
     this.store.set((s) => ({
       ...s,
@@ -367,25 +386,44 @@ export class AgentClient {
     this.persist();
   }
 
-  /** Re-poll background jobs from a previous session. Call on mount. */
+  /**
+   * Re-poll background jobs from a previous session. Call on mount.
+   *
+   * Results are routed by `StoredJob.threadId`: the current thread gets its
+   * results appended live; another thread's results are written into its
+   * stored snapshot (when a ThreadStore is configured), so an answer to
+   * thread A never gets pasted into thread B.
+   */
   async resumeBackgroundJobs(): Promise<void> {
     const store = this.config.jobStore;
     if (!store) return;
     const results = await resumeJobs(store, { [this.config.provider.id]: this.config.provider });
     this.store.set((s) => ({ ...s, jobs: results.map((r) => r.job) }));
 
-    for (const { snapshot } of results) {
-      if (snapshot.status === "completed" && snapshot.result) {
-        this.store.set((s) => ({ ...s, messages: [...s.messages, assistantMessage(snapshot.result!.parts)] }));
-      } else if (snapshot.status === "failed") {
-        this.store.set((s) => ({
-          ...s,
-          messages: [
-            ...s.messages,
-            assistantMessage([{ type: "text", text: `_${snapshot.error?.message ?? "A background job failed."}_` }]),
-          ],
-        }));
+    for (const { job, snapshot } of results) {
+      const parts: ContentPart[] | null =
+        snapshot.status === "completed" && snapshot.result
+          ? snapshot.result.parts
+          : snapshot.status === "failed"
+            ? [{ type: "text", text: `_${snapshot.error?.message ?? "A background job failed."}_` }]
+            : null;
+      if (!parts) continue;
+
+      const currentId = this.store.get().id;
+      if (!job.threadId || job.threadId === currentId) {
+        this.store.set((s) => ({ ...s, messages: [...s.messages, assistantMessage(parts)] }));
+        if (job.threadId === currentId) this.persist();
+        continue;
       }
+
+      // The job belongs to a thread that is not open. Land the result there.
+      const threads = this.config.threadStore;
+      if (!threads) continue; // nowhere to put it; the handle was already reaped
+      const stored = await threads.load(job.threadId);
+      if (!stored) continue;
+      await threads.save(
+        threadSnapshot(job.threadId, [...stored.messages, assistantMessage(parts)], stored.meta),
+      );
     }
   }
 }

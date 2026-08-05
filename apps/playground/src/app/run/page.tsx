@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AgentClient, AgentProvider, useAgentClient, useAgentState, useAttachments, useThread, useThreadList } from "@agentloom/react";
+import { AgentClient, AgentProvider, useAgentClient, useAgentState, useAttachments, useJobs, useThread, useThreadList } from "@agentloom/react";
 import { BUILTIN_RENDERERS, CardRendererProvider, ContextInspector, Composer, Thread } from "@agentloom/ui";
 import type { RunEvent, RunMode, StoredFile } from "@agentloom/core";
 import {
@@ -319,6 +319,9 @@ function Examples() {
  * a developer evaluating the framework needs to see its shape.
  */
 function EventStream() {
+  // Also resumes background jobs from a previous session (one-shot on mount) —
+  // without this call, a persisted job handle would never be polled again.
+  const jobs = useJobs();
   const run = useAgentState((s) => s.run);
   const [events, setEvents] = useState<{ type: string; detail: string }[]>([]);
   const seen = useRef(0);
@@ -336,11 +339,14 @@ function EventStream() {
     for (const c of run.cards) next.push({ type: "card", detail: (c.spec as { kind?: string }).kind ?? "?" });
     if (run.pendingCard) next.push({ type: "awaiting-user", detail: (run.pendingCard.spec as { kind?: string }).kind ?? "?" });
     if (run.job) next.push({ type: "job-status", detail: `${run.job.handle.id.slice(0, 14)}… ${run.job.status}` });
+    for (const j of jobs) {
+      if (j.handle.id !== run.job?.handle.id) next.push({ type: "job-resumed", detail: `${j.handle.id.slice(0, 14)}… ${j.status}` });
+    }
     if (run.usage.totalTokens) next.push({ type: "usage", detail: `${run.usage.totalTokens} tok total` });
     if (run.status === "done") next.push({ type: "run-finish", detail: `${run.finishReason} · ${run.steps} step(s)` });
     setEvents(next);
     seen.current = next.length;
-  }, [run]);
+  }, [run, jobs]);
 
   const cls = (t: string) =>
     t.startsWith("tool") ? "tool" : t === "card" ? "card" : t === "awaiting-user" ? "user" : t === "error" ? "error" : "";
