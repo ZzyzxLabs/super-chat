@@ -97,11 +97,13 @@ export { createMemoryFileStore, createLocalFileStore, type FileStore, type Store
 export {
   createMemoryThreadStore,
   createLocalThreadStore,
+  createRestThreadStore,
   threadSnapshot,
   THREAD_SCHEMA_VERSION,
   type ThreadStore,
   type StoredThread,
   type ThreadMeta,
+  type RestThreadStoreConfig,
 } from "./runtime/threads.js";
 
 // memory & retrieval seams

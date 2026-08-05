@@ -10,8 +10,10 @@
 // derived context. Context is derived, never accumulated — persisting it would
 // freeze one turn's derivation into every later turn.
 //
-// A server-backed store is four fetch calls against this same interface; only
-// memory and localStorage ship here.
+// Three implementations ship: memory, localStorage, and REST
+// (`createRestThreadStore`) — the last one so "bring your own backend" is a
+// config line rather than an exercise, and so the interface is proven against
+// something that isn't synchronous key-value storage.
 
 import { linkLinear } from "../content/branching.js";
 import type { Message } from "../content/types.js";
@@ -227,6 +229,99 @@ export function createLocalThreadStore(prefix = "agentloom:threads"): ThreadStor
         // removeItem does not throw for quota; being defensive costs nothing.
       }
       writeIndex(readIndex().filter((m) => m.id !== id));
+    },
+  };
+}
+
+export type RestThreadStoreConfig = {
+  /** Base path of your thread API, e.g. "/api/threads". */
+  url: string;
+  /** Extra headers (auth, CSRF). A function is called per request. */
+  headers?: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>);
+  credentials?: RequestCredentials;
+  fetchImpl?: typeof fetch;
+  /**
+   * Called when a request fails. Default: swallow. Persistence is
+   * fire-and-forget at the call site, so a thrown error would surface as an
+   * unhandled rejection rather than anything a user can act on — but a host
+   * that wants telemetry needs the hook.
+   */
+  onError?: (error: unknown, op: "list" | "load" | "save" | "remove") => void;
+};
+
+/**
+ * REST-backed store — the "bring your own backend" implementation.
+ *
+ * The wire contract, four calls:
+ *   GET    {url}          → ThreadMeta[]
+ *   GET    {url}/{id}     → StoredThread (404 = absent, not an error)
+ *   PUT    {url}/{id}     ← StoredThread
+ *   DELETE {url}/{id}
+ *
+ * Reads stay defensive in the same way the localStorage store is: a failed or
+ * malformed response degrades to "not found" / "empty list" rather than
+ * throwing into a render or a run. Records still go through `migrate`, so a
+ * server that stored v1 payloads keeps working.
+ */
+export function createRestThreadStore(config: RestThreadStoreConfig): ThreadStore {
+  const doFetch = config.fetchImpl ?? globalThis.fetch;
+  const base = config.url.replace(/\/$/, "");
+  const path = (id: string) => `${base}/${encodeURIComponent(id)}`;
+
+  const headers = async (): Promise<Record<string, string>> =>
+    typeof config.headers === "function" ? await config.headers() : (config.headers ?? {});
+
+  const request = async (input: string, init: RequestInit, op: "list" | "load" | "save" | "remove"): Promise<Response | undefined> => {
+    try {
+      const res = await doFetch(input, {
+        ...init,
+        headers: { ...(init.body ? { "content-type": "application/json" } : {}), ...(await headers()), ...init.headers },
+        credentials: config.credentials ?? "same-origin",
+      });
+      // 404 on load is a legitimate "no such thread", not a failure.
+      if (!res.ok && !(op === "load" && res.status === 404)) {
+        config.onError?.(new Error(`Thread store ${op} failed: ${res.status}`), op);
+        return undefined;
+      }
+      return res;
+    } catch (e) {
+      config.onError?.(e, op);
+      return undefined;
+    }
+  };
+
+  return {
+    async list() {
+      const res = await request(base, { method: "GET" }, "list");
+      if (!res) return [];
+      try {
+        const parsed = (await res.json()) as unknown;
+        return Array.isArray(parsed)
+          ? (parsed as ThreadMeta[]).filter((m) => typeof m?.id === "string").sort((a, b) => b.updatedAt - a.updatedAt)
+          : [];
+      } catch (e) {
+        config.onError?.(e, "list");
+        return [];
+      }
+    },
+
+    async load(id) {
+      const res = await request(path(id), { method: "GET" }, "load");
+      if (!res || res.status === 404) return undefined;
+      try {
+        return migrate((await res.json()) as StoredThread);
+      } catch (e) {
+        config.onError?.(e, "load");
+        return undefined;
+      }
+    },
+
+    async save(thread) {
+      await request(path(thread.meta.id), { method: "PUT", body: JSON.stringify(thread) }, "save");
+    },
+
+    async remove(id) {
+      await request(path(id), { method: "DELETE" }, "remove");
     },
   };
 }

@@ -11,8 +11,9 @@ import {
   buildTransport,
   fileStore,
   jobStore,
-  threadStore,
+  threadStores,
   toolRegistry,
+  type ThreadBackend,
   type TransportMode,
   type Vendor,
 } from "@/agent/setup";
@@ -34,6 +35,8 @@ export default function RunPanel() {
   const [model, setModel] = useState(MODELS.openai[0]!);
   const [mode, setMode] = useState<RunMode>("stream");
   const [presets, setPresets] = useState<string[]>(["observer", "executor"]);
+  const [threadBackend, setThreadBackend] = useState<ThreadBackend>("local");
+  const threadStore = threadStores[threadBackend];
 
   // The SHARED registry singleton — tools imported on /tools are callable here.
   const tools = toolRegistry;
@@ -69,8 +72,10 @@ export default function RunPanel() {
       jobStore,
       threadStore,
     });
+    // Rebuilt when the persistence backend changes too — the thread list and
+    // hydration both read through the store the client holds.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider]);
+  }, [provider, threadBackend]);
 
   /** Upload (or reuse a previous upload of the same file) and stage the part. */
   const attachFile = async (picked: File) => {
@@ -127,6 +132,7 @@ export default function RunPanel() {
       if (target && target !== client.store.get().id) await client.openThread(target);
     })();
     return unsub;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [client]);
 
   return (
@@ -196,7 +202,7 @@ export default function RunPanel() {
           </div>
 
           <aside className="dev__runside">
-            <ThreadsPanel />
+            <ThreadsPanel backend={{ value: threadBackend, onChange: setThreadBackend }} />
             <EventStream />
             <ContextInspector />
           </aside>
@@ -210,7 +216,7 @@ export default function RunPanel() {
  * The thread picker — the ThreadStore demo. Snapshot-per-thread in
  * localStorage: reload the page and the conversation is still here.
  */
-function ThreadsPanel() {
+function ThreadsPanel({ backend }: { backend?: { value: ThreadBackend; onChange: (v: ThreadBackend) => void } }) {
   const { threads, activeId, open, create, remove } = useThreadList();
   const { isRunning } = useThread();
 
@@ -228,6 +234,20 @@ function ThreadsPanel() {
           + New
         </button>
       </div>
+      {backend ? (
+        <div className="dev__row" style={{ marginBottom: 6 }}>
+          <select
+            className="dev__select"
+            value={backend.value}
+            disabled={isRunning}
+            onChange={(e) => backend.onChange(e.target.value as ThreadBackend)}
+            title="Same ThreadStore interface, different backend"
+          >
+            <option value="local">localStorage</option>
+            <option value="server">Server (REST)</option>
+          </select>
+        </div>
+      ) : null}
       {threads.length === 0 ? (
         <p className="al-muted" style={{ fontSize: 12 }}>
           Threads persist to localStorage as you chat.

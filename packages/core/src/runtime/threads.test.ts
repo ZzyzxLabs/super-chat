@@ -4,9 +4,50 @@ import {
   THREAD_SCHEMA_VERSION,
   createLocalThreadStore,
   createMemoryThreadStore,
+  createRestThreadStore,
   threadSnapshot,
+  type StoredThread,
   type ThreadStore,
 } from "./threads.js";
+
+/** An in-memory HTTP server implementing the REST store's four-call contract. */
+function fakeRestBackend(opts: { failOn?: "list" | "load" | "save" | "remove" } = {}) {
+  const rows = new Map<string, StoredThread>();
+  const seen: { method: string; url: string; auth?: string }[] = [];
+  const fetchImpl = (async (url: string, init: RequestInit = {}) => {
+    const method = init.method ?? "GET";
+    const auth = (init.headers as Record<string, string> | undefined)?.["authorization"];
+    seen.push({ method, url, ...(auth ? { auth } : {}) });
+    const id = url.split("/").pop()!;
+    const isCollection = url.endsWith("/threads");
+
+    if (method === "GET" && isCollection) {
+      if (opts.failOn === "list") return new Response("boom", { status: 500 });
+      return new Response(JSON.stringify([...rows.values()].map((t) => t.meta)), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    if (method === "GET") {
+      if (opts.failOn === "load") return new Response("boom", { status: 500 });
+      const row = rows.get(decodeURIComponent(id));
+      return row
+        ? new Response(JSON.stringify(row), { status: 200, headers: { "content-type": "application/json" } })
+        : new Response(null, { status: 404 });
+    }
+    if (method === "PUT") {
+      if (opts.failOn === "save") return new Response("boom", { status: 500 });
+      rows.set(decodeURIComponent(id), JSON.parse(init.body as string) as StoredThread);
+      return new Response(null, { status: 204 });
+    }
+    if (method === "DELETE") {
+      rows.delete(decodeURIComponent(id));
+      return new Response(null, { status: 204 });
+    }
+    return new Response(null, { status: 405 });
+  }) as unknown as typeof fetch;
+  return { fetchImpl, rows, seen };
+}
 
 const msg = (role: Message["role"], text: string, id = `${role}-${text}`): Message => ({
   id,
@@ -84,6 +125,83 @@ storeContract("memory", () => createMemoryThreadStore());
 storeContract("localStorage", () => {
   fakeLocalStorage();
   return createLocalThreadStore("test:threads");
+});
+// The REST impl passes the SAME contract as the two local ones — which is the
+// point of running it through this suite rather than testing it in isolation.
+storeContract("rest", () => createRestThreadStore({ url: "http://api.local/threads", fetchImpl: fakeRestBackend().fetchImpl }));
+
+describe("createRestThreadStore", () => {
+  it("uses the documented four calls and url-encodes ids", async () => {
+    const backend = fakeRestBackend();
+    const store = createRestThreadStore({ url: "http://api.local/threads", fetchImpl: backend.fetchImpl });
+
+    await store.save(threadSnapshot("t 1", [msg("user", "hello")]));
+    expect(await store.list()).toHaveLength(1);
+    expect((await store.load("t 1"))?.messages).toHaveLength(1);
+    await store.remove("t 1");
+    expect(await store.load("t 1")).toBeUndefined();
+
+    expect(backend.seen.map((r) => `${r.method} ${r.url.replace("http://api.local", "")}`)).toEqual([
+      "PUT /threads/t%201",
+      "GET /threads",
+      "GET /threads/t%201",
+      "DELETE /threads/t%201",
+      "GET /threads/t%201",
+    ]);
+  });
+
+  it("sends host headers, including a per-request function", async () => {
+    const backend = fakeRestBackend();
+    let calls = 0;
+    const store = createRestThreadStore({
+      url: "http://api.local/threads",
+      fetchImpl: backend.fetchImpl,
+      headers: () => {
+        calls += 1;
+        return { authorization: `Bearer token-${calls}` };
+      },
+    });
+    await store.list();
+    await store.list();
+    expect(backend.seen.map((r) => r.auth)).toEqual(["Bearer token-1", "Bearer token-2"]);
+  });
+
+  it("degrades to empty/undefined on transport failure instead of throwing", async () => {
+    const errors: string[] = [];
+    const store = createRestThreadStore({
+      url: "http://api.local/threads",
+      fetchImpl: fakeRestBackend({ failOn: "list" }).fetchImpl,
+      onError: (_e, op) => errors.push(op),
+    });
+    // A failing store must not take down the render that called list().
+    expect(await store.list()).toEqual([]);
+    expect(errors).toEqual(["list"]);
+  });
+
+  it("treats 404 as absent — not an error the host hears about", async () => {
+    const errors: string[] = [];
+    const store = createRestThreadStore({
+      url: "http://api.local/threads",
+      fetchImpl: fakeRestBackend().fetchImpl,
+      onError: (_e, op) => errors.push(op),
+    });
+    expect(await store.load("missing")).toBeUndefined();
+    expect(errors).toEqual([]);
+  });
+
+  it("migrates a v1 payload served by the backend", async () => {
+    const backend = fakeRestBackend();
+    backend.rows.set("t_old", {
+      version: 1,
+      meta: { id: "t_old", createdAt: 1, updatedAt: 2, messageCount: 2 },
+      messages: [msg("user", "hi", "u1"), msg("assistant", "hello", "a1")],
+    } as unknown as StoredThread);
+    const store = createRestThreadStore({ url: "http://api.local/threads", fetchImpl: backend.fetchImpl });
+
+    const loaded = await store.load("t_old");
+    expect(loaded?.version).toBe(THREAD_SCHEMA_VERSION);
+    expect(loaded?.headId).toBe("a1");
+  });
 });
 
 describe("createLocalThreadStore", () => {

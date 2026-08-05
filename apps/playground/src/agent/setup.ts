@@ -21,6 +21,7 @@ import {
   createOpenAIProvider,
   createProxyTransport,
   createRememberTool,
+  createRestThreadStore,
   createRetrievalSource,
   type Provider,
   type Transport,
@@ -166,7 +167,24 @@ export function buildContextBuilder(contextWindow = 128_000): ContextBuilder {
 
 export const jobStore = createLocalJobStore("agentloom:playground:jobs");
 export const fileStore = createLocalFileStore("agentloom:playground:files");
-export const threadStore = createLocalThreadStore("agentloom:playground:threads");
+export type ThreadBackend = "local" | "server";
+
+const localThreads = createLocalThreadStore("agentloom:playground:threads");
+const serverThreads = createRestThreadStore({
+  url: "/api/threads",
+  // Surfacing the failure beats a silently un-saved thread; a real host would
+  // report this to its telemetry instead of the console.
+  onError: (e, op) => console.warn(`[threads] ${op} failed`, e),
+});
+
+/** Same `ThreadStore` interface either way — which is the point of the seam. */
+export const threadStores: Record<ThreadBackend, typeof localThreads> = {
+  local: localThreads,
+  server: serverThreads,
+};
+
+/** Default backend; the /run panel can switch at runtime. */
+export const threadStore = localThreads;
 
 export const MODELS: Record<Vendor, string[]> = {
   openai: ["gpt-5.2", "gpt-5.2-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"],
