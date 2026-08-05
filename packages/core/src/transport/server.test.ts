@@ -120,6 +120,46 @@ describe("createProxyHandler", () => {
     expect(res.status).toBe(200);
   });
 
+  it("forwards sanitized envelope headers and passes mcp-session-id back", async () => {
+    const upstream = vi.fn(
+      async () => new Response("{}", { status: 200, headers: { "content-type": "application/json", "mcp-session-id": "sess_9" } }),
+    );
+    const res = await createProxyHandler(config(upstream as never))(
+      envelope({
+        headers: {
+          "Mcp-Session-Id": "sess_9",
+          "OpenAI-Beta": "assistants=v2",
+          // None of these may reach upstream — the credential is the operator's.
+          authorization: "Bearer sk-attacker",
+          cookie: "session=stolen",
+          host: "evil.example",
+        },
+      }),
+    );
+
+    const [, init] = upstream.mock.calls[0] as unknown as [string, RequestInit];
+    const headers = init.headers as Record<string, string>;
+    expect(headers["mcp-session-id"]).toBe("sess_9");
+    expect(headers["openai-beta"]).toBe("assistants=v2");
+    expect(headers["authorization"]).toBe("Bearer sk-test");
+    expect(headers["cookie"]).toBeUndefined();
+    expect(headers["host"]).toBeUndefined();
+    // …and the session id assigned upstream is visible to the client.
+    expect(res.headers.get("mcp-session-id")).toBe("sess_9");
+  });
+
+  it("omits the authorization header entirely for a keyless provider", async () => {
+    // An MCP server with no bearer auth must not receive "Bearer ".
+    const upstream = okUpstream();
+    await createProxyHandler({
+      providers: { mcp: { baseUrl: "http://mcp.local", apiKey: "", allowPaths: ["POST /"] } },
+      fetchImpl: upstream as never,
+    })(envelope({ provider: "mcp", path: "/" }));
+
+    const [, init] = upstream.mock.calls[0] as unknown as [string, RequestInit];
+    expect((init.headers as Record<string, string>)["authorization"]).toBeUndefined();
+  });
+
   it("round-trips a request built by ProxyTransport", async () => {
     // The two halves must agree on the envelope shape; this is the contract test.
     const upstream = okUpstream();

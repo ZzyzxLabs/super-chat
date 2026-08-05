@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { McpClient, createHttpTransport, importMcpTools } from "@agentloom/core";
 import { PanelHeader } from "@/components/Shell";
 import { buildToolRegistry } from "@/agent/setup";
 
@@ -11,9 +12,36 @@ export default function ToolsPanel() {
   const [enabled, setEnabled] = useState<string[]>(["observer"]);
   const [open, setOpen] = useState<string | null>(null);
 
+  const [mcpUrl, setMcpUrl] = useState("/api/mcp");
+  const [importing, setImporting] = useState(false);
+  const [imported, setImported] = useState<string[]>([]);
+  const [allowImported, setAllowImported] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  const importFromMcp = async () => {
+    setImporting(true);
+    setImportError(null);
+    try {
+      const client = new McpClient({ transport: createHttpTransport({ baseUrl: mcpUrl }) });
+      const defs = await importMcpTools(client);
+      // NO preset: imported tools are skill-gated/private, like every other
+      // domain tool. Import grants existence, never authority.
+      registry.registerAll(defs);
+      setImported(defs.map((d) => d.name));
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const resolution = {
+    presets: enabled,
+    ...(allowImported && imported.length ? { allow: imported } : {}),
+  };
   const all = registry.list();
-  const exposed = new Set(registry.resolve({ presets: enabled }).map((t) => t.name));
-  const specs = registry.toSpecs(registry.resolve({ presets: enabled }));
+  const exposed = new Set(registry.resolve(resolution).map((t) => t.name));
+  const specs = registry.toSpecs(registry.resolve(resolution));
 
   return (
     <div className="dev__page">
@@ -109,6 +137,52 @@ export default function ToolsPanel() {
         <pre className="al-pre dev__code" style={{ maxHeight: 420 }}>
           {JSON.stringify(specs, null, 2)}
         </pre>
+      </section>
+
+      <section className="dev__section">
+        <h2 className="dev__section-title">Import from MCP</h2>
+        <p className="dev__section-note">
+          <code className="al-mono">importMcpTools()</code> maps an MCP server&apos;s tool list onto{" "}
+          <code className="al-mono">ToolDefinition</code>s — namespaced, with an executor that calls back through the
+          server. Imported tools register with <strong>no preset</strong>, so they land as{" "}
+          <em>private</em> in the table above: visible to nothing until a skill (or the allow toggle below, standing in
+          for one) surfaces them. Import grants existence, never authority. The default URL is this playground&apos;s own
+          mock MCP route — no key, real HTTP.
+        </p>
+        <div className="dev__row">
+          <input
+            className="dev__select"
+            style={{ minWidth: "22ch" }}
+            value={mcpUrl}
+            onChange={(e) => setMcpUrl(e.target.value)}
+            placeholder="/api/mcp"
+          />
+          <button type="button" className="al-btn al-btn--sm" disabled={importing || !mcpUrl.trim()} onClick={() => void importFromMcp()}>
+            {importing ? "Connecting…" : imported.length ? "Re-import" : "Connect & import"}
+          </button>
+          {imported.length ? (
+            <label className="dev__toggle" title="What a matched skill's `tools` list would do">
+              <input type="checkbox" checked={allowImported} onChange={(e) => setAllowImported(e.target.checked)} />
+              allow imported (as a skill would)
+            </label>
+          ) : null}
+        </div>
+        {importError ? (
+          <p className="al-muted" style={{ color: "var(--al-negative, #c00)", fontSize: 12 }}>
+            {importError}
+          </p>
+        ) : null}
+        {imported.length ? (
+          <p className="al-muted" style={{ fontSize: 12 }}>
+            Imported {imported.length} tool{imported.length === 1 ? "" : "s"}:{" "}
+            {imported.map((n) => (
+              <code key={n} className="al-mono" style={{ marginRight: 6 }}>
+                {n}
+              </code>
+            ))}
+            — now toggle the allow switch and watch the Exposed column.
+          </p>
+        ) : null}
       </section>
 
       <section className="dev__section">

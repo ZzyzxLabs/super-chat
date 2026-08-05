@@ -103,6 +103,9 @@ export {
   type ThreadMeta,
 } from "./runtime/threads.js";
 
+// mcp
+export * from "./mcp/index.js";
+
 // providers — the OpenAI adapter is also available at "@agentloom/core/openai"
 // for hosts that want to keep it out of a bundle that never calls OpenAI.
 export { createOpenAIProvider, type OpenAIProviderConfig, type OpenAIDialect } from "./providers/openai/adapter.js";

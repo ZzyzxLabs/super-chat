@@ -64,6 +64,16 @@ function entryMatches(entry: string, method: string, path: string): boolean {
   return pathMatches(entry, path);
 }
 
+/** Never forwarded from the client — the credential comes from the operator. */
+const STRIPPED_HEADERS: ReadonlySet<string> = new Set([
+  "authorization",
+  "proxy-authorization",
+  "cookie",
+  "host",
+  "content-length",
+  "content-type",
+]);
+
 const isSerializedMultipart = (b: unknown): b is SerializedMultipartBody =>
   typeof b === "object" &&
   b !== null &&
@@ -110,10 +120,20 @@ export function createProxyHandler(config: ProxyHandlerConfig) {
     }
 
     const apiKey = typeof provider.apiKey === "function" ? await provider.apiKey() : provider.apiKey;
-    const headers: Record<string, string> = {
-      authorization: `Bearer ${apiKey}`,
-      ...provider.headers,
-    };
+    const headers: Record<string, string> = {};
+    // Client-requested upstream headers (org ids, beta flags, an MCP session
+    // id) go in first, minus anything credential-shaped — then the key and the
+    // operator's own headers are applied ON TOP, so a client can request
+    // headers but never substitute the credential.
+    for (const [k, v] of Object.entries(envelope.headers ?? {})) {
+      const key = k.toLowerCase();
+      if (STRIPPED_HEADERS.has(key)) continue;
+      headers[key] = v;
+    }
+    // An empty key means "this upstream has no bearer auth" (a local MCP
+    // server) rather than `Bearer ` garbage.
+    if (apiKey) headers["authorization"] = `Bearer ${apiKey}`;
+    for (const [k, v] of Object.entries(provider.headers ?? {})) headers[k.toLowerCase()] = v;
     if (envelope.stream) headers["accept"] = "text/event-stream";
 
     let body: BodyInit | undefined;
@@ -159,6 +179,10 @@ export function createProxyHandler(config: ProxyHandlerConfig) {
     if (contentType) outHeaders.set("content-type", contentType);
     const retryAfter = upstream.headers.get("retry-after");
     if (retryAfter) outHeaders.set("retry-after", retryAfter);
+    // MCP Streamable HTTP assigns the session on the initialize response; the
+    // client must see it to send it back on every later call.
+    const mcpSession = upstream.headers.get("mcp-session-id");
+    if (mcpSession) outHeaders.set("mcp-session-id", mcpSession);
     if (envelope.stream) {
       outHeaders.set("cache-control", "no-cache, no-transform");
       outHeaders.set("connection", "keep-alive");

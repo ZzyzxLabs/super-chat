@@ -28,6 +28,13 @@ export type ProxyEnvelope = {
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined>;
   stream?: boolean;
+  /**
+   * Per-request headers for the UPSTREAM call (org ids, beta flags, an MCP
+   * session id). The server half forwards them after stripping credential
+   * headers and then applies its own key on top — a client can request
+   * headers, never substitute the credential.
+   */
+  headers?: Record<string, string>;
 };
 
 /**
@@ -70,6 +77,10 @@ export function createProxyTransport(config: ProxyTransportConfig): Transport {
         body,
         query: req.query,
         stream: req.stream,
+        // Inside the envelope, not on the outer request — the BFF builds the
+        // upstream headers itself, and anything on the outer request is
+        // between the browser and the BFF (cookies, CSRF), not for upstream.
+        ...(req.headers ? { headers: req.headers } : {}),
       };
 
       // Always POST the envelope, even for provider-side GETs (job polling):
@@ -81,7 +92,6 @@ export function createProxyTransport(config: ProxyTransportConfig): Transport {
           "content-type": "application/json",
           ...(req.stream ? { accept: "text/event-stream" } : {}),
           ...extra,
-          ...req.headers,
         },
         body: JSON.stringify(envelope),
         credentials: config.credentials ?? "same-origin",
