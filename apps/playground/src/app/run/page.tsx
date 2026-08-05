@@ -14,6 +14,7 @@ import {
   threadStore,
   toolRegistry,
   type TransportMode,
+  type Vendor,
 } from "@/agent/setup";
 
 const EXAMPLES = [
@@ -28,8 +29,9 @@ const EXAMPLES = [
 
 export default function RunPanel() {
   const [transportMode, setTransportMode] = useState<TransportMode>("demo");
+  const [vendor, setVendor] = useState<Vendor>("openai");
   const [apiKey, setApiKey] = useState("");
-  const [model, setModel] = useState(MODELS[0]!);
+  const [model, setModel] = useState(MODELS.openai[0]!);
   const [mode, setMode] = useState<RunMode>("stream");
   const [presets, setPresets] = useState<string[]>(["observer", "executor"]);
 
@@ -39,13 +41,21 @@ export default function RunPanel() {
 
   // BYOK with an empty key falls back to demo — track that as a VISIBLE fact,
   // not a silent one, so nobody attaches a demo-minted file id believing it is
-  // real.
-  const effectiveMode: TransportMode = transportMode === "direct" && !apiKey.trim() ? "demo" : transportMode;
+  // real. The demo script speaks OpenAI's wire shape, so Anthropic has no demo
+  // mode: it falls back to the proxy instead.
+  const effectiveMode: TransportMode =
+    transportMode === "direct" && !apiKey.trim()
+      ? vendor === "anthropic"
+        ? "proxy"
+        : "demo"
+      : transportMode === "demo" && vendor === "anthropic"
+        ? "proxy"
+        : transportMode;
 
   const provider = useMemo(() => {
-    return buildProvider(buildTransport(effectiveMode, apiKey || undefined), effectiveMode);
+    return buildProvider(buildTransport(effectiveMode, vendor, apiKey || undefined), effectiveMode, vendor);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transportMode, transportMode === "direct" ? apiKey : "static"]);
+  }, [transportMode, vendor, transportMode === "direct" ? apiKey : "static"]);
 
   const client = useMemo(() => {
     return new AgentClient({
@@ -125,8 +135,22 @@ export default function RunPanel() {
         <div className="dev__run">
           <div className="dev__runmain">
             <div className="dev__runbar">
+              <select
+                className="dev__select"
+                value={vendor}
+                onChange={(e) => {
+                  const v = e.target.value as Vendor;
+                  setVendor(v);
+                  setModel(MODELS[v][0]!);
+                }}
+              >
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
               <select className="dev__select" value={transportMode} onChange={(e) => setTransportMode(e.target.value as TransportMode)}>
-                <option value="demo">Demo transport</option>
+                <option value="demo" disabled={vendor === "anthropic"}>
+                  Demo transport
+                </option>
                 <option value="proxy">Server proxy</option>
                 <option value="direct">BYOK direct</option>
               </select>
@@ -134,7 +158,7 @@ export default function RunPanel() {
                 <input className="dev__select" type="password" placeholder="sk-…" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
               ) : null}
               <select className="dev__select" value={model} onChange={(e) => setModel(e.target.value)}>
-                {MODELS.map((m) => (
+                {MODELS[vendor].map((m) => (
                   <option key={m} value={m}>
                     {m}
                   </option>

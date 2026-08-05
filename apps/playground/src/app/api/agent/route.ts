@@ -34,15 +34,31 @@ const handler = createProxyHandler({
         "POST /files",
       ],
     },
+    anthropic: {
+      baseUrl: process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com/v1",
+      apiKey: () => {
+        const key = process.env.ANTHROPIC_API_KEY;
+        if (!key) throw new Error("ANTHROPIC_API_KEY is not set. Add one to .env.local.");
+        return key;
+      },
+      // Anthropic authenticates with x-api-key, not a Bearer header.
+      authStyle: "x-api-key",
+      allowPaths: ["POST /messages"],
+    },
   },
   // A real deployment authenticates the session and meters here. The playground
   // is single-user and local, so it only refuses when the key is missing.
-  authorize: () =>
-    Boolean(process.env.OPENAI_API_KEY) ||
-    new Response(
-      JSON.stringify({ error: { message: "Server has no OPENAI_API_KEY. Add one to .env.local, or switch this page to BYOK mode." } }),
-      { status: 503, headers: { "content-type": "application/json" } },
-    ),
+  authorize: (_req, envelope) => {
+    const key = envelope.provider === "anthropic" ? process.env.ANTHROPIC_API_KEY : process.env.OPENAI_API_KEY;
+    const name = envelope.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
+    return (
+      Boolean(key) ||
+      new Response(
+        JSON.stringify({ error: { message: `Server has no ${name}. Add one to .env.local, or switch this page to BYOK mode.` } }),
+        { status: 503, headers: { "content-type": "application/json" } },
+      )
+    );
+  },
 });
 
 export async function POST(request: Request): Promise<Response> {

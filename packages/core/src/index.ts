@@ -110,7 +110,9 @@ export * from "./mcp/index.js";
 // providers — the OpenAI adapter is also available at "@agentloom/core/openai"
 // for hosts that want to keep it out of a bundle that never calls OpenAI.
 export { createOpenAIProvider, type OpenAIProviderConfig, type OpenAIDialect } from "./providers/openai/adapter.js";
+export { createAnthropicProvider, type AnthropicProviderConfig } from "./providers/anthropic/adapter.js";
 // The request builders are exported deliberately: they are pure functions, and
 // being able to assert on the exact bytes a dialect produces is the difference
 // between "we craft requests correctly" as a claim and as something you can test.
 export { buildResponsesRequest, buildChatRequest } from "./providers/openai/map-in.js";
+export { buildAnthropicRequest } from "./providers/anthropic/map-in.js";

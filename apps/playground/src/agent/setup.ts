@@ -9,6 +9,7 @@ import {
   ContextBuilder,
   SkillRegistry,
   ToolRegistry,
+  createAnthropicProvider,
   createBuiltinTools,
   createDirectTransport,
   createLocalFileStore,
@@ -25,6 +26,7 @@ import { LEGAL_TOOLS, MARKETING_TOOLS } from "./tools-domains";
 import { SKILLS } from "./skills";
 
 export type TransportMode = "demo" | "proxy" | "direct";
+export type Vendor = "openai" | "anthropic";
 
 export const cards = new CardRegistry(BUILTIN_CARDS);
 export const skills = new SkillRegistry(SKILLS, { maxMatched: 3 });
@@ -67,15 +69,18 @@ function populateToolRegistry(registry: ToolRegistry): void {
  */
 export const toolRegistry = buildToolRegistry();
 
-export function buildTransport(mode: TransportMode, apiKey?: string): Transport {
+export function buildTransport(mode: TransportMode, vendor: Vendor = "openai", apiKey?: string): Transport {
   // Demo replaces only the network. The adapter, runtime, tools, cards and
-  // context builder above it are the real ones.
+  // context builder above it are the real ones. (The demo script speaks the
+  // OpenAI Responses shape, so demo mode always pairs with the OpenAI adapter.)
   if (mode === "demo") return createDemoTransport();
   if (mode === "direct") {
     if (!apiKey) throw new Error("BYOK mode needs an API key.");
     return createDirectTransport({
-      baseUrl: "https://api.openai.com/v1",
+      baseUrl: vendor === "anthropic" ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1",
       apiKey,
+      // Anthropic authenticates with x-api-key, not a Bearer header.
+      ...(vendor === "anthropic" ? { authStyle: "x-api-key" as const } : {}),
       // Named to make the trade-off explicit: this ships the key to the client.
       dangerouslyAllowBrowser: true,
     });
@@ -83,12 +88,14 @@ export function buildTransport(mode: TransportMode, apiKey?: string): Transport 
   return createProxyTransport({ url: "/api/agent" });
 }
 
-export function buildProvider(transport: Transport, mode: TransportMode = "proxy"): Provider {
+export function buildProvider(transport: Transport, mode: TransportMode = "proxy", vendor: Vendor = "openai"): Provider {
   // Demo gets its OWN provider id: providerFile refs are stamped with the id
   // that minted them, so a fake `file_demo_N` attached in demo mode degrades
   // to a readable placeholder when the thread is replayed against real
   // OpenAI, instead of 400ing the thread forever.
-  return createOpenAIProvider({ transport, dialect: "responses", ...(mode === "demo" ? { id: "demo" } : {}) });
+  if (mode === "demo") return createOpenAIProvider({ transport, dialect: "responses", id: "demo" });
+  if (vendor === "anthropic") return createAnthropicProvider({ transport });
+  return createOpenAIProvider({ transport, dialect: "responses" });
 }
 
 export function buildContextBuilder(contextWindow = 128_000): ContextBuilder {
@@ -108,4 +115,7 @@ export const jobStore = createLocalJobStore("agentloom:playground:jobs");
 export const fileStore = createLocalFileStore("agentloom:playground:files");
 export const threadStore = createLocalThreadStore("agentloom:playground:threads");
 
-export const MODELS = ["gpt-5.2", "gpt-5.2-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"];
+export const MODELS: Record<Vendor, string[]> = {
+  openai: ["gpt-5.2", "gpt-5.2-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"],
+  anthropic: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
+};

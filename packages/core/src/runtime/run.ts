@@ -360,8 +360,15 @@ function collectStream(stream: AsyncIterable<StreamEvent>) {
         }
         case "reasoning-delta": {
           const last = parts[parts.length - 1];
-          if (last?.type === "reasoning") last.text += event.delta;
-          else parts.push({ type: "reasoning", text: event.delta, ...(event.signature ? { signature: event.signature } : {}) });
+          if (last?.type === "reasoning") {
+            last.text += event.delta;
+            // Anthropic's replay token (signature_delta) arrives at the END of
+            // a thinking block — stamp it onto the accumulated part, or replay
+            // never works in stream mode.
+            if (event.signature) last.signature = event.signature;
+          } else {
+            parts.push({ type: "reasoning", text: event.delta, ...(event.signature ? { signature: event.signature } : {}) });
+          }
           break;
         }
         case "tool-call-end":

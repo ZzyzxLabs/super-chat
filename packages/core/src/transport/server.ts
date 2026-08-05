@@ -16,6 +16,12 @@ import type { ProxyEnvelope, SerializedMultipartBody } from "./proxy.js";
 export type ProxyProviderConfig = {
   baseUrl: string;
   apiKey: string | (() => string | Promise<string>);
+  /**
+   * How the key rides on the upstream request. "bearer" (default) sends
+   * `Authorization: Bearer <key>`; "x-api-key" sends the `x-api-key` header
+   * (Anthropic's Messages API).
+   */
+  authStyle?: "bearer" | "x-api-key";
   // Allowed provider paths. A single `*` matches one segment; a double `*`
   // matches the remaining path. An entry may carry a method prefix
   // ("POST /files") to allow only that method — without one, any method
@@ -68,6 +74,7 @@ function entryMatches(entry: string, method: string, path: string): boolean {
 const STRIPPED_HEADERS: ReadonlySet<string> = new Set([
   "authorization",
   "proxy-authorization",
+  "x-api-key",
   "cookie",
   "host",
   "content-length",
@@ -132,7 +139,10 @@ export function createProxyHandler(config: ProxyHandlerConfig) {
     }
     // An empty key means "this upstream has no bearer auth" (a local MCP
     // server) rather than `Bearer ` garbage.
-    if (apiKey) headers["authorization"] = `Bearer ${apiKey}`;
+    if (apiKey) {
+      if (provider.authStyle === "x-api-key") headers["x-api-key"] = apiKey;
+      else headers["authorization"] = `Bearer ${apiKey}`;
+    }
     for (const [k, v] of Object.entries(provider.headers ?? {})) headers[k.toLowerCase()] = v;
     if (envelope.stream) headers["accept"] = "text/event-stream";
 

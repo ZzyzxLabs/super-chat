@@ -14,6 +14,12 @@ export type DirectTransportConfig = {
   baseUrl: string;
   /** Static key, or a getter for keys that rotate / come from a keychain. */
   apiKey: string | (() => string | Promise<string>);
+  /**
+   * How the key rides on the wire. "bearer" (default) sends
+   * `Authorization: Bearer <key>`; "x-api-key" sends the `x-api-key` header —
+   * what Anthropic's Messages API expects.
+   */
+  authStyle?: "bearer" | "x-api-key";
   /** Sent on every request; merged under per-request headers. */
   headers?: Record<string, string>;
   /**
@@ -49,7 +55,7 @@ export function createDirectTransport(config: DirectTransportConfig): Transport 
     async fetch(req: TransportRequest): Promise<Response> {
       const apiKey = typeof config.apiKey === "function" ? await config.apiKey() : config.apiKey;
       const headers: Record<string, string> = {
-        authorization: `Bearer ${apiKey}`,
+        ...(config.authStyle === "x-api-key" ? { "x-api-key": apiKey } : { authorization: `Bearer ${apiKey}` }),
         ...config.headers,
         ...req.headers,
       };
