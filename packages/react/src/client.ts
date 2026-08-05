@@ -56,6 +56,18 @@ export type AgentClientConfig = {
   temperature?: number;
   maxOutputTokens?: number;
   reasoning?: RunConfig["reasoning"];
+  // Full RunConfig surface — a React host must not get LESS control than a
+  // direct runAgent caller.
+  stopWhen?: RunConfig["stopWhen"];
+  toolTimeoutMs?: number;
+  useServerHistory?: boolean;
+  toolChoice?: RunConfig["toolChoice"];
+  responseFormat?: RunConfig["responseFormat"];
+  topP?: number;
+  stopSequences?: string[];
+  store?: boolean;
+  metadata?: Record<string, string>;
+  providerOptions?: RunConfig["providerOptions"];
   jobStore?: JobStore;
   /** When set, the thread is saved after each user and assistant turn. */
   threadStore?: ThreadStore;
@@ -151,6 +163,16 @@ export class AgentClient {
       temperature: this.config.temperature,
       maxOutputTokens: this.config.maxOutputTokens,
       reasoning: this.config.reasoning,
+      stopWhen: this.config.stopWhen,
+      toolTimeoutMs: this.config.toolTimeoutMs,
+      useServerHistory: this.config.useServerHistory,
+      toolChoice: this.config.toolChoice,
+      responseFormat: this.config.responseFormat,
+      topP: this.config.topP,
+      stopSequences: this.config.stopSequences,
+      store: this.config.store,
+      metadata: this.config.metadata,
+      providerOptions: this.config.providerOptions,
       signal: this.controller.signal,
       forceSkillIds: opts.forceSkillIds,
       onHostTool: this.config.onHostTool,

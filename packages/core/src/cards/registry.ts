@@ -115,7 +115,10 @@ export class CardRegistry {
 }
 
 let cardCounter = 0;
-export function makeCard(spec: CardSpec, callId?: string): Card {
+export function makeCard(spec: CardSpec, callId?: string, id?: string): Card {
+  // An explicit id means "replace that card": the reducer upserts by id, so
+  // reusing one turns an append into an in-place update (`updateCard`).
+  if (id) return { id, spec, ...(callId ? { callId } : {}) };
   cardCounter += 1;
   return { id: `card_${Date.now().toString(36)}${cardCounter.toString(36)}`, spec, ...(callId ? { callId } : {}) };
 }

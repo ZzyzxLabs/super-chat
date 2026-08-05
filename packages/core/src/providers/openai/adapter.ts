@@ -119,7 +119,34 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
     if (req.tools?.length && !capabilities.tools) {
       throw new AgentError("not-supported", `Provider "${id}" does not support tools.`, { provider: id });
     }
+    // Media guards: a text-only compatible endpoint should fail HERE with a
+    // capability error, not upstream with an inscrutable 400.
+    const unsupported = (type: "image" | "file" | "audio") =>
+      req.messages.some((m) => m.parts.some((p) => p.type === type));
+    if (!capabilities.images && unsupported("image")) {
+      throw new AgentError("not-supported", `Provider "${id}" does not accept image parts.`, { provider: id });
+    }
+    if (!capabilities.files && unsupported("file")) {
+      throw new AgentError("not-supported", `Provider "${id}" does not accept file parts.`, { provider: id });
+    }
+    if (!capabilities.audio && unsupported("audio")) {
+      throw new AgentError("not-supported", `Provider "${id}" does not accept audio parts.`, { provider: id });
+    }
   }
+
+  /** Apply declared capabilities to the request before it reaches a builder. */
+  function applyCapabilities(req: NormalizedRequest): NormalizedRequest {
+    if (capabilities.strictJsonSchema || !req.tools?.some((t) => t.strict)) return req;
+    // Strict mode on an endpoint that lacks it 400s; dropping the flag keeps
+    // the tool usable with plain (non-guaranteed) schema conformance.
+    return { ...req, tools: req.tools.map(({ strict: _strict, ...t }) => t) };
+  }
+
+  const buildOpts = (stream?: boolean) => ({
+    ...(stream ? { stream: true } : {}),
+    providerId: id,
+    parallelToolCalls: capabilities.parallelToolCalls,
+  });
 
   function resultFromResponses(r: ResponsesResponse): GenerateResult {
     return {
@@ -138,11 +165,12 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
     capabilities,
     transport: config.transport,
 
-    async generate(req, opts): Promise<GenerateResult> {
-      guardRequest(req);
+    async generate(rawReq, opts): Promise<GenerateResult> {
+      guardRequest(rawReq);
+      const req = applyCapabilities(rawReq);
 
       if (dialect === "responses") {
-        const res = await call("/responses", { method: "POST", body: buildResponsesRequest(req, { providerId: id }) }, opts);
+        const res = await call("/responses", { method: "POST", body: buildResponsesRequest(req, buildOpts()) }, opts);
         const json = (await res.json()) as ResponsesResponse;
         if (json.status === "failed" && json.error) {
           throw new AgentError("unknown", json.error.message, { provider: id, detail: json.error });
@@ -150,7 +178,7 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
         return resultFromResponses(json);
       }
 
-      const res = await call("/chat/completions", { method: "POST", body: buildChatRequest(req, { providerId: id }) }, opts);
+      const res = await call("/chat/completions", { method: "POST", body: buildChatRequest(req, buildOpts()) }, opts);
       const json = (await res.json()) as ChatResponse;
       return {
         parts: partsFromChat(json),
@@ -162,13 +190,14 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
       };
     },
 
-    async *stream(req, opts): AsyncIterable<StreamEvent> {
-      guardRequest(req);
+    async *stream(rawReq, opts): AsyncIterable<StreamEvent> {
+      guardRequest(rawReq);
+      const req = applyCapabilities(rawReq);
       try {
         if (dialect === "responses") {
           const res = await call(
             "/responses",
-            { method: "POST", body: buildResponsesRequest(req, { stream: true, providerId: id }), stream: true },
+            { method: "POST", body: buildResponsesRequest(req, buildOpts(true)), stream: true },
             opts,
           );
           if (!res.body) throw new AgentError("network", "Response had no body to stream.", { provider: id });
@@ -177,7 +206,7 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
         }
         const res = await call(
           "/chat/completions",
-          { method: "POST", body: buildChatRequest(req, { stream: true, providerId: id }), stream: true },
+          { method: "POST", body: buildChatRequest(req, buildOpts(true)), stream: true },
           opts,
         );
         if (!res.body) throw new AgentError("network", "Response had no body to stream.", { provider: id });
@@ -189,11 +218,12 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
       }
     },
 
-    async startJob(req, opts): Promise<JobHandle> {
+    async startJob(rawReq, opts): Promise<JobHandle> {
       if (!capabilities.backgroundJobs) {
         throw new AgentError("not-supported", `Provider "${id}" has no background mode.`, { provider: id });
       }
-      const body = buildResponsesRequest({ ...req, background: true }, { providerId: id });
+      const req = applyCapabilities(rawReq);
+      const body = buildResponsesRequest({ ...req, background: true }, buildOpts());
       const res = await call("/responses", { method: "POST", body }, opts);
       const json = (await res.json()) as ResponsesResponse;
       return { provider: id, id: json.id, model: json.model || req.model, createdAt: Date.now() };

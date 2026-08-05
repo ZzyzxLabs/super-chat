@@ -137,6 +137,9 @@ export function createLoadSkillTool(skills: SkillRegistry): ToolDefinition {
           instructions: loaded.text,
           ...(loaded.tools.length ? { unlockedTools: loaded.tools } : {}),
         },
+        // The runtime half of the promise: re-resolve the active set so the
+        // names announced in `unlockedTools` are actually callable next step.
+        ...(loaded.tools.length ? { unlockTools: loaded.tools } : {}),
       };
     },
   };
@@ -172,7 +175,9 @@ export function createUpdateCardTool(cards: CardRegistry): ToolDefinition {
       if (!verdict.ok) {
         return { output: { ok: false, error: verdict.error, expected: verdict.expected }, failure: "invalid-input" as const };
       }
-      return { output: { ok: true, cardId }, card: spec as CardSpec };
+      // `cardId` makes the runtime REUSE the id, so the reducer's upsert
+      // replaces the original card instead of appending a near-identical twin.
+      return { output: { ok: true, cardId }, card: spec as CardSpec, cardId };
     },
   };
 }

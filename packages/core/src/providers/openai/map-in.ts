@@ -182,10 +182,14 @@ function toResponsesTools(tools: readonly ToolSpec[]): ResponsesTool[] {
   }));
 }
 
-export function buildResponsesRequest(
-  req: NormalizedRequest,
-  opts: { stream?: boolean; providerId?: string } = {},
-): ResponsesRequest {
+export type BuildOptions = {
+  stream?: boolean;
+  providerId?: string;
+  /** Declared capability; when false the flag is omitted from the wire. */
+  parallelToolCalls?: boolean;
+};
+
+export function buildResponsesRequest(req: NormalizedRequest, opts: BuildOptions = {}): ResponsesRequest {
   // Hoist leading system messages into `instructions`; that is where Responses
   // wants them and it keeps them out of the cacheable input array.
   const systemFromMessages = req.messages
@@ -206,7 +210,7 @@ export function buildResponsesRequest(
   if (req.tools?.length) {
     out.tools = toResponsesTools(req.tools);
     out.tool_choice = toResponsesToolChoice(req);
-    out.parallel_tool_calls = true;
+    if (opts.parallelToolCalls !== false) out.parallel_tool_calls = true;
   }
   if (req.maxOutputTokens != null) out.max_output_tokens = req.maxOutputTokens;
   if (req.temperature != null) out.temperature = req.temperature;
@@ -229,7 +233,18 @@ export function buildResponsesRequest(
   } else if (req.store != null) {
     out.store = req.store;
   }
+  mergeProviderOptions(out as Record<string, unknown>, req, opts.providerId);
   return out;
+}
+
+/**
+ * `providerOptions[providerId]` is THE escape hatch: fields the normalized
+ * request has no name for are merged verbatim onto the wire object, last, so
+ * they can also override anything the builder chose.
+ */
+function mergeProviderOptions(out: Record<string, unknown>, req: NormalizedRequest, providerId = "openai"): void {
+  const extra = req.providerOptions?.[providerId];
+  if (extra) Object.assign(out, extra);
 }
 
 /** With `previous_response_id` set, only messages after the last assistant turn are new. */
@@ -399,10 +414,7 @@ function toChatTools(tools: readonly ToolSpec[]): ChatTool[] {
   }));
 }
 
-export function buildChatRequest(
-  req: NormalizedRequest,
-  opts: { stream?: boolean; providerId?: string } = {},
-): ChatRequest {
+export function buildChatRequest(req: NormalizedRequest, opts: BuildOptions = {}): ChatRequest {
   const out: ChatRequest = {
     model: req.model,
     messages: toChatMessages(req.messages, req.system, opts.providerId),
@@ -413,7 +425,7 @@ export function buildChatRequest(
     const active = req.activeTools ? req.tools.filter((t) => req.activeTools!.includes(t.name)) : req.tools;
     if (active.length) {
       out.tools = toChatTools(active);
-      out.parallel_tool_calls = true;
+      if (opts.parallelToolCalls !== false) out.parallel_tool_calls = true;
       switch (req.toolChoice?.type) {
         case "none":
           out.tool_choice = "none";
@@ -455,5 +467,6 @@ export function buildChatRequest(
     // every streamed turn meters as zero tokens.
     out.stream_options = { include_usage: true };
   }
+  mergeProviderOptions(out as Record<string, unknown>, req, opts.providerId);
   return out;
 }
