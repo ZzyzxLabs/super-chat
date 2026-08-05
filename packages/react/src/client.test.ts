@@ -230,6 +230,62 @@ describe("background job resume routing", () => {
   });
 });
 
+describe("branching", () => {
+  it("regenerate forks: the old answer survives as a switchable sibling", async () => {
+    const client = makeClient([respondText("first answer"), respondText("second answer")]);
+    await client.send("question");
+    const firstAssistant = client.store.get().messages[1]!;
+
+    await client.regenerate();
+    const s = client.store.get();
+    // Active path shows the NEW answer…
+    expect(s.messages).toHaveLength(2);
+    expect(JSON.stringify(s.messages[1]!.parts)).toContain("second answer");
+    // …while the tree kept the old one as a sibling under the same user turn.
+    expect(s.tree).toHaveLength(3);
+    const siblings = s.tree.filter((m) => m.parentId === s.messages[0]!.id);
+    expect(siblings.map((m) => m.id)).toContain(firstAssistant.id);
+
+    // Switch back: the first answer is the active branch again.
+    client.switchBranch(s.messages[1]!.id, -1);
+    expect(JSON.stringify(client.store.get().messages[1]!.parts)).toContain("first answer");
+  });
+
+  it("editMessage forks a sibling user turn under the same parent", async () => {
+    const client = makeClient([respondText("about A"), respondText("about B")]);
+    await client.send("tell me about A");
+    const originalUser = client.store.get().messages[0]!;
+
+    await client.editMessage(originalUser.id, "tell me about B");
+    const s = client.store.get();
+    expect(s.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(JSON.stringify(s.messages[0]!.parts)).toContain("about B");
+    // Original user turn + its answer still exist in the tree.
+    expect(s.tree.map((m) => m.id)).toContain(originalUser.id);
+    expect(s.tree).toHaveLength(4);
+    // Both user turns are roots (siblings under null).
+    expect(s.tree.filter((m) => (m.parentId ?? null) === null)).toHaveLength(2);
+  });
+
+  it("persists the TREE and the head, and reloads the active branch", async () => {
+    const store = createMemoryThreadStore();
+    const client = makeClient([respondText("v1"), respondText("v2")], { threadStore: store });
+    await client.send("q");
+    await client.regenerate();
+    await flush();
+    const id = client.store.get().id;
+
+    const stored = await store.load(id);
+    expect(stored?.messages).toHaveLength(3); // both answers persisted
+    expect(stored?.headId).toBe(client.store.get().headId);
+
+    const reloaded = makeClient([respondText("unused")], { threadStore: store });
+    await reloaded.openThread(id);
+    expect(JSON.stringify(reloaded.store.get().messages[1]!.parts)).toContain("v2");
+    expect(reloaded.store.get().tree).toHaveLength(3);
+  });
+});
+
 describe("attachments", () => {
   it("staged parts join the next send and are consumed by it", async () => {
     const client = makeClient([respondText("got it")]);

@@ -14,7 +14,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import type { Card, CardAction, ContentPart, ContextTrace, Message, Skill, ThreadMeta, ToolDefinition } from "@agentloom/core";
+import { siblingsOf, type Card, type CardAction, type ContentPart, type ContextTrace, type Message, type Skill, type ThreadMeta, type ToolDefinition } from "@agentloom/core";
 import { AgentClient, type AgentClientConfig, type ThreadState } from "./client.js";
 
 const AgentContext = createContext<AgentClient | null>(null);
@@ -66,11 +66,35 @@ export function useThread() {
       error,
       send: (input: Parameters<AgentClient["send"]>[0], opts?: Parameters<AgentClient["send"]>[1]) => client.send(input, opts),
       regenerate: () => client.regenerate(),
+      editMessage: (id: string, input: Parameters<AgentClient["send"]>[0]) => client.editMessage(id, input),
       stop: () => client.stop(),
       clear: () => client.clear(),
       isRunning: status === "running" || status === "awaiting-user",
     }),
     [client, messages, status, error],
+  );
+}
+
+/**
+ * Branch position of one message: its index among siblings and the switcher
+ * actions. `count === 1` means no branches — render nothing.
+ */
+export function useBranches(messageId: string): { index: number; count: number; prev: () => void; next: () => void } {
+  const client = useAgentClient();
+  const info = useAgentState(
+    (s) => {
+      const siblings = siblingsOf(s.tree, messageId);
+      return { index: siblings.findIndex((m) => m.id === messageId), count: siblings.length };
+    },
+    (a, b) => a.index === b.index && a.count === b.count,
+  );
+  return useMemo(
+    () => ({
+      ...info,
+      prev: () => client.switchBranch(messageId, -1),
+      next: () => client.switchBranch(messageId, +1),
+    }),
+    [client, messageId, info],
   );
 }
 

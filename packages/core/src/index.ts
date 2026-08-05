@@ -3,6 +3,7 @@
 // content
 export * from "./content/types.js";
 export * from "./content/parts.js";
+export { pathTo, childrenOf, siblingsOf, latestLeaf, linkLinear } from "./content/branching.js";
 
 // errors
 export { AgentError, isAgentError, toAgentError, kindFromStatus, type AgentErrorKind } from "./errors.js";

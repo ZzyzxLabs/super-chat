@@ -27,7 +27,11 @@ import {
   type ToolRegistry,
   type ToolResolution,
   assistantMessage,
+  latestLeaf,
+  linkLinear,
   nextId,
+  pathTo,
+  siblingsOf,
   threadSnapshot,
   userMessage,
 } from "@agentloom/core";
@@ -35,7 +39,15 @@ import { Store } from "./store.js";
 
 export type ThreadState = {
   id: string;
+  /**
+   * The ACTIVE PATH — root to head — which is what the UI renders and a run
+   * consumes. Always derived from `tree` + `headId`; treat as read-only.
+   */
   messages: Message[];
+  /** Every message ever sent in this thread, abandoned branches included. */
+  tree: Message[];
+  /** Leaf of the active branch. */
+  headId: string | null;
   run: RunState;
   /** Cards from the CURRENT run; committed to messages when the run finishes. */
   cards: Card[];
@@ -74,8 +86,10 @@ export type AgentClientConfig = {
   /** When set, the thread is saved after each user and assistant turn. */
   threadStore?: ThreadStore;
   onHostTool?: (call: ToolCallRequest) => Promise<unknown>;
-  /** Persisted thread to hydrate from. */
+  /** Persisted thread to hydrate from (linear list or a parentId tree). */
   initialMessages?: Message[];
+  /** Active-branch leaf when `initialMessages` is a tree. Default: last message. */
+  initialHeadId?: string | null;
   threadId?: string;
 };
 
@@ -99,14 +113,30 @@ export class AgentClient {
 
   constructor(config: AgentClientConfig) {
     this.config = config;
+    // `initialMessages` may be a plain linear list (pre-branching hosts) or a
+    // tree with parentIds (a v2 snapshot); linkLinear handles both.
+    const tree = linkLinear(config.initialMessages ?? []);
+    const headId = config.initialHeadId ?? tree.at(-1)?.id ?? null;
     this.store = new Store<ThreadState>({
       id: config.threadId ?? nextId("thread"),
-      messages: config.initialMessages ?? [],
+      messages: pathTo(tree, headId),
+      tree,
+      headId,
       run: initialRunState("", config.mode ?? "stream"),
       cards: [],
       jobs: [],
       attachments: [],
       status: "idle",
+    });
+  }
+
+  /** Append under `parent` (default: the current head) and move the head there. */
+  private appendMessage(message: Message, parent?: string | null): void {
+    this.store.set((s) => {
+      const parentId = parent !== undefined ? parent : s.headId;
+      const linked: Message = { ...message, parentId };
+      const tree = [...s.tree, linked];
+      return { ...s, tree, headId: linked.id, messages: pathTo(tree, linked.id) };
     });
   }
 
@@ -146,26 +176,58 @@ export class AgentClient {
     const staged = this.store.get().attachments;
     const parts: ContentPart[] = typeof input === "string" ? [{ type: "text", text: input }] : [...input];
     const message = userMessage(staged.length ? [...parts, ...staged] : input);
-    this.store.set((s) => ({ ...s, messages: [...s.messages, message], attachments: [] }));
+    this.appendMessage(message);
+    this.store.set((s) => ({ ...s, attachments: [] }));
     // Persist the user turn before running — a reload mid-run keeps it.
     this.persist();
     await this.run([...this.store.get().messages], opts);
   }
 
-  /** Re-run from the last user message, discarding the assistant turn after it. */
+  /**
+   * Re-run from the last user message. A FORK, not a rewrite: the head moves
+   * back to that user message and the new answer grows as a sibling of the
+   * old one, which stays switchable via `switchBranch`.
+   */
   async regenerate(opts: { forceSkillIds?: string[] } = {}): Promise<void> {
     if (this.isRunning) throw new Error("A run is already in progress.");
     const { messages } = this.store.get();
-    let cut = messages.length;
     for (let i = messages.length - 1; i >= 0; i -= 1) {
-      if (messages[i]?.role === "user") {
-        cut = i + 1;
-        break;
+      const m = messages[i]!;
+      if (m.role === "user") {
+        this.store.set((s) => ({ ...s, headId: m.id, messages: pathTo(s.tree, m.id) }));
+        await this.run([...this.store.get().messages], opts);
+        return;
       }
     }
-    const trimmed = messages.slice(0, cut);
-    this.store.set((s) => ({ ...s, messages: trimmed }));
-    await this.run(trimmed, opts);
+  }
+
+  /**
+   * Edit a user message: a SIBLING fork under the same parent, preserving the
+   * original and everything under it. The edited branch runs immediately.
+   */
+  async editMessage(messageId: string, input: string | ContentPart[], opts: { forceSkillIds?: string[] } = {}): Promise<void> {
+    if (this.isRunning) throw new Error("A run is already in progress.");
+    const original = this.store.get().tree.find((m) => m.id === messageId);
+    if (!original || original.role !== "user") return;
+    this.appendMessage(userMessage(input), original.parentId ?? null);
+    this.persist();
+    await this.run([...this.store.get().messages], opts);
+  }
+
+  /**
+   * Move the active branch to a SIBLING of `messageId` (delta −1/+1 in
+   * insertion order), resuming at that branch's latest leaf.
+   */
+  switchBranch(messageId: string, delta: number): void {
+    if (this.isRunning) return; // switching under a live run would cross-write threads of the same id
+    const s = this.store.get();
+    const siblings = siblingsOf(s.tree, messageId);
+    if (siblings.length < 2) return;
+    const index = siblings.findIndex((m) => m.id === messageId);
+    const next = siblings[(index + delta + siblings.length) % siblings.length]!;
+    const headId = latestLeaf(s.tree, next.id);
+    this.store.set((prev) => ({ ...prev, headId, messages: pathTo(prev.tree, headId) }));
+    this.persist();
   }
 
   private async run(messages: Message[], opts: { forceSkillIds?: string[] }): Promise<void> {
@@ -268,9 +330,13 @@ export class AgentClient {
         data: c.spec,
       }));
 
+      const linked: Message = { ...assistantMessage([...parts, ...cardParts]), parentId: s.headId };
+      const tree = [...s.tree, linked];
       return {
         ...s,
-        messages: [...s.messages, assistantMessage([...parts, ...cardParts])],
+        tree,
+        headId: linked.id,
+        messages: pathTo(tree, linked.id),
         status: s.run.status,
       };
     });
@@ -291,7 +357,8 @@ export class AgentClient {
       // A client hydrated via config (threadId/initialMessages) has no meta in
       // hand; read the stored one so createdAt and title survive the reload.
       const prior = this.threadMeta ?? (await store.load(s.id))?.meta;
-      const snapshot = threadSnapshot(s.id, s.messages, prior);
+      // The TREE persists — abandoned branches included — plus the active head.
+      const snapshot = threadSnapshot(s.id, s.tree, prior, s.headId);
       this.threadMeta = snapshot.meta;
       await store.save(snapshot);
     })().catch(() => {
@@ -311,10 +378,14 @@ export class AgentClient {
     this.generation += 1; // invalidate any in-flight run before replacing state
     this.stop();
     this.threadMeta = stored.meta;
+    const tree = linkLinear(stored.messages);
+    const headId = stored.headId ?? tree.at(-1)?.id ?? null;
     this.store.set((s) => ({
       ...s,
       id: stored.meta.id,
-      messages: stored.messages,
+      tree,
+      headId,
+      messages: pathTo(tree, headId),
       cards: [],
       attachments: [],
       run: initialRunState("", this.config.mode ?? "stream"),
@@ -333,6 +404,8 @@ export class AgentClient {
       ...s,
       id: nextId("thread"),
       messages: [],
+      tree: [],
+      headId: null,
       cards: [],
       attachments: [],
       run: initialRunState("", this.config.mode ?? "stream"),
@@ -376,6 +449,8 @@ export class AgentClient {
     this.store.set((s) => ({
       ...s,
       messages: [],
+      tree: [],
+      headId: null,
       cards: [],
       attachments: [],
       run: initialRunState("", this.config.mode ?? "stream"),
@@ -411,18 +486,21 @@ export class AgentClient {
 
       const currentId = this.store.get().id;
       if (!job.threadId || job.threadId === currentId) {
-        this.store.set((s) => ({ ...s, messages: [...s.messages, assistantMessage(parts)] }));
+        this.appendMessage(assistantMessage(parts));
         if (job.threadId === currentId) this.persist();
         continue;
       }
 
-      // The job belongs to a thread that is not open. Land the result there.
+      // The job belongs to a thread that is not open. Land the result there,
+      // appended under that thread's own head.
       const threads = this.config.threadStore;
       if (!threads) continue; // nowhere to put it; the handle was already reaped
       const stored = await threads.load(job.threadId);
       if (!stored) continue;
+      const awayHead = stored.headId ?? stored.messages.at(-1)?.id ?? null;
+      const appended: Message = { ...assistantMessage(parts), parentId: awayHead };
       await threads.save(
-        threadSnapshot(job.threadId, [...stored.messages, assistantMessage(parts)], stored.meta),
+        threadSnapshot(job.threadId, [...stored.messages, appended], stored.meta, appended.id),
       );
     }
   }

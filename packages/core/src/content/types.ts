@@ -76,6 +76,14 @@ export type Message = {
   role: MessageRole;
   parts: ContentPart[];
   createdAt?: number;
+  /**
+   * Branching: the message this one replies to. `null`/absent on a root.
+   * A linear thread is the degenerate case (each message's parent is the
+   * previous one); editing or regenerating creates a SIBLING instead of
+   * rewriting history, and the active conversation is the path from a chosen
+   * head back to the root. Helpers live in content/branching.ts.
+   */
+  parentId?: string | null;
   /** Free-form host metadata. Never sent to a provider. */
   metadata?: Record<string, unknown>;
 };

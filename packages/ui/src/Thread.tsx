@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { isCardCarrier, type Card, type ContentPart, type MediaSource, type Message } from "@agentloom/core";
-import { useAttachments, useCardAction, useCards, useRun, useThread } from "@agentloom/react";
+import { useAgentClient, useAttachments, useBranches, useCardAction, useCards, useRun, useThread } from "@agentloom/react";
 import { CardRenderer, useCardRenderers } from "./renderer-registry.js";
 
 function partsOf(message: Message) {
@@ -51,7 +51,8 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
     return (
       <div className="al-msg al-msg--user">
         {media.length ? <MediaParts parts={media} /> : null}
-        {text ? <div className="al-bubble">{text}</div> : null}
+        <UserBubble message={message} text={text} />
+        <BranchNav messageId={message.id} />
       </div>
     );
   }
@@ -73,6 +74,85 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
       ))}
       {text ? <div className="al-prose al-msg__text">{text}</div> : null}
       {!text && !cards.length && !calls.length ? <div className="al-muted">(no response)</div> : null}
+      <BranchNav messageId={message.id} />
+    </div>
+  );
+}
+
+/** "‹ 2/3 ›" — rendered only when the message actually has siblings. */
+function BranchNav({ messageId }: { messageId: string }) {
+  const { index, count, prev, next } = useBranches(messageId);
+  const { isRunning } = useThread();
+  if (count < 2) return null;
+  return (
+    <div className="al-branchnav" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+      <button type="button" className="al-btn al-btn--ghost al-btn--sm" disabled={isRunning} onClick={prev} aria-label="Previous branch">
+        ‹
+      </button>
+      <span className="al-muted">
+        {index + 1}/{count}
+      </span>
+      <button type="button" className="al-btn al-btn--ghost al-btn--sm" disabled={isRunning} onClick={next} aria-label="Next branch">
+        ›
+      </button>
+    </div>
+  );
+}
+
+/** The user bubble, with edit-as-fork: saving runs a sibling branch. */
+function UserBubble({ message, text }: { message: Message; text: string }) {
+  const client = useAgentClient();
+  const { isRunning } = useThread();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(text);
+
+  if (!text && !editing) return null;
+  if (!editing) {
+    return (
+      <div className="al-bubble" style={{ position: "relative" }}>
+        {text}
+        <button
+          type="button"
+          className="al-btn al-btn--ghost al-btn--sm"
+          style={{ marginLeft: 6 }}
+          disabled={isRunning}
+          aria-label="Edit message"
+          title="Edit — the original stays as a switchable branch"
+          onClick={() => {
+            setDraft(text);
+            setEditing(true);
+          }}
+        >
+          ✎
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="al-bubble" style={{ width: "100%" }}>
+      <textarea
+        className="al-composer__input"
+        rows={2}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        style={{ width: "100%" }}
+      />
+      <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+        <button
+          type="button"
+          className="al-btn al-btn--primary al-btn--sm"
+          disabled={!draft.trim() || isRunning}
+          onClick={() => {
+            setEditing(false);
+            void client.editMessage(message.id, draft.trim());
+          }}
+        >
+          Send edited
+        </button>
+        <button type="button" className="al-btn al-btn--ghost al-btn--sm" onClick={() => setEditing(false)}>
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

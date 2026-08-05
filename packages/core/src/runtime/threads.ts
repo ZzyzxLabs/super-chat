@@ -13,6 +13,7 @@
 // A server-backed store is four fetch calls against this same interface; only
 // memory and localStorage ship here.
 
+import { linkLinear } from "../content/branching.js";
 import type { Message } from "../content/types.js";
 
 export type ThreadMeta = {
@@ -24,13 +25,37 @@ export type ThreadMeta = {
   messageCount: number;
 };
 
-export const THREAD_SCHEMA_VERSION = 1 as const;
+export const THREAD_SCHEMA_VERSION = 2 as const;
 
 export type StoredThread = {
   version: typeof THREAD_SCHEMA_VERSION;
   meta: ThreadMeta;
+  /** The full message TREE (flat, parentId pointers) — abandoned branches included. */
   messages: Message[];
+  /** Leaf of the active branch. Absent → the last message (v1-era linearity). */
+  headId?: string | null;
 };
+
+/**
+ * v1 stored threads (linear, no parent pointers) migrate on read: the list is
+ * linked into a chain and the head is the last message. Never thrown away —
+ * a stored conversation outliving a schema bump is the whole point of the
+ * version field.
+ */
+function migrate(parsed: { version?: number; meta?: ThreadMeta; messages?: Message[]; headId?: string | null }): StoredThread | undefined {
+  if (!parsed || !Array.isArray(parsed.messages) || !parsed.meta) return undefined;
+  if (parsed.version === THREAD_SCHEMA_VERSION) return parsed as StoredThread;
+  if (parsed.version === 1) {
+    const messages = linkLinear(parsed.messages);
+    return {
+      version: THREAD_SCHEMA_VERSION,
+      meta: parsed.meta,
+      messages,
+      headId: messages.at(-1)?.id ?? null,
+    };
+  }
+  return undefined; // a FUTURE version reads as absent, never a crash
+}
 
 export type ThreadStore = {
   /** Metadata only — a thread picker must not load every message ever sent. */
@@ -83,7 +108,12 @@ function safeCloneMessages(messages: readonly Message[]): Message[] {
 }
 
 /** Build a JSON-safe snapshot: safe-clone, derive title, stamp meta. */
-export function threadSnapshot(id: string, messages: readonly Message[], prior?: ThreadMeta): StoredThread {
+export function threadSnapshot(
+  id: string,
+  messages: readonly Message[],
+  prior?: ThreadMeta,
+  headId?: string | null,
+): StoredThread {
   const cloned = safeCloneMessages(messages);
   const title = deriveTitle(cloned) ?? prior?.title;
   return {
@@ -96,6 +126,7 @@ export function threadSnapshot(id: string, messages: readonly Message[], prior?:
       messageCount: cloned.length,
     },
     messages: cloned,
+    headId: headId !== undefined ? headId : (cloned.at(-1)?.id ?? null),
   };
 }
 
@@ -107,7 +138,7 @@ export function createMemoryThreadStore(): ThreadStore {
     },
     async load(id) {
       const t = threads.get(id);
-      return t && t.version === THREAD_SCHEMA_VERSION ? t : undefined;
+      return t ? migrate(t) : undefined;
     },
     async save(thread) {
       threads.set(thread.meta.id, thread);
@@ -159,8 +190,7 @@ export function createLocalThreadStore(prefix = "agentloom:threads"): ThreadStor
       try {
         const raw = globalThis.localStorage?.getItem(threadKey(id));
         if (!raw) return undefined;
-        const parsed = JSON.parse(raw) as StoredThread;
-        return parsed?.version === THREAD_SCHEMA_VERSION && Array.isArray(parsed.messages) ? parsed : undefined;
+        return migrate(JSON.parse(raw) as StoredThread);
       } catch {
         return undefined;
       }

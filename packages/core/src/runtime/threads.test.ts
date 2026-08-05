@@ -57,6 +57,20 @@ function storeContract(name: string, make: () => ThreadStore) {
       expect((await store.list()).map((m) => m.id)).toEqual(["t_b"]);
     });
 
+    it("migrates a v1 (linear, no parentId) record on load", async () => {
+      const store = make();
+      const v1 = {
+        version: 1,
+        meta: { id: "t_old", createdAt: 1, updatedAt: 2, messageCount: 2 },
+        messages: [msg("user", "hi", "u1"), msg("assistant", "hello", "a1")],
+      };
+      await store.save(v1 as never);
+      const loaded = await store.load("t_old");
+      expect(loaded?.version).toBe(THREAD_SCHEMA_VERSION);
+      expect(loaded?.messages.map((m) => m.parentId)).toEqual([null, "u1"]);
+      expect(loaded?.headId).toBe("a1");
+    });
+
     it("treats an unknown version as absent, never a throw", async () => {
       const store = make();
       const snap = threadSnapshot("t_v", [msg("user", "hi")]);
