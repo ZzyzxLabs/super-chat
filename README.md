@@ -1,4 +1,4 @@
-# agentloom
+# superchat
 
 A frontend framework for agent services. It assembles **contexts**, **skills** and
 **I/O content** into requests that are correct on the wire for each provider, and
@@ -10,9 +10,9 @@ Not a chat app. The thing chat apps leave to you.
 > decisions, bugs already fixed, and what will bite you.
 
 ```
-@agentloom/core    provider-agnostic engine — no React, isomorphic
-@agentloom/react   thread state, run control, card actions
-@agentloom/ui      card renderers, chat primitives, context inspector
+@superchat/core    provider-agnostic engine — no React, isomorphic
+@superchat/react   thread state, run control, card actions
+@superchat/ui      card renderers, chat primitives, context inspector
 apps/playground    Next.js dev panels — one per capability, no API key needed
 ```
 
@@ -32,7 +32,7 @@ production:
 | **Capability scoping** | Tools accumulate. The day you add a destructive one, it is already live on every key you ever minted. |
 | **Agent cards** | A hand-maintained parser/renderer dispatch chain drifts, and a card silently degrades to a "ran ✓" chip. |
 
-agentloom takes a position on all four.
+superchat takes a position on all four.
 
 ---
 
@@ -82,7 +82,7 @@ orphaned tool calls dropped before they poison the thread.
 
 ### 2. Context assembly — derived, budgeted, inspectable
 
-Most chat apps *accumulate* an array. agentloom *derives* the context every turn
+Most chat apps *accumulate* an array. superchat *derives* the context every turn
 from named sources under an explicit token budget, and records why each layer was
 included, truncated or dropped.
 
@@ -260,9 +260,10 @@ the transport selector to **Server proxy**, or pick **BYOK direct** and paste a 
 pnpm test
 ```
 
-107 tests. The runtime suite drives the real OpenAI adapter against a mocked
-transport, so the tool loop, card suspension and background polling are all
-exercised with no key and no network.
+237 tests. The runtime suite drives the real OpenAI and Anthropic adapters
+against mocked transports, so the tool loop, card suspension, thinking replay,
+background polling and concurrent proxy streaming are all exercised with no key
+and no network.
 
 ---
 
@@ -270,13 +271,25 @@ exercised with no key and no network.
 
 v0.1. Working and tested; API not frozen.
 
-**Built:** OpenAI adapter (Responses + Chat Completions + background jobs),
-transport layer, skills, context assembly, tools + presets, 20 card kinds, React
-bindings, UI kit, dev panels.
+**Built:** OpenAI adapter (Responses + Chat Completions + background jobs) and
+Anthropic adapter (`/v1/messages`, thinking-signature replay), transport layer
+(multipart upload through the proxy, bearer or x-api-key auth), file upload to
+`/v1/files` with a cross-thread `FileStore`, thread persistence with message
+branching (`ThreadStore` v2 — parentId tree, fork-on-edit/regenerate, branch
+switcher), MCP tool import (hand-rolled Streamable HTTP client, elicitation via
+interactive form cards, `createMcpSkill` for the relevance half), memory seam
+(`MemoryStore` + context source + `remember` tool), retrieval seam (`Retriever`
++ cited-evidence context source + lexical reference impl), skills, context
+assembly, tools + presets, 20 card kinds, React bindings, UI kit, dev panels.
 
-**Not built yet:** an Anthropic/Gemini adapter (the `Provider` seam is designed for
-it — `capabilities` and `providerOptions` exist for exactly this), file upload to
-`/v1/files`, a persistence adapter beyond `localStorage`, and MCP tool import.
+Also built: an **app-state seam** (the agent reads and operates host
+application state through the same context-source and tool machinery), a REST
+`ThreadStore` alongside the memory and localStorage ones, and **provider-native
+tool passthrough** (web search, code interpreter — declared per provider, their
+activity surfaced in the transcript).
+
+**Not built yet:** a Gemini adapter, and voice / image generation (out of scope
+for a framework — they belong to the host's own product surface).
 
 Prior art read closely: Open WebUI's tools/functions/knowledge split, LibreChat's
 multi-provider handling, and the Sup Wallet agent in `zzyzx-full-repo` — whose

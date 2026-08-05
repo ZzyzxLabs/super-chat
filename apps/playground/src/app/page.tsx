@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BUILTIN_CARDS } from "@agentloom/core";
+import { BUILTIN_CARDS } from "@superchat/core";
 import { PanelHeader } from "@/components/Shell";
 
 const RESOURCES = [
@@ -7,7 +7,7 @@ const RESOURCES = [
     href: "/cards",
     title: "Agent cards",
     body: "20 built-in card kinds the agent can choose from — tables, comparisons, funnels, gauges, citations, checklists, trees, and three interactive kinds that pause the run for an answer. Each shown with the spec that produced it.",
-    tag: "@agentloom/core + /ui",
+    tag: "@superchat/core + /ui",
   },
   {
     href: "/skills",
@@ -47,7 +47,7 @@ const FACTS = [
 export default function OverviewPanel() {
   return (
     <div className="dev__page">
-      <PanelHeader title="agentloom">
+      <PanelHeader title="superchat">
         A frontend framework for agent services. It assembles contexts, skills and I/O content into requests that are
         correct on the wire for each provider, and gives the agent a visual vocabulary to answer with. These panels
         show what is available, one capability at a time — nothing here is a finished product.
@@ -59,7 +59,7 @@ export default function OverviewPanel() {
             <h3>{r.title}</h3>
             <p>{r.body}</p>
             <p style={{ marginTop: 8 }}>
-              <code className="al-mono">{r.tag}</code>
+              <code className="sc-mono">{r.tag}</code>
             </p>
           </Link>
         ))}
@@ -71,9 +71,9 @@ export default function OverviewPanel() {
           The framework is domain-neutral. The demo agent in these panels covers contract review, marketing analytics
           and market data through the same registry — different skills and tools, identical machinery.
         </p>
-        <dl className="al-kv">
+        <dl className="sc-kv">
           {FACTS.map(([k, v]) => (
-            <div key={k} className="al-kv__row">
+            <div key={k} className="sc-kv__row">
               <dt>{k}</dt>
               <dd style={{ textAlign: "left", maxWidth: "62ch" }}>{v}</dd>
             </div>
@@ -83,7 +83,7 @@ export default function OverviewPanel() {
 
       <section className="dev__section">
         <h2 className="dev__section-title">Install</h2>
-        <pre className="al-pre">{`pnpm add @agentloom/core @agentloom/react @agentloom/ui`}</pre>
+        <pre className="sc-pre">{`pnpm add @superchat/core @superchat/react @superchat/ui`}</pre>
         <p className="dev__section-note" style={{ marginTop: 12 }}>
           Core is isomorphic and React-free. React and UI are optional — a server-side agent needs only core.
         </p>

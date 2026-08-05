@@ -29,7 +29,21 @@ export type ToolExecutionContext = {
   requestCard?: (spec: CardSpec) => Promise<unknown>;
 };
 
-export type ToolResult = {
+export type ToolResultExtras = {
+  /**
+   * Update an EXISTING card instead of minting a new one: the runtime reuses
+   * this id, and the reducer's upsert replaces the old card in place.
+   */
+  cardId?: string;
+  /**
+   * Tool names this result unlocks for the REST of the run (`loadSkill`'s pull
+   * half). The runtime re-resolves the active set and re-declares specs to the
+   * provider from the next step on.
+   */
+  unlockTools?: string[];
+};
+
+export type ToolResult = ToolResultExtras & {
   /** What the model sees. Keep it small — this is re-sent every subsequent step. */
   output: unknown;
   /** What the user sees. Not sent to the model. */

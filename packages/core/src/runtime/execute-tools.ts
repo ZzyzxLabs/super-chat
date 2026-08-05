@@ -23,6 +23,8 @@ export type ToolCallOutcome = {
   output: unknown;
   card?: Card;
   failure?: string;
+  /** Tool names this outcome unlocked for the rest of the run (loadSkill). */
+  unlockTools?: string[];
   ms: number;
 };
 
@@ -38,7 +40,10 @@ export function compactError(e: unknown): { error: string; kind?: string } {
 }
 
 const isToolResult = (v: unknown): v is ToolResult =>
-  typeof v === "object" && v !== null && "output" in v && Object.keys(v).every((k) => ["output", "card", "failure"].includes(k));
+  typeof v === "object" &&
+  v !== null &&
+  "output" in v &&
+  Object.keys(v).every((k) => ["output", "card", "failure", "cardId", "unlockTools"].includes(k));
 
 export type ExecuteToolOptions = {
   tools: readonly ToolDefinition[];
@@ -107,7 +112,7 @@ export async function executeToolCall(call: ToolCallRequest, opts: ExecuteToolOp
     let output = result.output;
 
     if (result.card) {
-      card = makeCard(result.card, call.callId);
+      card = makeCard(result.card, call.callId, result.cardId);
       output = withCard(asRecord(result.output), card.spec, card.id);
       opts.onCard?.(card);
     } else if (isCardCarrier(result.output)) {
@@ -122,6 +127,7 @@ export async function executeToolCall(call: ToolCallRequest, opts: ExecuteToolOp
       output,
       ...(card ? { card } : {}),
       ...(result.failure ? { failure: result.failure } : {}),
+      ...(result.unlockTools?.length ? { unlockTools: result.unlockTools } : {}),
       ms: Date.now() - started,
     };
   } catch (e) {

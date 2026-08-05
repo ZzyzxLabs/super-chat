@@ -21,22 +21,39 @@ import {
   type RunMode,
   type RunState,
   type StoredJob,
+  type ThreadMeta,
+  type ThreadStore,
   type ToolCallRequest,
   type ToolRegistry,
   type ToolResolution,
   assistantMessage,
+  latestLeaf,
+  linkLinear,
   nextId,
+  pathTo,
+  siblingsOf,
+  threadSnapshot,
   userMessage,
-} from "@agentloom/core";
+} from "@superchat/core";
 import { Store } from "./store.js";
 
 export type ThreadState = {
   id: string;
+  /**
+   * The ACTIVE PATH — root to head — which is what the UI renders and a run
+   * consumes. Always derived from `tree` + `headId`; treat as read-only.
+   */
   messages: Message[];
+  /** Every message ever sent in this thread, abandoned branches included. */
+  tree: Message[];
+  /** Leaf of the active branch. */
+  headId: string | null;
   run: RunState;
   /** Cards from the CURRENT run; committed to messages when the run finishes. */
   cards: Card[];
   jobs: StoredJob[];
+  /** Parts staged for the NEXT send (file/image attachments). Thread-scoped. */
+  attachments: ContentPart[];
   status: RunState["status"];
   error?: unknown;
 };
@@ -53,10 +70,27 @@ export type AgentClientConfig = {
   temperature?: number;
   maxOutputTokens?: number;
   reasoning?: RunConfig["reasoning"];
+  // Full RunConfig surface — a React host must not get LESS control than a
+  // direct runAgent caller.
+  stopWhen?: RunConfig["stopWhen"];
+  toolTimeoutMs?: number;
+  useServerHistory?: boolean;
+  toolChoice?: RunConfig["toolChoice"];
+  providerTools?: RunConfig["providerTools"];
+  responseFormat?: RunConfig["responseFormat"];
+  topP?: number;
+  stopSequences?: string[];
+  store?: boolean;
+  metadata?: Record<string, string>;
+  providerOptions?: RunConfig["providerOptions"];
   jobStore?: JobStore;
+  /** When set, the thread is saved after each user and assistant turn. */
+  threadStore?: ThreadStore;
   onHostTool?: (call: ToolCallRequest) => Promise<unknown>;
-  /** Persisted thread to hydrate from. */
+  /** Persisted thread to hydrate from (linear list or a parentId tree). */
   initialMessages?: Message[];
+  /** Active-branch leaf when `initialMessages` is a tree. Default: last message. */
+  initialHeadId?: string | null;
   threadId?: string;
 };
 
@@ -68,17 +102,59 @@ export class AgentClient {
   private config: AgentClientConfig;
   private controller: AbortController | null = null;
   private pending = new Map<string, PendingDecision>();
+  /** Meta of the last snapshot saved, so createdAt/title survive re-saves. */
+  private threadMeta: ThreadMeta | undefined;
+  /**
+   * Bumped by every thread switch. A run captures the value it started under
+   * and stops writing to the store the moment they diverge — so a run dying
+   * from `openThread()`'s stop() cannot leak its error/status/commit into the
+   * thread the user just opened.
+   */
+  private generation = 0;
 
   constructor(config: AgentClientConfig) {
     this.config = config;
+    // `initialMessages` may be a plain linear list (pre-branching hosts) or a
+    // tree with parentIds (a v2 snapshot); linkLinear handles both.
+    const tree = linkLinear(config.initialMessages ?? []);
+    const headId = config.initialHeadId ?? tree.at(-1)?.id ?? null;
     this.store = new Store<ThreadState>({
       id: config.threadId ?? nextId("thread"),
-      messages: config.initialMessages ?? [],
+      messages: pathTo(tree, headId),
+      tree,
+      headId,
       run: initialRunState("", config.mode ?? "stream"),
       cards: [],
       jobs: [],
+      attachments: [],
       status: "idle",
     });
+  }
+
+  /** Append under `parent` (default: the current head) and move the head there. */
+  private appendMessage(message: Message, parent?: string | null): void {
+    this.store.set((s) => {
+      const parentId = parent !== undefined ? parent : s.headId;
+      const linked: Message = { ...message, parentId };
+      const tree = [...s.tree, linked];
+      return { ...s, tree, headId: linked.id, messages: pathTo(tree, linked.id) };
+    });
+  }
+
+  /**
+   * Stage a part (a file/image the host uploaded) for the next send. The
+   * Composer only carries text; this is how binary content joins the turn.
+   */
+  attach(part: ContentPart): void {
+    this.store.set((s) => ({ ...s, attachments: [...s.attachments, part] }));
+  }
+
+  removeAttachment(index: number): void {
+    this.store.set((s) => ({ ...s, attachments: s.attachments.filter((_, i) => i !== index) }));
+  }
+
+  clearAttachments(): void {
+    this.store.set((s) => (s.attachments.length ? { ...s, attachments: [] } : s));
   }
 
   /** Update config in place (model switch, preset toggle) without losing the thread. */
@@ -95,31 +171,68 @@ export class AgentClient {
     return status === "running" || status === "awaiting-user";
   }
 
-  /** Append a user message and run a turn. */
+  /** Append a user message (plus any staged attachments) and run a turn. */
   async send(input: string | ContentPart[], opts: { forceSkillIds?: string[] } = {}): Promise<void> {
     if (this.isRunning) throw new Error("A run is already in progress. Call stop() first.");
-    const message = userMessage(input);
-    this.store.set((s) => ({ ...s, messages: [...s.messages, message] }));
+    const staged = this.store.get().attachments;
+    const parts: ContentPart[] = typeof input === "string" ? [{ type: "text", text: input }] : [...input];
+    const message = userMessage(staged.length ? [...parts, ...staged] : input);
+    this.appendMessage(message);
+    this.store.set((s) => ({ ...s, attachments: [] }));
+    // Persist the user turn before running — a reload mid-run keeps it.
+    this.persist();
     await this.run([...this.store.get().messages], opts);
   }
 
-  /** Re-run from the last user message, discarding the assistant turn after it. */
+  /**
+   * Re-run from the last user message. A FORK, not a rewrite: the head moves
+   * back to that user message and the new answer grows as a sibling of the
+   * old one, which stays switchable via `switchBranch`.
+   */
   async regenerate(opts: { forceSkillIds?: string[] } = {}): Promise<void> {
     if (this.isRunning) throw new Error("A run is already in progress.");
     const { messages } = this.store.get();
-    let cut = messages.length;
     for (let i = messages.length - 1; i >= 0; i -= 1) {
-      if (messages[i]?.role === "user") {
-        cut = i + 1;
-        break;
+      const m = messages[i]!;
+      if (m.role === "user") {
+        this.store.set((s) => ({ ...s, headId: m.id, messages: pathTo(s.tree, m.id) }));
+        await this.run([...this.store.get().messages], opts);
+        return;
       }
     }
-    const trimmed = messages.slice(0, cut);
-    this.store.set((s) => ({ ...s, messages: trimmed }));
-    await this.run(trimmed, opts);
+  }
+
+  /**
+   * Edit a user message: a SIBLING fork under the same parent, preserving the
+   * original and everything under it. The edited branch runs immediately.
+   */
+  async editMessage(messageId: string, input: string | ContentPart[], opts: { forceSkillIds?: string[] } = {}): Promise<void> {
+    if (this.isRunning) throw new Error("A run is already in progress.");
+    const original = this.store.get().tree.find((m) => m.id === messageId);
+    if (!original || original.role !== "user") return;
+    this.appendMessage(userMessage(input), original.parentId ?? null);
+    this.persist();
+    await this.run([...this.store.get().messages], opts);
+  }
+
+  /**
+   * Move the active branch to a SIBLING of `messageId` (delta −1/+1 in
+   * insertion order), resuming at that branch's latest leaf.
+   */
+  switchBranch(messageId: string, delta: number): void {
+    if (this.isRunning) return; // switching under a live run would cross-write threads of the same id
+    const s = this.store.get();
+    const siblings = siblingsOf(s.tree, messageId);
+    if (siblings.length < 2) return;
+    const index = siblings.findIndex((m) => m.id === messageId);
+    const next = siblings[(index + delta + siblings.length) % siblings.length]!;
+    const headId = latestLeaf(s.tree, next.id);
+    this.store.set((prev) => ({ ...prev, headId, messages: pathTo(prev.tree, headId) }));
+    this.persist();
   }
 
   private async run(messages: Message[], opts: { forceSkillIds?: string[] }): Promise<void> {
+    const gen = this.generation;
     this.controller = new AbortController();
     const mode = this.config.mode ?? "stream";
     this.store.set((s) => ({
@@ -142,6 +255,17 @@ export class AgentClient {
       temperature: this.config.temperature,
       maxOutputTokens: this.config.maxOutputTokens,
       reasoning: this.config.reasoning,
+      stopWhen: this.config.stopWhen,
+      toolTimeoutMs: this.config.toolTimeoutMs,
+      useServerHistory: this.config.useServerHistory,
+      toolChoice: this.config.toolChoice,
+      providerTools: this.config.providerTools,
+      responseFormat: this.config.responseFormat,
+      topP: this.config.topP,
+      stopSequences: this.config.stopSequences,
+      store: this.config.store,
+      metadata: this.config.metadata,
+      providerOptions: this.config.providerOptions,
       signal: this.controller.signal,
       forceSkillIds: opts.forceSkillIds,
       onHostTool: this.config.onHostTool,
@@ -154,13 +278,14 @@ export class AgentClient {
 
     try {
       for await (const event of runAgent(messages, runConfig)) {
+        if (gen !== this.generation) return; // thread switched under us — drop the rest
         this.apply(event);
       }
     } catch (e) {
-      this.store.set((s) => ({ ...s, status: "error", error: e }));
+      if (gen === this.generation) this.store.set((s) => ({ ...s, status: "error", error: e }));
     } finally {
       this.controller = null;
-      this.commitRun();
+      if (gen === this.generation) this.commitRun();
     }
   }
 
@@ -207,12 +332,88 @@ export class AgentClient {
         data: c.spec,
       }));
 
+      const linked: Message = { ...assistantMessage([...parts, ...cardParts]), parentId: s.headId };
+      const tree = [...s.tree, linked];
       return {
         ...s,
-        messages: [...s.messages, assistantMessage([...parts, ...cardParts])],
+        tree,
+        headId: linked.id,
+        messages: pathTo(tree, linked.id),
         status: s.run.status,
       };
     });
+    this.persist();
+  }
+
+  /**
+   * Fire-and-forget save, the same posture as the job store put: persistence
+   * must not stall the run, and a failed save degrades to "not saved", never
+   * to a broken thread.
+   */
+  private persist(): void {
+    const store = this.config.threadStore;
+    if (!store) return;
+    const s = this.store.get();
+    if (this.threadMeta && this.threadMeta.id !== s.id) this.threadMeta = undefined;
+    void (async () => {
+      // A client hydrated via config (threadId/initialMessages) has no meta in
+      // hand; read the stored one so createdAt and title survive the reload.
+      const prior = this.threadMeta ?? (await store.load(s.id))?.meta;
+      // The TREE persists — abandoned branches included — plus the active head.
+      const snapshot = threadSnapshot(s.id, s.tree, prior, s.headId);
+      this.threadMeta = snapshot.meta;
+      await store.save(snapshot);
+    })().catch(() => {
+      // Fire-and-forget: a failed save degrades to "not saved", never a crash.
+    });
+  }
+
+  /**
+   * Load a stored thread and replace the current one. Returns false when the
+   * id is unknown (the current thread is left untouched).
+   */
+  async openThread(id: string): Promise<boolean> {
+    const store = this.config.threadStore;
+    if (!store) return false;
+    const stored = await store.load(id);
+    if (!stored) return false;
+    this.generation += 1; // invalidate any in-flight run before replacing state
+    this.stop();
+    this.threadMeta = stored.meta;
+    const tree = linkLinear(stored.messages);
+    const headId = stored.headId ?? tree.at(-1)?.id ?? null;
+    this.store.set((s) => ({
+      ...s,
+      id: stored.meta.id,
+      tree,
+      headId,
+      messages: pathTo(tree, headId),
+      cards: [],
+      attachments: [],
+      run: initialRunState("", this.config.mode ?? "stream"),
+      status: "idle",
+      error: undefined,
+    }));
+    return true;
+  }
+
+  /** Start a fresh thread under a new id (`clear()` keeps the id; this doesn't). */
+  newThread(): void {
+    this.generation += 1;
+    this.stop();
+    this.threadMeta = undefined;
+    this.store.set((s) => ({
+      ...s,
+      id: nextId("thread"),
+      messages: [],
+      tree: [],
+      headId: null,
+      cards: [],
+      attachments: [],
+      run: initialRunState("", this.config.mode ?? "stream"),
+      status: "idle",
+      error: undefined,
+    }));
   }
 
   /** Answer an interactive card. Unblocks the suspended tool. */
@@ -230,6 +431,13 @@ export class AgentClient {
 
   stop(): void {
     this.controller?.abort();
+    // A background job keeps running (and billing) server-side after a local
+    // abort — cancel it there too, best-effort.
+    const job = this.store.get().run.job;
+    if (job && this.config.provider.cancelJob && !["completed", "failed", "cancelled"].includes(job.status)) {
+      void this.config.provider.cancelJob(job.handle).catch(() => {});
+      void this.config.jobStore?.remove(job.handle.id);
+    }
     // Release any suspended tool so the run can unwind instead of hanging.
     for (const [callId, entry] of this.pending) {
       entry.resolve({ cardId: entry.card.id, callId, kind: "cancel", type: "cancel", at: Date.now() });
@@ -238,29 +446,64 @@ export class AgentClient {
   }
 
   clear(): void {
+    this.generation += 1;
     this.stop();
-    this.store.set((s) => ({ ...s, messages: [], cards: [], run: initialRunState("", this.config.mode ?? "stream"), status: "idle", error: undefined }));
+    this.store.set((s) => ({
+      ...s,
+      messages: [],
+      tree: [],
+      headId: null,
+      cards: [],
+      attachments: [],
+      run: initialRunState("", this.config.mode ?? "stream"),
+      status: "idle",
+      error: undefined,
+    }));
+    // Without this, reload restores the conversation the user just cleared.
+    this.persist();
   }
 
-  /** Re-poll background jobs from a previous session. Call on mount. */
+  /**
+   * Re-poll background jobs from a previous session. Call on mount.
+   *
+   * Results are routed by `StoredJob.threadId`: the current thread gets its
+   * results appended live; another thread's results are written into its
+   * stored snapshot (when a ThreadStore is configured), so an answer to
+   * thread A never gets pasted into thread B.
+   */
   async resumeBackgroundJobs(): Promise<void> {
     const store = this.config.jobStore;
     if (!store) return;
     const results = await resumeJobs(store, { [this.config.provider.id]: this.config.provider });
     this.store.set((s) => ({ ...s, jobs: results.map((r) => r.job) }));
 
-    for (const { snapshot } of results) {
-      if (snapshot.status === "completed" && snapshot.result) {
-        this.store.set((s) => ({ ...s, messages: [...s.messages, assistantMessage(snapshot.result!.parts)] }));
-      } else if (snapshot.status === "failed") {
-        this.store.set((s) => ({
-          ...s,
-          messages: [
-            ...s.messages,
-            assistantMessage([{ type: "text", text: `_${snapshot.error?.message ?? "A background job failed."}_` }]),
-          ],
-        }));
+    for (const { job, snapshot } of results) {
+      const parts: ContentPart[] | null =
+        snapshot.status === "completed" && snapshot.result
+          ? snapshot.result.parts
+          : snapshot.status === "failed"
+            ? [{ type: "text", text: `_${snapshot.error?.message ?? "A background job failed."}_` }]
+            : null;
+      if (!parts) continue;
+
+      const currentId = this.store.get().id;
+      if (!job.threadId || job.threadId === currentId) {
+        this.appendMessage(assistantMessage(parts));
+        if (job.threadId === currentId) this.persist();
+        continue;
       }
+
+      // The job belongs to a thread that is not open. Land the result there,
+      // appended under that thread's own head.
+      const threads = this.config.threadStore;
+      if (!threads) continue; // nowhere to put it; the handle was already reaped
+      const stored = await threads.load(job.threadId);
+      if (!stored) continue;
+      const awayHead = stored.headId ?? stored.messages.at(-1)?.id ?? null;
+      const appended: Message = { ...assistantMessage(parts), parentId: awayHead };
+      await threads.save(
+        threadSnapshot(job.threadId, [...stored.messages, appended], stored.meta, appended.id),
+      );
     }
   }
 }

@@ -5,7 +5,7 @@
 // reload — a chart that reshuffles each render makes it impossible to tell a
 // rendering bug from new data.
 
-import { withCard, type ToolDefinition } from "@agentloom/core";
+import { withCard, type ToolDefinition } from "@superchat/core";
 
 const INSTRUMENTS = [
   { symbol: "SUI", name: "Sui", venue: "crypto", base: 3.42 },

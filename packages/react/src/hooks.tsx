@@ -10,10 +10,22 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import type { Card, CardAction, ContextTrace, Message, Skill, ToolDefinition } from "@agentloom/core";
+import {
+  siblingsOf,
+  type AppStateBinding,
+  type Card,
+  type CardAction,
+  type ContentPart,
+  type ContextTrace,
+  type Message,
+  type Skill,
+  type ThreadMeta,
+  type ToolDefinition,
+} from "@superchat/core";
 import { AgentClient, type AgentClientConfig, type ThreadState } from "./client.js";
 
 const AgentContext = createContext<AgentClient | null>(null);
@@ -65,11 +77,35 @@ export function useThread() {
       error,
       send: (input: Parameters<AgentClient["send"]>[0], opts?: Parameters<AgentClient["send"]>[1]) => client.send(input, opts),
       regenerate: () => client.regenerate(),
+      editMessage: (id: string, input: Parameters<AgentClient["send"]>[0]) => client.editMessage(id, input),
       stop: () => client.stop(),
       clear: () => client.clear(),
       isRunning: status === "running" || status === "awaiting-user",
     }),
     [client, messages, status, error],
+  );
+}
+
+/**
+ * Branch position of one message: its index among siblings and the switcher
+ * actions. `count === 1` means no branches — render nothing.
+ */
+export function useBranches(messageId: string): { index: number; count: number; prev: () => void; next: () => void } {
+  const client = useAgentClient();
+  const info = useAgentState(
+    (s) => {
+      const siblings = siblingsOf(s.tree, messageId);
+      return { index: siblings.findIndex((m) => m.id === messageId), count: siblings.length };
+    },
+    (a, b) => a.index === b.index && a.count === b.count,
+  );
+  return useMemo(
+    () => ({
+      ...info,
+      prev: () => client.switchBranch(messageId, -1),
+      next: () => client.switchBranch(messageId, +1),
+    }),
+    [client, messageId, info],
   );
 }
 
@@ -154,6 +190,12 @@ export function useTools(): { all: ToolDefinition[]; active: string[]; presets: 
     (a, b) => a?.length === b?.length && (a ?? []).every((n, i) => n === b?.[i]),
   );
   const config = client.getConfig();
+  // Re-read after LATE registrations (an MCP import lands long after mount).
+  const registryVersion = useSyncExternalStore(
+    useCallback((cb: () => void) => config.tools.subscribe(cb), [config.tools]),
+    () => config.tools.getVersion(),
+    () => config.tools.getVersion(),
+  );
 
   return useMemo(() => {
     const base = config.tools.resolve(config.toolResolution).map((t) => t.name);
@@ -166,7 +208,7 @@ export function useTools(): { all: ToolDefinition[]; active: string[]; presets: 
       presets: [...config.toolResolution.presets],
       fromRun: Boolean(recorded?.length),
     };
-  }, [config, recorded]);
+  }, [config, recorded, registryVersion]);
 }
 
 export function useJobs() {
@@ -183,6 +225,108 @@ export function useJobs() {
   }, [client]);
 
   return jobs;
+}
+
+/**
+ * Bind a piece of React state so the agent can SEE it.
+ *
+ * The binding reads through a ref that this hook keeps current, so the source
+ * always observes the latest render's value rather than the value captured
+ * when the binding was created — the stale-closure bug this seam would
+ * otherwise walk into every time.
+ *
+ * Returns a stable `AppStateBinding`; pass the array of them to
+ * `createAppStateSource()` when constructing the ContextBuilder.
+ */
+export function useAppState<T>(
+  id: string,
+  value: T,
+  description: string,
+  opts: { serialize?: (v: T) => string; when?: (v: T) => boolean } = {},
+): AppStateBinding<T> {
+  const latest = useRef(value);
+  latest.current = value;
+  const optsRef = useRef(opts);
+  optsRef.current = opts;
+
+  return useMemo(
+    () => ({
+      id,
+      description,
+      read: () => latest.current,
+      serialize: (v: T) => (optsRef.current.serialize ?? ((x: T) => JSON.stringify(x, null, 2)))(v),
+      when: (v: T) => (optsRef.current.when ? optsRef.current.when(v) : true),
+    }),
+    [id, description],
+  );
+}
+
+/** Parts staged for the next send, plus the stage/unstage actions. */
+export function useAttachments(): {
+  attachments: ContentPart[];
+  attach: (part: ContentPart) => void;
+  remove: (index: number) => void;
+  clear: () => void;
+} {
+  const client = useAgentClient();
+  const attachments = useAgentState((s) => s.attachments);
+  return useMemo(
+    () => ({
+      attachments,
+      attach: (part: ContentPart) => client.attach(part),
+      remove: (index: number) => client.removeAttachment(index),
+      clear: () => client.clearAttachments(),
+    }),
+    [client, attachments],
+  );
+}
+
+/**
+ * Stored threads, for a thread picker.
+ *
+ * Refreshes whenever the ACTIVE thread id changes (open/new/switch) and after
+ * every save-worthy status transition, so the list tracks reality without the
+ * host wiring anything. No `threadStore` configured → empty list, inert actions.
+ */
+export function useThreadList(): {
+  threads: ThreadMeta[];
+  activeId: string;
+  refresh: () => Promise<void>;
+  open: (id: string) => Promise<boolean>;
+  create: () => void;
+  remove: (id: string) => Promise<void>;
+} {
+  const client = useAgentClient();
+  const activeId = useAgentState((s) => s.id);
+  const status = useAgentState((s) => s.status);
+  const [threads, setThreads] = useState<ThreadMeta[]>([]);
+
+  const refresh = useCallback(async () => {
+    const store = client.getConfig().threadStore;
+    setThreads(store ? await store.list() : []);
+  }, [client]);
+
+  useEffect(() => {
+    // `status` is a dependency on purpose: a run finishing is when the client
+    // saves, so it is exactly when the list's metadata goes stale.
+    void refresh();
+  }, [refresh, activeId, status]);
+
+  return useMemo(
+    () => ({
+      threads,
+      activeId,
+      refresh,
+      open: (id: string) => client.openThread(id),
+      create: () => client.newThread(),
+      remove: async (id: string) => {
+        await client.getConfig().threadStore?.remove(id);
+        if (id === client.store.get().id) client.newThread();
+        await refresh();
+      },
+    }),
+    [client, threads, activeId, refresh],
+  );
 }
 
 /** Construct a client once and keep it stable across renders. */

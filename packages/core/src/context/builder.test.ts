@@ -149,7 +149,7 @@ describe("compaction", () => {
     });
 
     expect(result.strategy).toBe("summarize");
-    expect(result.messages[0]?.metadata?.["agentloom"]).toBe("compaction-summary");
+    expect(result.messages[0]?.metadata?.["superchat"]).toBe("compaction-summary");
     expect(result.messages.at(-1)).toEqual(messages.at(-1));
   });
 
@@ -165,7 +165,7 @@ describe("compaction", () => {
     });
 
     expect(result.strategy).toBe("summarize");
-    expect(result.messages[0]?.metadata?.["agentloom"]).toBe("compaction-summary");
+    expect(result.messages[0]?.metadata?.["superchat"]).toBe("compaction-summary");
     expect(result.tokensAfter).toBeLessThanOrEqual(300);
   });
 

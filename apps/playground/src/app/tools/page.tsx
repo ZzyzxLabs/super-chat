@@ -1,19 +1,57 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
+import { McpClient, createHttpTransport, createMcpSkill, importMcpTools } from "@superchat/core";
 import { PanelHeader } from "@/components/Shell";
-import { buildToolRegistry } from "@/agent/setup";
+import { skills, toolRegistry } from "@/agent/setup";
 
 const PRESETS = ["observer", "executor"] as const;
 
 export default function ToolsPanel() {
-  const registry = useMemo(() => buildToolRegistry(), []);
+  // The SHARED registry — imports done here are live in the /run agent too.
+  const registry = toolRegistry;
+  useSyncExternalStore(
+    (cb) => registry.subscribe(cb),
+    () => registry.getVersion(),
+    () => registry.getVersion(),
+  );
   const [enabled, setEnabled] = useState<string[]>(["observer"]);
   const [open, setOpen] = useState<string | null>(null);
 
+  const [mcpUrl, setMcpUrl] = useState("/api/mcp");
+  const [importing, setImporting] = useState(false);
+  const [imported, setImported] = useState<string[]>([]);
+  const [allowImported, setAllowImported] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+
+  const importFromMcp = async () => {
+    setImporting(true);
+    setImportError(null);
+    try {
+      const client = new McpClient({ transport: createHttpTransport({ baseUrl: mcpUrl }) });
+      const { serverInfo } = await client.connect();
+      const defs = await importMcpTools(client);
+      // NO preset: imported tools are skill-gated/private, like every other
+      // domain tool. Import grants existence, never authority.
+      registry.registerAll(defs);
+      // The relevance half: a matched skill naming the tools, so the /run
+      // agent surfaces them when the conversation is about them.
+      skills.register(createMcpSkill(serverInfo.name, defs));
+      setImported(defs.map((d) => d.name));
+    } catch (e) {
+      setImportError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const resolution = {
+    presets: enabled,
+    ...(allowImported && imported.length ? { allow: imported } : {}),
+  };
   const all = registry.list();
-  const exposed = new Set(registry.resolve({ presets: enabled }).map((t) => t.name));
-  const specs = registry.toSpecs(registry.resolve({ presets: enabled }));
+  const exposed = new Set(registry.resolve(resolution).map((t) => t.name));
+  const specs = registry.toSpecs(registry.resolve(resolution));
 
   return (
     <div className="dev__page">
@@ -32,15 +70,15 @@ export default function ToolsPanel() {
                 checked={enabled.includes(p)}
                 onChange={(e) => setEnabled((prev) => (e.target.checked ? [...prev, p] : prev.filter((x) => x !== p)))}
               />
-              <code className="al-mono">{p}</code>
+              <code className="sc-mono">{p}</code>
             </label>
           ))}
-          <span className="al-muted" style={{ fontSize: 12 }}>
+          <span className="sc-muted" style={{ fontSize: 12 }}>
             {exposed.size} of {all.length} tools exposed
           </span>
         </div>
 
-        <table className="al-table">
+        <table className="sc-table">
           <thead>
             <tr>
               <th>Tool</th>
@@ -56,10 +94,10 @@ export default function ToolsPanel() {
               return (
                 <tr key={t.name} style={{ opacity: exposed.has(t.name) ? 1 : 0.45 }}>
                   <td>
-                    <button type="button" className="al-th-btn" onClick={() => setOpen(open === t.name ? null : t.name)}>
-                      <code className="al-mono">{t.name}</code>
+                    <button type="button" className="sc-th-btn" onClick={() => setOpen(open === t.name ? null : t.name)}>
+                      <code className="sc-mono">{t.name}</code>
                     </button>
-                    <div className="al-muted" style={{ fontSize: 11, maxWidth: "44ch", lineHeight: 1.4 }}>
+                    <div className="sc-muted" style={{ fontSize: 11, maxWidth: "44ch", lineHeight: 1.4 }}>
                       {t.description.split("\n")[0]!.slice(0, 96)}
                       {t.description.length > 96 ? "…" : ""}
                     </div>
@@ -67,21 +105,21 @@ export default function ToolsPanel() {
                   <td>
                     {grants.length ? (
                       grants.map((g) => (
-                        <span key={g} className={`al-pill${g === "executor" ? " al-pill--warning" : ""}`}>
+                        <span key={g} className={`sc-pill${g === "executor" ? " sc-pill--warning" : ""}`}>
                           {g}
                         </span>
                       ))
                     ) : (
-                      <span className="al-pill al-pill--negative">none — private</span>
+                      <span className="sc-pill sc-pill--negative">none — private</span>
                     )}
                   </td>
                   <td>
-                    <span className={`al-pill${t.side === "confirm" ? " al-pill--warning" : ""}`}>{t.side ?? "read"}</span>
+                    <span className={`sc-pill${t.side === "confirm" ? " sc-pill--warning" : ""}`}>{t.side ?? "read"}</span>
                   </td>
-                  <td className="al-muted" style={{ fontSize: 11 }}>
+                  <td className="sc-muted" style={{ fontSize: 11 }}>
                     {typeof t.execute === "function" ? "in-process" : "host"}
                   </td>
-                  <td>{exposed.has(t.name) ? <span className="al-tone--positive">✓</span> : <span className="al-muted">—</span>}</td>
+                  <td>{exposed.has(t.name) ? <span className="sc-tone--positive">✓</span> : <span className="sc-muted">—</span>}</td>
                 </tr>
               );
             })}
@@ -92,23 +130,70 @@ export default function ToolsPanel() {
       {open ? (
         <section className="dev__section">
           <h2 className="dev__section-title">
-            <code className="al-mono">{open}</code> — what the model sees
+            <code className="sc-mono">{open}</code> — what the model sees
           </h2>
           <p className="dev__section-note">{registry.get(open)?.description}</p>
-          <pre className="al-pre dev__code">{JSON.stringify(registry.get(open)?.inputSchema, null, 2)}</pre>
+          <pre className="sc-pre dev__code">{JSON.stringify(registry.get(open)?.inputSchema, null, 2)}</pre>
         </section>
       ) : null}
 
       <section className="dev__section">
         <h2 className="dev__section-title">Rendered tool specs</h2>
         <p className="dev__section-note">
-          What <code className="al-mono">ToolRegistry.toSpecs()</code> hands the adapter for the current preset
+          What <code className="sc-mono">ToolRegistry.toSpecs()</code> hands the adapter for the current preset
           selection. The adapter then reshapes it per dialect — flat for Responses, nested under{" "}
-          <code className="al-mono">function</code> for Chat Completions. See the wire panel.
+          <code className="sc-mono">function</code> for Chat Completions. See the wire panel.
         </p>
-        <pre className="al-pre dev__code" style={{ maxHeight: 420 }}>
+        <pre className="sc-pre dev__code" style={{ maxHeight: 420 }}>
           {JSON.stringify(specs, null, 2)}
         </pre>
+      </section>
+
+      <section className="dev__section">
+        <h2 className="dev__section-title">Import from MCP</h2>
+        <p className="dev__section-note">
+          <code className="sc-mono">importMcpTools()</code> maps an MCP server&apos;s tool list onto{" "}
+          <code className="sc-mono">ToolDefinition</code>s — namespaced, with an executor that calls back through the
+          server. Imported tools register into the <strong>shared</strong> registry with <strong>no preset</strong>{" "}
+          (private — import grants existence, never authority), and <code className="sc-mono">createMcpSkill()</code>{" "}
+          registers a matched skill naming them — so on <code className="sc-mono">/run</code>, asking about e.g. a word
+          count surfaces and unlocks them like any domain tool. The allow toggle below simulates that match manually.
+          The default URL is this playground&apos;s own mock MCP route — no key, real HTTP.
+        </p>
+        <div className="dev__row">
+          <input
+            className="dev__select"
+            style={{ minWidth: "22ch" }}
+            value={mcpUrl}
+            onChange={(e) => setMcpUrl(e.target.value)}
+            placeholder="/api/mcp"
+          />
+          <button type="button" className="sc-btn sc-btn--sm" disabled={importing || !mcpUrl.trim()} onClick={() => void importFromMcp()}>
+            {importing ? "Connecting…" : imported.length ? "Re-import" : "Connect & import"}
+          </button>
+          {imported.length ? (
+            <label className="dev__toggle" title="What a matched skill's `tools` list would do">
+              <input type="checkbox" checked={allowImported} onChange={(e) => setAllowImported(e.target.checked)} />
+              allow imported (as a skill would)
+            </label>
+          ) : null}
+        </div>
+        {importError ? (
+          <p className="sc-muted" style={{ color: "var(--sc-negative, #c00)", fontSize: 12 }}>
+            {importError}
+          </p>
+        ) : null}
+        {imported.length ? (
+          <p className="sc-muted" style={{ fontSize: 12 }}>
+            Imported {imported.length} tool{imported.length === 1 ? "" : "s"}:{" "}
+            {imported.map((n) => (
+              <code key={n} className="sc-mono" style={{ marginRight: 6 }}>
+                {n}
+              </code>
+            ))}
+            — now toggle the allow switch and watch the Exposed column.
+          </p>
+        ) : null}
       </section>
 
       <section className="dev__section">
@@ -117,7 +202,7 @@ export default function ToolsPanel() {
           All three work, so a tool author never has to know which one the runtime checks. Whichever is used, the card
           reaches the UI and is stripped from the output before the next provider call.
         </p>
-        <pre className="al-pre dev__code">{`// 1. explicit result field
+        <pre className="sc-pre dev__code">{`// 1. explicit result field
 return { output: { n: 1 }, card: { kind: "stats", items: [...] } };
 
 // 2. embedded in the output

@@ -18,48 +18,48 @@ import type {
   GaugeCard,
   TreeCard,
   TreeNode,
-} from "@agentloom/core";
+} from "@superchat/core";
 import type { CardRendererProps } from "../renderer-registry.js";
 import { formatValue, toneClass } from "../format.js";
 
 export function ComparisonCardView({ spec }: CardRendererProps<ComparisonCard>) {
   return (
-    <div className="al-card">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      <div className="al-table-wrap">
-        <table className="al-table al-compare">
+    <div className="sc-card">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      <div className="sc-table-wrap">
+        <table className="sc-table sc-compare">
           <thead>
             <tr>
               <th />
               {spec.options.map((o) => (
-                <th key={o.id} className={o.highlight ? "al-compare__best" : undefined}>
+                <th key={o.id} className={o.highlight ? "sc-compare__best" : undefined}>
                   <div>{o.label}</div>
-                  {o.note ? <div className="al-muted al-compare__note">{o.note}</div> : null}
+                  {o.note ? <div className="sc-muted sc-compare__note">{o.note}</div> : null}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {spec.criteria.map((c, i) => (
-              <tr key={i} className={c.weight === "high" ? "al-compare__key" : undefined}>
+              <tr key={i} className={c.weight === "high" ? "sc-compare__key" : undefined}>
                 <th scope="row">
                   {c.label}
-                  {c.detail ? <div className="al-muted al-compare__note">{c.detail}</div> : null}
+                  {c.detail ? <div className="sc-muted sc-compare__note">{c.detail}</div> : null}
                 </th>
                 {spec.options.map((o) => {
                   const v = c.values[o.id];
                   return (
-                    <td key={o.id} className={o.highlight ? "al-compare__best" : undefined}>
+                    <td key={o.id} className={o.highlight ? "sc-compare__best" : undefined}>
                       {v === true ? (
-                        <span className="al-tone--positive" aria-label="yes">
+                        <span className="sc-tone--positive" aria-label="yes">
                           ✓
                         </span>
                       ) : v === false ? (
-                        <span className="al-tone--negative" aria-label="no">
+                        <span className="sc-tone--negative" aria-label="no">
                           ✕
                         </span>
                       ) : v == null ? (
-                        <span className="al-muted">—</span>
+                        <span className="sc-muted">—</span>
                       ) : (
                         formatValue(v)
                       )}
@@ -94,25 +94,25 @@ export function ChecklistCardView({ spec }: CardRendererProps<ChecklistCard>) {
   const relevant = spec.items.filter((i) => i.status !== "na").length;
 
   return (
-    <div className="al-card">
-      <div className="al-card__head">
-        {spec.title ? <span className="al-card__title">{spec.title}</span> : <span />}
-        <span className="al-pill">
+    <div className="sc-card">
+      <div className="sc-card__head">
+        {spec.title ? <span className="sc-card__title">{spec.title}</span> : <span />}
+        <span className="sc-pill">
           {done}/{relevant} done
         </span>
       </div>
       {groups.map((g, gi) => (
-        <div key={gi} className="al-checkgroup">
-          {g.name ? <div className="al-panel__label">{g.name}</div> : null}
-          <ul className="al-checklist">
+        <div key={gi} className="sc-checkgroup">
+          {g.name ? <div className="sc-panel__label">{g.name}</div> : null}
+          <ul className="sc-checklist">
             {g.items.map((item, i) => (
-              <li key={i} className={`al-check al-check--${item.status}`}>
-                <span className="al-check__icon" aria-hidden>
+              <li key={i} className={`sc-check sc-check--${item.status}`}>
+                <span className="sc-check__icon" aria-hidden>
                   {CHECK_ICON[item.status] ?? "○"}
                 </span>
-                <span className="al-check__body">
-                  <span className="al-check__label">{item.label}</span>
-                  {item.detail ? <span className="al-muted al-check__detail">{item.detail}</span> : null}
+                <span className="sc-check__body">
+                  <span className="sc-check__label">{item.label}</span>
+                  {item.detail ? <span className="sc-muted sc-check__detail">{item.detail}</span> : null}
                 </span>
               </li>
             ))}
@@ -127,13 +127,13 @@ const CALLOUT_ICON: Record<string, string> = { info: "i", warning: "!", danger: 
 
 export function CalloutCardView({ spec }: CardRendererProps<CalloutCard>) {
   return (
-    <div className={`al-card al-callout al-callout--${spec.tone}`} role={spec.tone === "danger" ? "alert" : undefined}>
-      <span className="al-callout__icon" aria-hidden>
+    <div className={`sc-card sc-callout sc-callout--${spec.tone}`} role={spec.tone === "danger" ? "alert" : undefined}>
+      <span className="sc-callout__icon" aria-hidden>
         {CALLOUT_ICON[spec.tone] ?? "·"}
       </span>
       <div>
-        {spec.title ? <div className="al-callout__title">{spec.title}</div> : null}
-        <div className="al-callout__body">{spec.body}</div>
+        {spec.title ? <div className="sc-callout__title">{spec.title}</div> : null}
+        <div className="sc-callout__body">{spec.body}</div>
       </div>
     </div>
   );
@@ -141,16 +141,16 @@ export function CalloutCardView({ spec }: CardRendererProps<CalloutCard>) {
 
 export function CitationsCardView({ spec }: CardRendererProps<CitationsCard>) {
   return (
-    <div className="al-card">
-      <div className="al-card__title">{spec.title ?? "Sources"}</div>
-      <ol className="al-cites">
+    <div className="sc-card">
+      <div className="sc-card__title">{spec.title ?? "Sources"}</div>
+      <ol className="sc-cites">
         {spec.items.map((item, i) => (
-          <li key={i} className="al-cite">
-            <span className="al-cite__n" aria-hidden>
+          <li key={i} className="sc-cite">
+            <span className="sc-cite__n" aria-hidden>
               {i + 1}
             </span>
-            <div className="al-cite__body">
-              <div className="al-cite__head">
+            <div className="sc-cite__body">
+              <div className="sc-cite__head">
                 {item.url ? (
                   // Model-supplied URLs: never trust the referrer, never let the
                   // opened page reach back via window.opener.
@@ -158,20 +158,20 @@ export function CitationsCardView({ spec }: CardRendererProps<CitationsCard>) {
                     {item.title}
                   </a>
                 ) : (
-                  <span className="al-cite__title">{item.title}</span>
+                  <span className="sc-cite__title">{item.title}</span>
                 )}
                 {item.relevance ? (
-                  <span className={`al-pill al-pill--${item.relevance === "high" ? "positive" : item.relevance === "low" ? "warning" : "info"}`}>
+                  <span className={`sc-pill sc-pill--${item.relevance === "high" ? "positive" : item.relevance === "low" ? "warning" : "info"}`}>
                     {item.relevance}
                   </span>
                 ) : null}
               </div>
-              <div className="al-muted al-cite__meta">
+              <div className="sc-muted sc-cite__meta">
                 {[item.source, item.locator, item.date ? formatValue(item.date, "datetime") : null]
                   .filter(Boolean)
                   .join(" · ")}
               </div>
-              {item.snippet ? <blockquote className="al-cite__snippet">{item.snippet}</blockquote> : null}
+              {item.snippet ? <blockquote className="sc-cite__snippet">{item.snippet}</blockquote> : null}
             </div>
           </li>
         ))}
@@ -184,9 +184,9 @@ export function FunnelCardView({ spec }: CardRendererProps<FunnelCard>) {
   const top = Math.max(...spec.stages.map((s) => s.value), 1);
 
   return (
-    <div className="al-card">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      <div className="al-funnel">
+    <div className="sc-card">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      <div className="sc-funnel">
         {spec.stages.map((stage, i) => {
           const prev = i > 0 ? spec.stages[i - 1]! : null;
           // Two rates, because they answer different questions: conversion from
@@ -194,21 +194,21 @@ export function FunnelCardView({ spec }: CardRendererProps<FunnelCard>) {
           // (how much survives end to end).
           const stepRate = prev && prev.value > 0 ? (stage.value / prev.value) * 100 : null;
           return (
-            <div key={i} className="al-funnel__row">
-              <div className="al-funnel__label">
+            <div key={i} className="sc-funnel__row">
+              <div className="sc-funnel__label">
                 {stage.label}
-                {stage.note ? <span className="al-muted al-funnel__note">{stage.note}</span> : null}
+                {stage.note ? <span className="sc-muted sc-funnel__note">{stage.note}</span> : null}
               </div>
-              <div className="al-funnel__track">
-                <div className="al-funnel__bar" style={{ width: `${Math.max(2, (stage.value / top) * 100)}%` }}>
-                  <span className="al-funnel__value">{formatValue(stage.value, spec.format ?? "number")}</span>
+              <div className="sc-funnel__track">
+                <div className="sc-funnel__bar" style={{ width: `${Math.max(2, (stage.value / top) * 100)}%` }}>
+                  <span className="sc-funnel__value">{formatValue(stage.value, spec.format ?? "number")}</span>
                 </div>
               </div>
-              <div className="al-funnel__rate">
+              <div className="sc-funnel__rate">
                 {stepRate == null ? (
-                  <span className="al-muted">—</span>
+                  <span className="sc-muted">—</span>
                 ) : (
-                  <span className={stepRate < 50 ? "al-tone--warning" : "al-muted"}>{stepRate.toFixed(1)}%</span>
+                  <span className={stepRate < 50 ? "sc-tone--warning" : "sc-muted"}>{stepRate.toFixed(1)}%</span>
                 )}
               </div>
             </div>
@@ -227,37 +227,37 @@ export function GaugeCardView({ spec }: CardRendererProps<GaugeCard>) {
   const band = spec.bands?.find((b) => clamped >= b.from && clamped <= b.to);
 
   return (
-    <div className="al-card">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      <div className="al-gauge">
-        <div className={`al-gauge__value${toneClass(band?.tone)}`}>{formatValue(spec.value, spec.format ?? "number")}</div>
+    <div className="sc-card">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      <div className="sc-gauge">
+        <div className={`sc-gauge__value${toneClass(band?.tone)}`}>{formatValue(spec.value, spec.format ?? "number")}</div>
         {band || spec.label ? (
-          <div className={`al-gauge__label${toneClass(band?.tone)}`}>{spec.label ?? band?.label}</div>
+          <div className={`sc-gauge__label${toneClass(band?.tone)}`}>{spec.label ?? band?.label}</div>
         ) : null}
       </div>
-      <div className="al-gauge__track" role="meter" aria-valuenow={clamped} aria-valuemin={min} aria-valuemax={max}>
+      <div className="sc-gauge__track" role="meter" aria-valuenow={clamped} aria-valuemin={min} aria-valuemax={max}>
         {(spec.bands ?? []).map((b, i) => (
           <div
             key={i}
-            className={`al-gauge__band al-tone--${b.tone ?? "neutral"}`}
+            className={`sc-gauge__band sc-tone--${b.tone ?? "neutral"}`}
             style={{ left: `${((b.from - min) / (max - min)) * 100}%`, width: `${((b.to - b.from) / (max - min)) * 100}%` }}
             title={b.label}
           />
         ))}
-        <div className="al-gauge__needle" style={{ left: `${pct}%` }} />
+        <div className="sc-gauge__needle" style={{ left: `${pct}%` }} />
       </div>
-      <div className="al-gauge__scale">
-        <span className="al-muted al-mono">{formatValue(min, spec.format ?? "number")}</span>
+      <div className="sc-gauge__scale">
+        <span className="sc-muted sc-mono">{formatValue(min, spec.format ?? "number")}</span>
         {spec.bands?.length ? (
-          <span className="al-gauge__bandlabels">
+          <span className="sc-gauge__bandlabels">
             {spec.bands.map((b, i) => (
-              <span key={i} className={`al-muted${band === b ? " al-gauge__bandlabel--on" : ""}`}>
+              <span key={i} className={`sc-muted${band === b ? " sc-gauge__bandlabel--on" : ""}`}>
                 {b.label}
               </span>
             ))}
           </span>
         ) : null}
-        <span className="al-muted al-mono">{formatValue(max, spec.format ?? "number")}</span>
+        <span className="sc-muted sc-mono">{formatValue(max, spec.format ?? "number")}</span>
       </div>
     </div>
   );
@@ -265,13 +265,13 @@ export function GaugeCardView({ spec }: CardRendererProps<GaugeCard>) {
 
 function TreeBranch({ node, depth }: { node: TreeNode; depth: number }) {
   return (
-    <li className={`al-treenode${toneClass(node.tone)}`}>
-      <div className="al-treenode__row">
-        <span className="al-treenode__label">{node.label}</span>
-        {node.detail ? <span className="al-muted al-treenode__detail">{node.detail}</span> : null}
+    <li className={`sc-treenode${toneClass(node.tone)}`}>
+      <div className="sc-treenode__row">
+        <span className="sc-treenode__label">{node.label}</span>
+        {node.detail ? <span className="sc-muted sc-treenode__detail">{node.detail}</span> : null}
       </div>
       {node.children?.length ? (
-        <ul className="al-tree__children">
+        <ul className="sc-tree__children">
           {node.children.map((child, i) => (
             <TreeBranch key={i} node={child} depth={depth + 1} />
           ))}
@@ -283,9 +283,9 @@ function TreeBranch({ node, depth }: { node: TreeNode; depth: number }) {
 
 export function TreeCardView({ spec }: CardRendererProps<TreeCard>) {
   return (
-    <div className="al-card">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      <ul className="al-tree">
+    <div className="sc-card">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      <ul className="sc-tree">
         {spec.nodes.map((n, i) => (
           <TreeBranch key={i} node={n} depth={0} />
         ))}

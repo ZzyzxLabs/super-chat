@@ -12,7 +12,6 @@
 //   4. Reasoning parts are echoed back only when they carry a provider id —
 //      a summary without its item id is not a valid input item.
 
-import { AgentError } from "../../errors.js";
 import type { ContentPart, Message } from "../../content/types.js";
 import type { NormalizedRequest, ToolSpec } from "../types.js";
 import type {
@@ -32,14 +31,21 @@ function dataUrl(mediaType: string, base64: string): string {
   return `data:${mediaType};base64,${base64}`;
 }
 
-function assertOwnFile(source: { kind: "providerFile"; id: string; provider: string }) {
-  if (source.provider !== "openai") {
-    throw new AgentError(
-      "invalid-request",
-      `File id "${source.id}" was uploaded to "${source.provider}" and cannot be used with OpenAI.`,
-      { provider: "openai" },
-    );
-  }
+// Compared against the ADAPTER's configured id, not a hardcoded "openai" — with
+// several instances (openai, groq, nvidia, demo) a file id minted by one is
+// meaningless to the others.
+const ownFile = (source: { provider: string }, providerId: string): boolean => source.provider === providerId;
+
+/**
+ * A foreign file ref DEGRADES to text instead of throwing. Throwing would be
+ * correct for the turn that attached it — but the ref lives in persisted
+ * history, so a throw poisons every subsequent turn of the thread (the exact
+ * failure mode dropOrphanToolCalls exists to prevent for tool calls). The
+ * model reading "[attachment unavailable]" can say so; a permanently 400ing
+ * thread can't say anything.
+ */
+function foreignFileText(kind: "image" | "file", filename: string | undefined, source: { id: string; provider: string }) {
+  return `[${kind} "${filename ?? source.id}" unavailable — it was uploaded to "${source.provider}" and cannot be read here. Ask the user to re-attach it.]`;
 }
 
 const stringifyOutput = (output: unknown): string =>
@@ -47,7 +53,7 @@ const stringifyOutput = (output: unknown): string =>
 
 // ── Responses API ───────────────────────────────────────────────────────────
 
-function toResponsesContent(part: ContentPart, role: "user" | "assistant"): ResponsesInputContent | null {
+function toResponsesContent(part: ContentPart, role: "user" | "assistant", providerId: string): ResponsesInputContent | null {
   switch (part.type) {
     case "text":
       // Assistant turns replay as output_text; user turns as input_text. Sending
@@ -63,13 +69,13 @@ function toResponsesContent(part: ContentPart, role: "user" | "assistant"): Resp
           ...(part.detail ? { detail: part.detail } : {}),
         };
       }
-      assertOwnFile(s);
+      if (!ownFile(s, providerId)) return { type: "input_text", text: foreignFileText("image", undefined, s) };
       return { type: "input_image", file_id: s.id, ...(part.detail ? { detail: part.detail } : {}) };
     }
     case "file": {
       const s = part.source;
       if (s.kind === "providerFile") {
-        assertOwnFile(s);
+        if (!ownFile(s, providerId)) return { type: "input_text", text: foreignFileText("file", part.filename, s) };
         return { type: "input_file", file_id: s.id };
       }
       if (s.kind === "base64") {
@@ -92,7 +98,7 @@ function toResponsesContent(part: ContentPart, role: "user" | "assistant"): Resp
   }
 }
 
-export function toResponsesInput(messages: readonly Message[]): ResponsesInputItem[] {
+export function toResponsesInput(messages: readonly Message[], providerId = "openai"): ResponsesInputItem[] {
   const items: ResponsesInputItem[] = [];
 
   for (const m of messages) {
@@ -142,7 +148,7 @@ export function toResponsesInput(messages: readonly Message[]): ResponsesInputIt
         }
         continue;
       }
-      const mapped = toResponsesContent(part, role);
+      const mapped = toResponsesContent(part, role, providerId);
       if (mapped) content.push(mapped);
     }
 
@@ -179,7 +185,14 @@ function toResponsesTools(tools: readonly ToolSpec[]): ResponsesTool[] {
   }));
 }
 
-export function buildResponsesRequest(req: NormalizedRequest, opts: { stream?: boolean } = {}): ResponsesRequest {
+export type BuildOptions = {
+  stream?: boolean;
+  providerId?: string;
+  /** Declared capability; when false the flag is omitted from the wire. */
+  parallelToolCalls?: boolean;
+};
+
+export function buildResponsesRequest(req: NormalizedRequest, opts: BuildOptions = {}): ResponsesRequest {
   // Hoist leading system messages into `instructions`; that is where Responses
   // wants them and it keeps them out of the cacheable input array.
   const systemFromMessages = req.messages
@@ -194,13 +207,17 @@ export function buildResponsesRequest(req: NormalizedRequest, opts: { stream?: b
 
   const out: ResponsesRequest = {
     model: req.model,
-    input: toResponsesInput(messages.filter((m) => m.role !== "system")),
+    input: toResponsesInput(messages.filter((m) => m.role !== "system"), opts.providerId),
   };
   if (instructions && !req.previousResponseId) out.instructions = instructions;
-  if (req.tools?.length) {
-    out.tools = toResponsesTools(req.tools);
-    out.tool_choice = toResponsesToolChoice(req);
-    out.parallel_tool_calls = true;
+  // Provider-hosted tools ride in the SAME array as function tools — they are
+  // declarations, not executors — and are appended verbatim: the vendor owns
+  // this shape and versions it on their cadence, not ours.
+  const nativeTools = (req.providerTools?.[opts.providerId ?? "openai"] ?? []) as Record<string, unknown>[];
+  if (req.tools?.length || nativeTools.length) {
+    out.tools = [...(req.tools?.length ? toResponsesTools(req.tools) : []), ...nativeTools] as ResponsesTool[];
+    if (req.tools?.length) out.tool_choice = toResponsesToolChoice(req);
+    if (opts.parallelToolCalls !== false) out.parallel_tool_calls = true;
   }
   if (req.maxOutputTokens != null) out.max_output_tokens = req.maxOutputTokens;
   if (req.temperature != null) out.temperature = req.temperature;
@@ -223,7 +240,18 @@ export function buildResponsesRequest(req: NormalizedRequest, opts: { stream?: b
   } else if (req.store != null) {
     out.store = req.store;
   }
+  mergeProviderOptions(out as Record<string, unknown>, req, opts.providerId);
   return out;
+}
+
+/**
+ * `providerOptions[providerId]` is THE escape hatch: fields the normalized
+ * request has no name for are merged verbatim onto the wire object, last, so
+ * they can also override anything the builder chose.
+ */
+function mergeProviderOptions(out: Record<string, unknown>, req: NormalizedRequest, providerId = "openai"): void {
+  const extra = req.providerOptions?.[providerId];
+  if (extra) Object.assign(out, extra);
 }
 
 /** With `previous_response_id` set, only messages after the last assistant turn are new. */
@@ -263,7 +291,7 @@ function toResponsesFormat(f: NonNullable<NormalizedRequest["responseFormat"]>):
 
 // ── Chat Completions ────────────────────────────────────────────────────────
 
-function toChatContent(part: ContentPart): ChatContentPart | null {
+function toChatContent(part: ContentPart, providerId: string): ChatContentPart | null {
   switch (part.type) {
     case "text":
       return { type: "text", text: part.text };
@@ -272,16 +300,17 @@ function toChatContent(part: ContentPart): ChatContentPart | null {
       const url =
         s.kind === "url" ? s.url : s.kind === "base64" ? dataUrl(part.mediaType ?? "image/png", s.data) : null;
       if (!url) {
-        assertOwnFile(s as { kind: "providerFile"; id: string; provider: string });
+        const pf = s as { kind: "providerFile"; id: string; provider: string };
+        if (!ownFile(pf, providerId)) return { type: "text", text: foreignFileText("image", undefined, pf) };
         // Chat Completions has no image-by-file_id form; the file part does.
-        return { type: "file", file: { file_id: (s as { id: string }).id } };
+        return { type: "file", file: { file_id: pf.id } };
       }
       return { type: "image_url", image_url: { url, ...(part.detail ? { detail: part.detail } : {}) } };
     }
     case "file": {
       const s = part.source;
       if (s.kind === "providerFile") {
-        assertOwnFile(s);
+        if (!ownFile(s, providerId)) return { type: "text", text: foreignFileText("file", part.filename, s) };
         return { type: "file", file: { file_id: s.id } };
       }
       if (s.kind === "base64") {
@@ -302,7 +331,7 @@ function toChatContent(part: ContentPart): ChatContentPart | null {
   }
 }
 
-export function toChatMessages(messages: readonly Message[], system?: string): ChatMessage[] {
+export function toChatMessages(messages: readonly Message[], system?: string, providerId = "openai"): ChatMessage[] {
   const out: ChatMessage[] = [];
   if (system) out.push({ role: "system", content: system });
 
@@ -349,7 +378,7 @@ export function toChatMessages(messages: readonly Message[], system?: string): C
       out.push({ role: "tool", tool_call_id: p.callId, content: stringifyOutput(p.output) });
     }
 
-    const content = m.parts.map(toChatContent).filter((c): c is ChatContentPart => c !== null);
+    const content = m.parts.map((p) => toChatContent(p, providerId)).filter((c): c is ChatContentPart => c !== null);
     if (content.length) {
       // Collapse a lone text part to a bare string — the shape every
       // OpenAI-compatible router understands, including older ones.
@@ -393,18 +422,19 @@ function toChatTools(tools: readonly ToolSpec[]): ChatTool[] {
   }));
 }
 
-export function buildChatRequest(req: NormalizedRequest, opts: { stream?: boolean } = {}): ChatRequest {
+export function buildChatRequest(req: NormalizedRequest, opts: BuildOptions = {}): ChatRequest {
   const out: ChatRequest = {
     model: req.model,
-    messages: toChatMessages(req.messages, req.system),
+    messages: toChatMessages(req.messages, req.system, opts.providerId),
   };
-  if (req.tools?.length) {
+  const nativeChatTools = (req.providerTools?.[opts.providerId ?? "openai"] ?? []) as Record<string, unknown>[];
+  if (req.tools?.length || nativeChatTools.length) {
     // Chat Completions has no activeTools concept, so narrowing here really does
     // mean shipping fewer declarations.
-    const active = req.activeTools ? req.tools.filter((t) => req.activeTools!.includes(t.name)) : req.tools;
-    if (active.length) {
-      out.tools = toChatTools(active);
-      out.parallel_tool_calls = true;
+    const active = req.activeTools ? (req.tools ?? []).filter((t) => req.activeTools!.includes(t.name)) : (req.tools ?? []);
+    if (active.length || nativeChatTools.length) {
+      out.tools = [...(active.length ? toChatTools(active) : []), ...nativeChatTools] as ChatTool[];
+      if (opts.parallelToolCalls !== false) out.parallel_tool_calls = true;
       switch (req.toolChoice?.type) {
         case "none":
           out.tool_choice = "none";
@@ -446,5 +476,6 @@ export function buildChatRequest(req: NormalizedRequest, opts: { stream?: boolea
     // every streamed turn meters as zero tokens.
     out.stream_options = { include_usage: true };
   }
+  mergeProviderOptions(out as Record<string, unknown>, req, opts.providerId);
   return out;
 }

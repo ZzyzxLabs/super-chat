@@ -1,5 +1,5 @@
 {
-  "name": "@agentloom/playground",
+  "name": "@superchat/playground",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,9 +9,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@agentloom/core": "workspace:*",
-    "@agentloom/react": "workspace:*",
-    "@agentloom/ui": "workspace:*",
+    "@superchat/core": "workspace:*",
+    "@superchat/react": "workspace:*",
+    "@superchat/ui": "workspace:*",
     "next": "^15.1.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

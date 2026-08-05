@@ -19,7 +19,7 @@ apps/playground   Next.js dev panels. runs with NO API key.
 
 ```bash
 pnpm install && pnpm build && pnpm dev     # → http://localhost:3210
-pnpm test                                  # 107 tests, ~3s
+pnpm test                                  # 237 tests, ~3s
 ```
 
 The playground is **not a product**. It is six panels, one per capability, aimed
@@ -27,9 +27,14 @@ at a developer evaluating the framework: `/cards` `/skills` `/tools` `/requests`
 `/run`. That framing was an explicit instruction — don't quietly turn it back
 into an app.
 
-**Naming**: the repo is `SuperChat`, the packages are `@agentloom/*`. That split
-is unresolved — nobody has decided whether the framework keeps the agentloom name.
-Ask before renaming; it touches every import.
+**Naming**: resolved. The framework was called `agentloom` and is now **superchat**,
+matching the repo — packages `@superchat/*`, CSS prefix `sc-`, storage keys
+`superchat:*`. Nothing in the tree answers to the old name except
+`runtime/storage.ts`, which is a deliberate shim: every read of a `superchat:`
+localStorage key falls back once to its `agentloom:` twin and promotes the value,
+so a browser that used the pre-rename build keeps its threads, memories, uploaded
+file refs and job handles. That file is removable — delete it and its four call
+sites when the old keys stop being worth carrying.
 
 ---
 
@@ -112,14 +117,14 @@ has a regression test now; the test names spell out the failure.
   while `next dev` is live corrupts the running server and the page goes blank.
   Stop the server first.
 - **`tsup --clean` wipes `dist` on every rebuild.** That is why
-  `@agentloom/ui`'s `styles.css` export points at `src/`, not `dist/` — a
+  `@superchat/ui`'s `styles.css` export points at `src/`, not `dist/` — a
   consuming dev server that compiles during the wipe fails on a missing
   stylesheet. Don't "tidy" it back into dist.
 - **Next's webpack does not resolve `.js` specifiers to `.ts`** in app source.
   Inside `apps/playground/src`, import without the extension. The workspace
   packages are fine because they resolve to built `dist`.
 - **Typecheck order matters.** `packages/react` and `packages/ui` resolve
-  `@agentloom/core` through its built `dist`, so build core before typechecking
+  `@superchat/core` through its built `dist`, so build core before typechecking
   them. `pnpm -r typecheck` after `pnpm build` is the safe order.
 - **G: is slow.** Scope searches; avoid unscoped recursive `find`/`du` here.
 - The one thing verified only by DOM inspection, never visually: the browser pane
@@ -155,29 +160,22 @@ check the work instead of trusting a summary.
 
 ## Where to pick up
 
-Roughly in value order.
+Since the original handoff, the roadmap items were built (file upload, thread
+persistence + branching, MCP import + elicitation, the Anthropic adapter, the
+memory and retrieval seams — see README's Status section), and an integration
+audit fixed the seams that existed but didn't connect (loadSkill unlock,
+updateCard upsert, shared playground registry, thread-switch generation guard,
+job-resume routing, foreign-file degrade). What remains:
 
-1. **Look at the panels in a browser.** See the caveat above. This is genuinely
-   step one.
-2. **A second provider adapter — Anthropic or Gemini.** The `Provider` seam was
-   designed for exactly this: `capabilities` describes what a provider can do and
-   `providerOptions` is the per-provider escape hatch. Doing this is also the
-   real test of whether the normalized content model holds up. Anthropic's
-   thinking-signature replay is the interesting part; the `reasoning` part's
-   `signature` field already exists for it.
-3. **File upload (`/v1/files`).** `MediaSource` already has a `providerFile`
-   variant and the adapters already refuse a file id minted by another provider.
-   What's missing is the upload call and a place to keep the ids.
-4. **Persistence beyond `localStorage`.** `JobStore` is the interface; there is a
-   memory impl and a localStorage impl. A thread store does not exist at all —
-   `AgentClient` holds messages in memory and the host is expected to persist
-   them. That gap should be closed deliberately, not by bolting state onto the
-   client.
-5. **MCP tool import.** `ToolDefinition` is already plain JSON Schema plus an
-   executor, so an MCP server's tool list maps onto it almost directly.
-6. **Streaming through the proxy under load.** The BFF streams the upstream body
-   straight through, which is correct, but nothing has been tested with more than
-   one concurrent stream.
+Nothing on the previous roadmap is outstanding — concurrent proxy streaming now
+has a test, the REST `ThreadStore` ships, provider-native tools pass through,
+and the app-state seam landed. What is genuinely open:
+
+1. **A third provider (Gemini).** Two adapters proved the normalized content
+   model holds; a third is now routine rather than risky.
+2. **Nobody has driven the app-state panel against a live model.** The demo
+   transport is scripted, so the board actions are exercised by tests and by
+   hand — not by an actual model deciding to call them.
 
 Deliberately *not* done, and worth leaving alone unless asked: multi-agent
 orchestration, a plugin system, and any kind of visual builder. The framework's

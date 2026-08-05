@@ -3,7 +3,7 @@
 // Centralised because a table cell and a stat tile showing the same number in
 // different formats is the fastest way to make an interface look untrustworthy.
 
-import type { CardValueFormat } from "@agentloom/core";
+import type { CardValueFormat } from "@superchat/core";
 
 const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 });
 const plain = new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 });
@@ -68,7 +68,7 @@ export function formatDelta(delta: number, format: CardValueFormat = "number"): 
   return `${sign}${formatValue(delta, format)}`;
 }
 
-export const toneClass = (tone?: string): string => (tone && tone !== "neutral" ? ` al-tone--${tone}` : "");
+export const toneClass = (tone?: string): string => (tone && tone !== "neutral" ? ` sc-tone--${tone}` : "");
 
 /** Positive is not always good — but for a delta with no stated tone it is the useful default. */
 export const deltaTone = (delta: number): "positive" | "negative" | "neutral" =>

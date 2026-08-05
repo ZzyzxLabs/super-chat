@@ -10,7 +10,7 @@
 //     what the user actually chose.
 
 import { useState } from "react";
-import type { ChoiceCard, ConfirmCard, FormCard, FormField } from "@agentloom/core";
+import type { ChoiceCard, ConfirmCard, FormCard, FormField } from "@superchat/core";
 import type { CardRendererProps } from "../renderer-registry.js";
 import { formatValue, toneClass } from "../format.js";
 
@@ -31,18 +31,18 @@ export function ChoiceCardView({ spec, card, respond, answered }: CardRendererPr
   };
 
   return (
-    <div className="al-card al-card--interactive">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      {spec.prompt ? <p className="al-card__prompt">{spec.prompt}</p> : null}
+    <div className="sc-card sc-card--interactive">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      {spec.prompt ? <p className="sc-card__prompt">{spec.prompt}</p> : null}
 
-      <div className="al-choices" role={spec.multiple ? "group" : "radiogroup"}>
+      <div className="sc-choices" role={spec.multiple ? "group" : "radiogroup"}>
         {spec.options.map((opt) => {
           const isSelected = (submitted ?? selected).includes(opt.id);
           return (
             <button
               key={opt.id}
               type="button"
-              className={`al-choice${isSelected ? " al-choice--selected" : ""}`}
+              className={`sc-choice${isSelected ? " sc-choice--selected" : ""}`}
               disabled={done || opt.disabled}
               title={opt.disabled ? opt.disabledReason : undefined}
               aria-pressed={isSelected}
@@ -50,20 +50,20 @@ export function ChoiceCardView({ spec, card, respond, answered }: CardRendererPr
             >
               {opt.imageUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img className="al-choice__img" src={opt.imageUrl} alt="" loading="lazy" />
+                <img className="sc-choice__img" src={opt.imageUrl} alt="" loading="lazy" />
               ) : null}
-              <span className="al-choice__body">
-                <span className="al-choice__label">{opt.label}</span>
-                {opt.description ? <span className="al-muted al-choice__desc">{opt.description}</span> : null}
+              <span className="sc-choice__body">
+                <span className="sc-choice__label">{opt.label}</span>
+                {opt.description ? <span className="sc-muted sc-choice__desc">{opt.description}</span> : null}
                 {opt.disabled && opt.disabledReason ? (
-                  <span className="al-choice__desc al-tone--warning">{opt.disabledReason}</span>
+                  <span className="sc-choice__desc sc-tone--warning">{opt.disabledReason}</span>
                 ) : null}
               </span>
               {opt.meta?.length ? (
-                <span className="al-choice__meta">
+                <span className="sc-choice__meta">
                   {opt.meta.map((m, i) => (
-                    <span key={i} className="al-choice__metaitem">
-                      <span className="al-muted">{m.label}</span>
+                    <span key={i} className="sc-choice__metaitem">
+                      <span className="sc-muted">{m.label}</span>
                       <strong>{formatValue(m.value, m.format)}</strong>
                     </span>
                   ))}
@@ -75,13 +75,13 @@ export function ChoiceCardView({ spec, card, respond, answered }: CardRendererPr
       </div>
 
       {spec.multiple && !done ? (
-        <div className="al-card__actions">
-          <button type="button" className="al-btn al-btn--primary" disabled={!selected.length} onClick={() => submit(selected)}>
+        <div className="sc-card__actions">
+          <button type="button" className="sc-btn sc-btn--primary" disabled={!selected.length} onClick={() => submit(selected)}>
             Confirm selection ({selected.length})
           </button>
           <button
             type="button"
-            className="al-btn al-btn--ghost"
+            className="sc-btn sc-btn--ghost"
             onClick={() => {
               setSubmitted([]);
               respond?.({ cardId: card.id, callId: card.callId, kind: "choice", type: "cancel" });
@@ -92,7 +92,7 @@ export function ChoiceCardView({ spec, card, respond, answered }: CardRendererPr
         </div>
       ) : null}
 
-      {done ? <div className="al-muted al-card__footnote">Answered.</div> : null}
+      {done ? <div className="sc-muted sc-card__footnote">Answered.</div> : null}
     </div>
   );
 }
@@ -121,7 +121,7 @@ export function FormCardView({ spec, card, respond, answered }: CardRendererProp
 
   return (
     <form
-      className="al-card al-card--interactive"
+      className="sc-card sc-card--interactive"
       onSubmit={(e) => {
         e.preventDefault();
         if (done || missing.length) return;
@@ -133,19 +133,19 @@ export function FormCardView({ spec, card, respond, answered }: CardRendererProp
         respond?.({ cardId: card.id, callId: card.callId, kind: "form", type: "submit", value: coerced });
       }}
     >
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      {spec.description ? <p className="al-card__prompt">{spec.description}</p> : null}
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      {spec.description ? <p className="sc-card__prompt">{spec.description}</p> : null}
 
-      <div className="al-form">
+      <div className="sc-form">
         {spec.fields.map((f) => (
-          <label key={f.name} className="al-field">
-            <span className="al-field__label">
+          <label key={f.name} className="sc-field">
+            <span className="sc-field__label">
               {f.label}
-              {"required" in f && f.required ? <span className="al-tone--negative"> *</span> : null}
+              {"required" in f && f.required ? <span className="sc-tone--negative"> *</span> : null}
             </span>
             {f.type === "textarea" ? (
               <textarea
-                className="al-input"
+                className="sc-input"
                 rows={3}
                 disabled={done}
                 placeholder={f.placeholder}
@@ -153,7 +153,7 @@ export function FormCardView({ spec, card, respond, answered }: CardRendererProp
                 onChange={(e) => set(f.name, e.target.value)}
               />
             ) : f.type === "select" ? (
-              <select className="al-input" disabled={done} value={String(values[f.name] ?? "")} onChange={(e) => set(f.name, e.target.value)}>
+              <select className="sc-input" disabled={done} value={String(values[f.name] ?? "")} onChange={(e) => set(f.name, e.target.value)}>
                 {f.options.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
@@ -163,9 +163,9 @@ export function FormCardView({ spec, card, respond, answered }: CardRendererProp
             ) : f.type === "boolean" ? (
               <input type="checkbox" disabled={done} checked={Boolean(values[f.name])} onChange={(e) => set(f.name, e.target.checked)} />
             ) : (
-              <span className="al-input-group">
+              <span className="sc-input-group">
                 <input
-                  className="al-input"
+                  className="sc-input"
                   type={f.type === "number" ? "number" : "text"}
                   disabled={done}
                   placeholder={"placeholder" in f ? f.placeholder : undefined}
@@ -175,7 +175,7 @@ export function FormCardView({ spec, card, respond, answered }: CardRendererProp
                   value={String(values[f.name] ?? "")}
                   onChange={(e) => set(f.name, e.target.value)}
                 />
-                {f.type === "number" && f.suffix ? <span className="al-input-group__suffix">{f.suffix}</span> : null}
+                {f.type === "number" && f.suffix ? <span className="sc-input-group__suffix">{f.suffix}</span> : null}
               </span>
             )}
           </label>
@@ -183,13 +183,13 @@ export function FormCardView({ spec, card, respond, answered }: CardRendererProp
       </div>
 
       {!done ? (
-        <div className="al-card__actions">
-          <button type="submit" className="al-btn al-btn--primary" disabled={missing.length > 0}>
+        <div className="sc-card__actions">
+          <button type="submit" className="sc-btn sc-btn--primary" disabled={missing.length > 0}>
             {spec.submitLabel ?? "Submit"}
           </button>
           <button
             type="button"
-            className="al-btn al-btn--ghost"
+            className="sc-btn sc-btn--ghost"
             onClick={() => {
               setSubmitted(true);
               respond?.({ cardId: card.id, callId: card.callId, kind: "form", type: "cancel" });
@@ -197,10 +197,10 @@ export function FormCardView({ spec, card, respond, answered }: CardRendererProp
           >
             Cancel
           </button>
-          {missing.length ? <span className="al-muted">{missing.length} required field(s) left.</span> : null}
+          {missing.length ? <span className="sc-muted">{missing.length} required field(s) left.</span> : null}
         </div>
       ) : (
-        <div className="al-muted al-card__footnote">Submitted.</div>
+        <div className="sc-muted sc-card__footnote">Submitted.</div>
       )}
     </form>
   );
@@ -217,30 +217,30 @@ export function ConfirmCardView({ spec, card, respond, answered }: CardRendererP
   };
 
   return (
-    <div className={`al-card al-card--interactive${spec.danger ? " al-card--danger" : ""}`}>
-      <div className="al-card__title">{spec.title}</div>
-      {spec.description ? <p className="al-card__prompt">{spec.description}</p> : null}
+    <div className={`sc-card sc-card--interactive${spec.danger ? " sc-card--danger" : ""}`}>
+      <div className="sc-card__title">{spec.title}</div>
+      {spec.description ? <p className="sc-card__prompt">{spec.description}</p> : null}
 
-      <dl className="al-kv">
+      <dl className="sc-kv">
         {spec.summary.map((row, i) => (
-          <div key={i} className="al-kv__row">
+          <div key={i} className="sc-kv__row">
             <dt>{row.label}</dt>
-            <dd className={`${row.mono ? "al-mono" : ""}${toneClass(row.tone)}`}>{formatValue(row.value)}</dd>
+            <dd className={`${row.mono ? "sc-mono" : ""}${toneClass(row.tone)}`}>{formatValue(row.value)}</dd>
           </div>
         ))}
       </dl>
 
       {!done ? (
-        <div className="al-card__actions">
-          <button type="button" className={`al-btn ${spec.danger ? "al-btn--danger" : "al-btn--primary"}`} onClick={() => decide("confirm")}>
+        <div className="sc-card__actions">
+          <button type="button" className={`sc-btn ${spec.danger ? "sc-btn--danger" : "sc-btn--primary"}`} onClick={() => decide("confirm")}>
             {spec.confirmLabel ?? "Confirm"}
           </button>
-          <button type="button" className="al-btn al-btn--ghost" onClick={() => decide("cancel")}>
+          <button type="button" className="sc-btn sc-btn--ghost" onClick={() => decide("cancel")}>
             {spec.cancelLabel ?? "Cancel"}
           </button>
         </div>
       ) : (
-        <div className={`al-card__footnote al-tone--${decision === "confirm" ? "positive" : "warning"}`}>
+        <div className={`sc-card__footnote sc-tone--${decision === "confirm" ? "positive" : "warning"}`}>
           {decision === "confirm" ? "Confirmed." : "Declined."}
         </div>
       )}

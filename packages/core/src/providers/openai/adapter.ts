@@ -12,6 +12,7 @@ import { errorFromResponse, withRetry } from "../../transport/retry.js";
 import type { RetryPolicy, Transport } from "../../transport/types.js";
 import type {
   CallOptions,
+  FileUploadRequest,
   GenerateResult,
   JobHandle,
   JobSnapshot,
@@ -19,6 +20,7 @@ import type {
   NormalizedRequest,
   Provider,
   ProviderCapabilities,
+  ProviderFileRef,
   StreamEvent,
 } from "../types.js";
 import { buildChatRequest, buildResponsesRequest } from "./map-in.js";
@@ -54,6 +56,7 @@ const RESPONSES_CAPS: ProviderCapabilities = {
   reasoning: true,
   strictJsonSchema: true,
   serverSideHistory: true,
+  fileUpload: true,
 };
 
 const CHAT_CAPS: ProviderCapabilities = {
@@ -62,6 +65,9 @@ const CHAT_CAPS: ProviderCapabilities = {
   resumableStreams: false,
   audio: true,
   serverSideHistory: false,
+  // Most OpenAI-compatible routers implement /chat/completions but not /files.
+  // Override via `capabilities` for the ones that do.
+  fileUpload: false,
 };
 
 export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
@@ -75,7 +81,12 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
   /** Every HTTP call funnels through here so retry + error mapping happen once. */
   async function call(
     path: string,
-    init: { method: "GET" | "POST"; body?: unknown; stream?: boolean; query?: Record<string, string | number | boolean | undefined> },
+    init: {
+      method: "GET" | "POST" | "DELETE";
+      body?: unknown;
+      stream?: boolean;
+      query?: Record<string, string | number | boolean | undefined>;
+    },
     opts?: CallOptions,
   ): Promise<Response> {
     return withRetry(
@@ -108,7 +119,34 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
     if (req.tools?.length && !capabilities.tools) {
       throw new AgentError("not-supported", `Provider "${id}" does not support tools.`, { provider: id });
     }
+    // Media guards: a text-only compatible endpoint should fail HERE with a
+    // capability error, not upstream with an inscrutable 400.
+    const unsupported = (type: "image" | "file" | "audio") =>
+      req.messages.some((m) => m.parts.some((p) => p.type === type));
+    if (!capabilities.images && unsupported("image")) {
+      throw new AgentError("not-supported", `Provider "${id}" does not accept image parts.`, { provider: id });
+    }
+    if (!capabilities.files && unsupported("file")) {
+      throw new AgentError("not-supported", `Provider "${id}" does not accept file parts.`, { provider: id });
+    }
+    if (!capabilities.audio && unsupported("audio")) {
+      throw new AgentError("not-supported", `Provider "${id}" does not accept audio parts.`, { provider: id });
+    }
   }
+
+  /** Apply declared capabilities to the request before it reaches a builder. */
+  function applyCapabilities(req: NormalizedRequest): NormalizedRequest {
+    if (capabilities.strictJsonSchema || !req.tools?.some((t) => t.strict)) return req;
+    // Strict mode on an endpoint that lacks it 400s; dropping the flag keeps
+    // the tool usable with plain (non-guaranteed) schema conformance.
+    return { ...req, tools: req.tools.map(({ strict: _strict, ...t }) => t) };
+  }
+
+  const buildOpts = (stream?: boolean) => ({
+    ...(stream ? { stream: true } : {}),
+    providerId: id,
+    parallelToolCalls: capabilities.parallelToolCalls,
+  });
 
   function resultFromResponses(r: ResponsesResponse): GenerateResult {
     return {
@@ -127,11 +165,12 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
     capabilities,
     transport: config.transport,
 
-    async generate(req, opts): Promise<GenerateResult> {
-      guardRequest(req);
+    async generate(rawReq, opts): Promise<GenerateResult> {
+      guardRequest(rawReq);
+      const req = applyCapabilities(rawReq);
 
       if (dialect === "responses") {
-        const res = await call("/responses", { method: "POST", body: buildResponsesRequest(req) }, opts);
+        const res = await call("/responses", { method: "POST", body: buildResponsesRequest(req, buildOpts()) }, opts);
         const json = (await res.json()) as ResponsesResponse;
         if (json.status === "failed" && json.error) {
           throw new AgentError("unknown", json.error.message, { provider: id, detail: json.error });
@@ -139,7 +178,7 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
         return resultFromResponses(json);
       }
 
-      const res = await call("/chat/completions", { method: "POST", body: buildChatRequest(req) }, opts);
+      const res = await call("/chat/completions", { method: "POST", body: buildChatRequest(req, buildOpts()) }, opts);
       const json = (await res.json()) as ChatResponse;
       return {
         parts: partsFromChat(json),
@@ -151,13 +190,14 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
       };
     },
 
-    async *stream(req, opts): AsyncIterable<StreamEvent> {
-      guardRequest(req);
+    async *stream(rawReq, opts): AsyncIterable<StreamEvent> {
+      guardRequest(rawReq);
+      const req = applyCapabilities(rawReq);
       try {
         if (dialect === "responses") {
           const res = await call(
             "/responses",
-            { method: "POST", body: buildResponsesRequest(req, { stream: true }), stream: true },
+            { method: "POST", body: buildResponsesRequest(req, buildOpts(true)), stream: true },
             opts,
           );
           if (!res.body) throw new AgentError("network", "Response had no body to stream.", { provider: id });
@@ -166,7 +206,7 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
         }
         const res = await call(
           "/chat/completions",
-          { method: "POST", body: buildChatRequest(req, { stream: true }), stream: true },
+          { method: "POST", body: buildChatRequest(req, buildOpts(true)), stream: true },
           opts,
         );
         if (!res.body) throw new AgentError("network", "Response had no body to stream.", { provider: id });
@@ -178,11 +218,12 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
       }
     },
 
-    async startJob(req, opts): Promise<JobHandle> {
+    async startJob(rawReq, opts): Promise<JobHandle> {
       if (!capabilities.backgroundJobs) {
         throw new AgentError("not-supported", `Provider "${id}" has no background mode.`, { provider: id });
       }
-      const body = buildResponsesRequest({ ...req, background: true });
+      const req = applyCapabilities(rawReq);
+      const body = buildResponsesRequest({ ...req, background: true }, buildOpts());
       const res = await call("/responses", { method: "POST", body }, opts);
       const json = (await res.json()) as ResponsesResponse;
       return { provider: id, id: json.id, model: json.model || req.model, createdAt: Date.now() };
@@ -238,6 +279,51 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
       } catch (e) {
         yield { type: "error", error: toAgentError(e, id) };
       }
+    },
+
+    async uploadFile(req: FileUploadRequest, opts?: CallOptions): Promise<ProviderFileRef> {
+      if (!capabilities.fileUpload) {
+        throw new AgentError("not-supported", `Provider "${id}" has no file upload endpoint.`, { provider: id });
+      }
+      const data =
+        req.data instanceof Uint8Array
+          ? req.data
+          : req.data instanceof ArrayBuffer
+            ? new Uint8Array(req.data)
+            : new Uint8Array(await req.data.arrayBuffer());
+
+      const res = await call(
+        "/files",
+        {
+          method: "POST",
+          body: {
+            kind: "multipart",
+            fields: { purpose: req.purpose ?? "user_data" },
+            files: [
+              {
+                field: "file",
+                filename: req.filename,
+                ...(req.mediaType ? { mediaType: req.mediaType } : {}),
+                data,
+              },
+            ],
+          },
+        },
+        opts,
+      );
+      const json = (await res.json()) as { id: string; bytes?: number; created_at?: number; filename?: string };
+      return {
+        kind: "providerFile",
+        id: json.id,
+        provider: id,
+        filename: json.filename ?? req.filename,
+        ...(json.bytes != null ? { sizeBytes: json.bytes } : {}),
+        ...(json.created_at != null ? { createdAt: json.created_at * 1000 } : {}),
+      };
+    },
+
+    async deleteFile(fileId: string, opts?: CallOptions): Promise<void> {
+      await call(`/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, opts);
     },
 
     async listModels(opts): Promise<ModelInfo[]> {

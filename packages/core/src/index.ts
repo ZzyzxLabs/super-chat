@@ -1,17 +1,19 @@
-// @agentloom/core — public surface.
+// @superchat/core — public surface.
 
 // content
 export * from "./content/types.js";
 export * from "./content/parts.js";
+export { pathTo, childrenOf, siblingsOf, latestLeaf, linkLinear } from "./content/branching.js";
 
 // errors
 export { AgentError, isAgentError, toAgentError, kindFromStatus, type AgentErrorKind } from "./errors.js";
 
 // transport
-export type { Transport, TransportRequest, RetryPolicy } from "./transport/types.js";
-export { DEFAULT_RETRY } from "./transport/types.js";
+export type { Transport, TransportRequest, RetryPolicy, MultipartBody } from "./transport/types.js";
+export { DEFAULT_RETRY, isMultipartBody } from "./transport/types.js";
+export { bytesToBase64, base64ToBytes } from "./transport/binary.js";
 export { createDirectTransport, buildUrl, type DirectTransportConfig } from "./transport/direct.js";
-export { createProxyTransport, type ProxyTransportConfig, type ProxyEnvelope } from "./transport/proxy.js";
+export { createProxyTransport, type ProxyTransportConfig, type ProxyEnvelope, type SerializedMultipartBody } from "./transport/proxy.js";
 export { createProxyHandler, pathMatches, type ProxyHandlerConfig, type ProxyProviderConfig } from "./transport/server.js";
 export { withRetry, backoffDelay, errorFromResponse, parseRetryAfter } from "./transport/retry.js";
 export { parseSSE, parseSSEJson, SSEDecoder, type SSEMessage } from "./transport/sse.js";
@@ -33,6 +35,8 @@ export type {
   ResponseFormat,
   ReasoningOptions,
   CallOptions,
+  FileUploadRequest,
+  ProviderFileRef,
 } from "./providers/types.js";
 
 // tokens
@@ -89,11 +93,33 @@ export { runAgent, type RunConfig } from "./runtime/run.js";
 export { executeToolCall, executeToolCalls, compactError, type ToolCallRequest, type ToolCallOutcome, type ExecuteToolOptions } from "./runtime/execute-tools.js";
 export * from "./runtime/stop.js";
 export { createMemoryJobStore, createLocalJobStore, resumeJobs, reap, isTerminal, awaitJob, type JobStore, type StoredJob, type ResumeResult } from "./runtime/jobs.js";
+export { createMemoryFileStore, createLocalFileStore, type FileStore, type StoredFile } from "./runtime/files.js";
+export {
+  createMemoryThreadStore,
+  createLocalThreadStore,
+  createRestThreadStore,
+  threadSnapshot,
+  THREAD_SCHEMA_VERSION,
+  type ThreadStore,
+  type StoredThread,
+  type ThreadMeta,
+  type RestThreadStoreConfig,
+} from "./runtime/threads.js";
 
-// providers — the OpenAI adapter is also available at "@agentloom/core/openai"
+// memory, retrieval & app-state seams
+export * from "./memory/index.js";
+export * from "./retrieval/index.js";
+export * from "./app-state/index.js";
+
+// mcp
+export * from "./mcp/index.js";
+
+// providers — the OpenAI adapter is also available at "@superchat/core/openai"
 // for hosts that want to keep it out of a bundle that never calls OpenAI.
 export { createOpenAIProvider, type OpenAIProviderConfig, type OpenAIDialect } from "./providers/openai/adapter.js";
+export { createAnthropicProvider, type AnthropicProviderConfig } from "./providers/anthropic/adapter.js";
 // The request builders are exported deliberately: they are pure functions, and
 // being able to assert on the exact bytes a dialect produces is the difference
 // between "we craft requests correctly" as a claim and as something you can test.
 export { buildResponsesRequest, buildChatRequest } from "./providers/openai/map-in.js";
+export { buildAnthropicRequest } from "./providers/anthropic/map-in.js";

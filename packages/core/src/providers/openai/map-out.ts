@@ -106,7 +106,21 @@ export function partsFromResponses(r: ResponsesResponse): ContentPart[] {
       // `signature` carries the item id so the next turn can replay it — see the
       // reasoning branch in toResponsesInput.
       parts.push({ type: "reasoning", text, signature: rz.id });
+      continue;
     }
+    // Anything else the model emitted is a PROVIDER-HOSTED tool record
+    // (web_search_call, code_interpreter_call, …): work that happened
+    // server-side with no call for us to execute. Surface it as an artifact so
+    // the transcript shows the agent searched rather than the answer arriving
+    // from nowhere — artifacts are UI-only and stripped before the next
+    // request, so this costs nothing at request time.
+    const record = item as { type: string; id?: string; status?: string };
+    parts.push({
+      type: "artifact",
+      id: record.id ?? `${record.type}_${parts.length}`,
+      kind: `provider-tool:${record.type}`,
+      data: record,
+    });
   }
 
   return parts;

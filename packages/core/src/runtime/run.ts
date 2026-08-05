@@ -39,6 +39,19 @@ export type RunConfig = {
   temperature?: number;
   maxOutputTokens?: number;
   reasoning?: NormalizedRequest["reasoning"];
+  // Pass-throughs to NormalizedRequest — the adapter implements all of these;
+  // without this block no runAgent caller could ever set them.
+  toolChoice?: NormalizedRequest["toolChoice"];
+  /** Provider-hosted tools (web search, code interpreter), keyed by provider id. */
+  providerTools?: NormalizedRequest["providerTools"];
+  responseFormat?: NormalizedRequest["responseFormat"];
+  topP?: number;
+  stopSequences?: string[];
+  /** Provider-side conversation storage opt-out (OpenAI `store`). */
+  store?: boolean;
+  metadata?: Record<string, string>;
+  /** The per-provider escape hatch, keyed by provider id. */
+  providerOptions?: NormalizedRequest["providerOptions"];
   toolTimeoutMs?: number;
   signal?: AbortSignal;
   /**
@@ -93,9 +106,11 @@ export async function* runAgent(
 
     yield { type: "context-built", trace: context.trace, system: context.system, toolNames: context.toolNames };
 
-    // Skills may have unlocked tools beyond the base presets.
-    const activeTools = config.tools.resolve({ ...config.toolResolution, allow: context.toolNames });
-    const specs = config.tools.toSpecs(activeTools);
+    // Skills may have unlocked tools beyond the base presets. `let`, not
+    // `const`: a loadSkill outcome can unlock more mid-run (see below).
+    let unlockedNames = [...context.toolNames];
+    let activeTools = config.tools.resolve({ ...config.toolResolution, allow: unlockedNames });
+    let specs = config.tools.toSpecs(activeTools);
 
     let working: Message[] = [...context.messages];
 
@@ -108,8 +123,16 @@ export async function* runAgent(
         system: context.system,
         messages: working,
         ...(specs.length ? { tools: specs } : {}),
+        ...(config.providerTools ? { providerTools: config.providerTools } : {}),
+        ...(config.toolChoice ? { toolChoice: config.toolChoice } : {}),
         ...(config.temperature != null ? { temperature: config.temperature } : {}),
+        ...(config.topP != null ? { topP: config.topP } : {}),
         ...(config.maxOutputTokens != null ? { maxOutputTokens: config.maxOutputTokens } : {}),
+        ...(config.stopSequences?.length ? { stopSequences: config.stopSequences } : {}),
+        ...(config.responseFormat ? { responseFormat: config.responseFormat } : {}),
+        ...(config.store != null ? { store: config.store } : {}),
+        ...(config.metadata ? { metadata: config.metadata } : {}),
+        ...(config.providerOptions ? { providerOptions: config.providerOptions } : {}),
         ...(config.reasoning ? { reasoning: config.reasoning } : {}),
         ...(config.useServerHistory && previousResponseId && config.provider.capabilities.serverSideHistory
           ? { previousResponseId }
@@ -270,6 +293,17 @@ export async function* runAgent(
       working = [...working, { id: toolId, role: "tool", parts: providerParts, createdAt }];
       history = [...history, { id: toolId, role: "tool", parts: persistedParts, createdAt }];
 
+      // loadSkill's pull half: an outcome that unlocked tools re-resolves the
+      // active set so the names it announced are callable from the NEXT step.
+      // This does change the declared tool block mid-run — accepted: a cache
+      // miss on the remaining steps beats advertising tools that 404.
+      const unlocked = outcomes.flatMap((o) => o.unlockTools ?? []).filter((n) => !unlockedNames.includes(n));
+      if (unlocked.length) {
+        unlockedNames = [...unlockedNames, ...unlocked];
+        activeTools = config.tools.resolve({ ...config.toolResolution, allow: unlockedNames });
+        specs = config.tools.toSpecs(activeTools);
+      }
+
       step += 1;
       finishReason = stepFinish;
 
@@ -329,8 +363,15 @@ function collectStream(stream: AsyncIterable<StreamEvent>) {
         }
         case "reasoning-delta": {
           const last = parts[parts.length - 1];
-          if (last?.type === "reasoning") last.text += event.delta;
-          else parts.push({ type: "reasoning", text: event.delta, ...(event.signature ? { signature: event.signature } : {}) });
+          if (last?.type === "reasoning") {
+            last.text += event.delta;
+            // Anthropic's replay token (signature_delta) arrives at the END of
+            // a thinking block — stamp it onto the accumulated part, or replay
+            // never works in stream mode.
+            if (event.signature) last.signature = event.signature;
+          } else {
+            parts.push({ type: "reasoning", text: event.delta, ...(event.signature ? { signature: event.signature } : {}) });
+          }
           break;
         }
         case "tool-call-end":

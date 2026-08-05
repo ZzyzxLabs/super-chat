@@ -23,13 +23,13 @@ importers:
 
   apps/playground:
     dependencies:
-      '@agentloom/core':
+      '@superchat/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@agentloom/react':
+      '@superchat/react':
         specifier: workspace:*
         version: link:../../packages/react
-      '@agentloom/ui':
+      '@superchat/ui':
         specifier: workspace:*
         version: link:../../packages/ui
       next:
@@ -66,7 +66,7 @@ importers:
 
   packages/react:
     dependencies:
-      '@agentloom/core':
+      '@superchat/core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -85,10 +85,10 @@ importers:
 
   packages/ui:
     dependencies:
-      '@agentloom/core':
+      '@superchat/core':
         specifier: workspace:*
         version: link:../core
-      '@agentloom/react':
+      '@superchat/react':
         specifier: workspace:*
         version: link:../react
     devDependencies:

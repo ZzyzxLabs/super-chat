@@ -7,13 +7,19 @@
 // warn, and `assertBrowserUseAcknowledged` makes the footgun explicit rather
 // than silent.
 
-import type { Transport, TransportRequest } from "./types.js";
+import { isMultipartBody, type Transport, type TransportRequest } from "./types.js";
 
 export type DirectTransportConfig = {
   /** Provider API root, no trailing slash. e.g. "https://api.openai.com/v1". */
   baseUrl: string;
   /** Static key, or a getter for keys that rotate / come from a keychain. */
   apiKey: string | (() => string | Promise<string>);
+  /**
+   * How the key rides on the wire. "bearer" (default) sends
+   * `Authorization: Bearer <key>`; "x-api-key" sends the `x-api-key` header —
+   * what Anthropic's Messages API expects.
+   */
+  authStyle?: "bearer" | "x-api-key";
   /** Sent on every request; merged under per-request headers. */
   headers?: Record<string, string>;
   /**
@@ -49,17 +55,30 @@ export function createDirectTransport(config: DirectTransportConfig): Transport 
     async fetch(req: TransportRequest): Promise<Response> {
       const apiKey = typeof config.apiKey === "function" ? await config.apiKey() : config.apiKey;
       const headers: Record<string, string> = {
-        authorization: `Bearer ${apiKey}`,
+        ...(config.authStyle === "x-api-key" ? { "x-api-key": apiKey } : { authorization: `Bearer ${apiKey}` }),
         ...config.headers,
         ...req.headers,
       };
-      if (req.body !== undefined) headers["content-type"] = "application/json";
       if (req.stream) headers["accept"] = "text/event-stream";
+
+      let body: BodyInit | undefined;
+      if (isMultipartBody(req.body)) {
+        // No content-type here — fetch sets multipart/form-data with the boundary.
+        const form = new FormData();
+        for (const [k, v] of Object.entries(req.body.fields)) form.set(k, v);
+        for (const f of req.body.files) {
+          form.set(f.field, new Blob([f.data as BlobPart], f.mediaType ? { type: f.mediaType } : {}), f.filename);
+        }
+        body = form;
+      } else if (req.body !== undefined) {
+        headers["content-type"] = "application/json";
+        body = JSON.stringify(req.body);
+      }
 
       return doFetch(buildUrl(config.baseUrl, req.path, req.query), {
         method: req.method,
         headers,
-        body: req.body === undefined ? undefined : JSON.stringify(req.body),
+        body,
         signal: req.signal,
       });
     },

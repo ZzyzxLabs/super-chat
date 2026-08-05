@@ -8,7 +8,7 @@
 // ticket three weeks later.
 
 import { Component, createContext, useContext, type ComponentType, type ReactNode } from "react";
-import type { Card, CardAction, CardSpec } from "@agentloom/core";
+import type { Card, CardAction, CardSpec } from "@superchat/core";
 
 export type CardRendererProps<S extends CardSpec = CardSpec> = {
   spec: S;
@@ -49,9 +49,9 @@ export class CardBoundary extends Component<{ children: ReactNode; label?: strin
   override render() {
     if (this.state.failed) {
       return (
-        <div className="al-card al-card--error" role="alert">
+        <div className="sc-card sc-card--error" role="alert">
           <strong>{this.props.label ?? "This card"} couldn’t render.</strong>
-          {this.state.message ? <div className="al-muted al-mono">{this.state.message}</div> : null}
+          {this.state.message ? <div className="sc-muted sc-mono">{this.state.message}</div> : null}
         </div>
       );
     }
@@ -67,8 +67,8 @@ export function CardRenderer({ card, respond, answered }: { card: Card; respond?
     // Large card payloads are trimmed out of persisted history. Say so — an
     // empty shell reads as a broken app.
     return (
-      <div className="al-card al-card--muted">
-        <div className="al-muted">This {kind} result expired from saved history. Ask again to refresh it.</div>
+      <div className="sc-card sc-card--muted">
+        <div className="sc-muted">This {kind} result expired from saved history. Ask again to refresh it.</div>
       </div>
     );
   }
@@ -76,12 +76,12 @@ export function CardRenderer({ card, respond, answered }: { card: Card; respond?
   const Renderer = renderers[kind];
   if (!Renderer) {
     return (
-      <div className="al-card al-card--muted">
-        <div className="al-card__head">
-          <span className="al-pill al-pill--warning">unrendered</span>
-          <span className="al-muted">No renderer registered for card kind “{kind}”.</span>
+      <div className="sc-card sc-card--muted">
+        <div className="sc-card__head">
+          <span className="sc-pill sc-pill--warning">unrendered</span>
+          <span className="sc-muted">No renderer registered for card kind “{kind}”.</span>
         </div>
-        <pre className="al-pre">{JSON.stringify(card.spec, null, 2)}</pre>
+        <pre className="sc-pre">{JSON.stringify(card.spec, null, 2)}</pre>
       </div>
     );
   }

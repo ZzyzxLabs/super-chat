@@ -45,6 +45,21 @@ export type ToolChoice =
   | { type: "required" }
   | { type: "tool"; name: string };
 
+/**
+ * A tool the PROVIDER hosts and executes — web search, code interpreter,
+ * computer use. Distinct from `ToolSpec` in the way that matters: there is no
+ * executor here and never will be, because the call, the execution and the
+ * result all happen provider-side within one response.
+ *
+ * The shape is deliberately opaque. These definitions are provider-specific by
+ * nature (`{type: "web_search_20260209", name: "web_search"}` means nothing to
+ * a different vendor), they change on the vendor's release cadence rather than
+ * ours, and inventing a normalized union across vendors would be a lie that
+ * needs a migration every quarter. So: keyed by provider id, appended verbatim
+ * to that provider's tool array, ignored by everyone else.
+ */
+export type ProviderNativeTool = { type: string } & Record<string, unknown>;
+
 export type ReasoningOptions = {
   effort?: "minimal" | "low" | "medium" | "high";
   /** Ask for a human-readable summary of hidden reasoning, where supported. */
@@ -68,6 +83,13 @@ export type NormalizedRequest = {
   system?: string;
   messages: Message[];
   tools?: ToolSpec[];
+  /**
+   * Provider-hosted tools, keyed by provider id — only the matching adapter's
+   * entry is sent. They ride ALONGSIDE `tools`, never through the registry:
+   * presets gate what the host's own executors can do, and a provider-hosted
+   * search has no executor to gate.
+   */
+  providerTools?: Record<string, ProviderNativeTool[]>;
   toolChoice?: ToolChoice;
   /**
    * Names the model may call THIS step. Distinct from `tools`: the full set is
@@ -157,6 +179,32 @@ export type ProviderCapabilities = {
   strictJsonSchema: boolean;
   /** Provider stores the conversation, enabling `previousResponseId`. */
   serverSideHistory: boolean;
+  /** Can upload binaries and mint providerFile ids (`files` = accepts file parts). */
+  fileUpload: boolean;
+};
+
+export type FileUploadRequest = {
+  data: Blob | ArrayBuffer | Uint8Array;
+  filename: string;
+  mediaType?: string;
+  /** Provider-specific purpose tag. OpenAI defaults to "user_data". */
+  purpose?: string;
+};
+
+/**
+ * Structurally a `MediaSource` `providerFile` variant, so an upload result
+ * drops straight into `file(ref, mediaType)` / `image(ref)` with no glue.
+ * `provider` is the ADAPTER's configured id — that is what `assertOwnFile`
+ * checks against, so a ref minted by one provider instance is refused by
+ * another instead of producing a guaranteed 400.
+ */
+export type ProviderFileRef = {
+  kind: "providerFile";
+  id: string;
+  provider: string;
+  filename?: string;
+  sizeBytes?: number;
+  createdAt?: number;
 };
 
 export type CallOptions = {
@@ -180,6 +228,10 @@ export type Provider = {
   cancelJob?(handle: JobHandle, opts?: CallOptions): Promise<JobSnapshot>;
   /** Attach to a running background job's event stream from `handle.cursor`. */
   streamJob?(handle: JobHandle, opts?: CallOptions): AsyncIterable<StreamEvent>;
+
+  /** Upload a binary once and get back a reusable providerFile ref. */
+  uploadFile?(req: FileUploadRequest, opts?: CallOptions): Promise<ProviderFileRef>;
+  deleteFile?(fileId: string, opts?: CallOptions): Promise<void>;
 
   listModels?(opts?: CallOptions): Promise<ModelInfo[]>;
 };

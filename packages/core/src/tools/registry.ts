@@ -13,6 +13,8 @@ import type { PresetName, ToolDefinition, ToolResolution } from "./types.js";
 export class ToolRegistry {
   private tools = new Map<string, ToolDefinition>();
   private presets = new Map<PresetName, Set<string>>();
+  private listeners = new Set<() => void>();
+  private version = 0;
 
   constructor(tools: readonly ToolDefinition[] = []) {
     for (const t of tools) this.register(t);
@@ -21,6 +23,7 @@ export class ToolRegistry {
   register(tool: ToolDefinition, presets: readonly PresetName[] = []): this {
     this.tools.set(tool.name, tool);
     for (const p of presets) this.addToPreset(p, tool.name);
+    this.touch();
     return this;
   }
 
@@ -34,7 +37,30 @@ export class ToolRegistry {
     const set = this.presets.get(preset) ?? new Set<string>();
     for (const n of names) set.add(n);
     this.presets.set(preset, set);
+    this.touch();
     return this;
+  }
+
+  /**
+   * Change notification, so a UI (or an inspector hook) re-reads after a LATE
+   * registration — tools imported from an MCP server arrive long after mount,
+   * and a registry nobody can observe leaves them invisible until reload.
+   */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /** Monotonic change counter — a stable snapshot value for useSyncExternalStore. */
+  getVersion(): number {
+    return this.version;
+  }
+
+  private touch(): void {
+    this.version += 1;
+    for (const l of this.listeners) l();
   }
 
   get(name: string): ToolDefinition | undefined {

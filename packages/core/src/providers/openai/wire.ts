@@ -1,4 +1,4 @@
-// OpenAI wire shapes, hand-typed. Only the fields agentloom actually reads or
+// OpenAI wire shapes, hand-typed. Only the fields superchat actually reads or
 // writes — a faithful mirror of the whole API would be noise and would rot.
 //
 // The two dialects differ more than people expect, which is exactly why the

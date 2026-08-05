@@ -8,11 +8,11 @@
 // theme colours instead of fighting them.
 
 import { useId, useMemo } from "react";
-import type { ChartCard } from "@agentloom/core";
+import type { ChartCard } from "@superchat/core";
 import type { CardRendererProps } from "../renderer-registry.js";
 import { formatValue } from "../format.js";
 
-const PALETTE = ["var(--al-series-1)", "var(--al-series-2)", "var(--al-series-3)", "var(--al-series-4)", "var(--al-series-5)"];
+const PALETTE = ["var(--sc-series-1)", "var(--sc-series-2)", "var(--sc-series-3)", "var(--sc-series-4)", "var(--sc-series-5)"];
 
 const W = 720;
 const H = 280;
@@ -78,21 +78,21 @@ export function ChartCardView({ spec }: CardRendererProps<ChartCard>) {
   }, [spec, isCandles]);
 
   return (
-    <div className="al-card">
-      {spec.title ? <div className="al-card__title">{spec.title}</div> : null}
-      <div className="al-chart">
+    <div className="sc-card">
+      {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
+      <div className="sc-chart">
         <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={spec.title ?? "chart"} preserveAspectRatio="xMidYMid meet">
           <defs>
             <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--al-series-1)" stopOpacity="0.28" />
-              <stop offset="100%" stopColor="var(--al-series-1)" stopOpacity="0" />
+              <stop offset="0%" stopColor="var(--sc-series-1)" stopOpacity="0.28" />
+              <stop offset="100%" stopColor="var(--sc-series-1)" stopOpacity="0" />
             </linearGradient>
           </defs>
 
           {model.yTicks.map((t) => (
             <g key={`y${t}`}>
-              <line x1={PAD.left} x2={W - PAD.right} y1={model.y(t)} y2={model.y(t)} className="al-chart__grid" />
-              <text x={PAD.left - 8} y={model.y(t)} className="al-chart__label" textAnchor="end" dominantBaseline="middle">
+              <line x1={PAD.left} x2={W - PAD.right} y1={model.y(t)} y2={model.y(t)} className="sc-chart__grid" />
+              <text x={PAD.left - 8} y={model.y(t)} className="sc-chart__label" textAnchor="end" dominantBaseline="middle">
                 {formatValue(t, "number")}
               </text>
             </g>
@@ -105,7 +105,7 @@ export function ChartCardView({ spec }: CardRendererProps<ChartCard>) {
                 const top = model.y(Math.max(c.o, c.c));
                 const bottom = model.y(Math.min(c.o, c.c));
                 return (
-                  <g key={i} className={up ? "al-candle al-candle--up" : "al-candle al-candle--down"}>
+                  <g key={i} className={up ? "sc-candle sc-candle--up" : "sc-candle sc-candle--down"}>
                     <line x1={cx} x2={cx} y1={model.y(c.h)} y2={model.y(c.l)} />
                     <rect
                       x={cx - model.width / 2}
@@ -147,9 +147,9 @@ export function ChartCardView({ spec }: CardRendererProps<ChartCard>) {
             const yy = model.y(Number(a.value));
             return (
               <g key={`a${i}`}>
-                <line x1={PAD.left} x2={W - PAD.right} y1={yy} y2={yy} className={`al-chart__annotation al-tone--${a.tone ?? "info"}`} />
+                <line x1={PAD.left} x2={W - PAD.right} y1={yy} y2={yy} className={`sc-chart__annotation sc-tone--${a.tone ?? "info"}`} />
                 {a.label ? (
-                  <text x={W - PAD.right + 4} y={yy} className="al-chart__label" dominantBaseline="middle">
+                  <text x={W - PAD.right + 4} y={yy} className="sc-chart__label" dominantBaseline="middle">
                     {a.label}
                   </text>
                 ) : null}
@@ -157,15 +157,15 @@ export function ChartCardView({ spec }: CardRendererProps<ChartCard>) {
             );
           })}
 
-          <line x1={PAD.left} x2={W - PAD.right} y1={H - PAD.bottom} y2={H - PAD.bottom} className="al-chart__axis" />
+          <line x1={PAD.left} x2={W - PAD.right} y1={H - PAD.bottom} y2={H - PAD.bottom} className="sc-chart__axis" />
         </svg>
       </div>
 
       {model.kind === "series" && model.series.length > 1 ? (
-        <div className="al-legend">
+        <div className="sc-legend">
           {model.series.map((s, i) => (
-            <span key={s.name} className="al-legend__item">
-              <span className="al-legend__swatch" style={{ background: s.color ?? PALETTE[i % PALETTE.length] }} />
+            <span key={s.name} className="sc-legend__item">
+              <span className="sc-legend__swatch" style={{ background: s.color ?? PALETTE[i % PALETTE.length] }} />
               {s.name}
             </span>
           ))}

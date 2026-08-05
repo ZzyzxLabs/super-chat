@@ -1,5 +1,5 @@
 {
-  "name": "@agentloom/core",
+  "name": "@superchat/core",
   "version": "0.1.0",
   "description": "Provider-agnostic agent core: content model, skills, context assembly, tools, runtime, and hand-rolled provider adapters.",
   "type": "module",
@@ -14,6 +14,10 @@
     "./openai": {
       "types": "./dist/openai.d.ts",
       "import": "./dist/openai.js"
+    },
+    "./anthropic": {
+      "types": "./dist/anthropic.d.ts",
+      "import": "./dist/anthropic.js"
     }
   },
   "files": ["dist"],

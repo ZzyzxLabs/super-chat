@@ -13,6 +13,7 @@ const PANELS = [
   { href: "/skills", label: "Skills", hint: "Modes, matching, live scoring" },
   { href: "/tools", label: "Tools & presets", hint: "Schemas, capability gating" },
   { href: "/requests", label: "Wire requests", hint: "Responses vs Chat Completions" },
+  { href: "/app-state", label: "App state", hint: "Agent reads & drives your UI" },
   { href: "/run", label: "Run & events", hint: "Live chat + event stream" },
 ];
 
@@ -23,7 +24,7 @@ export function Shell({ children }: { children: ReactNode }) {
     <div className="dev">
       <aside className="dev__nav">
         <div className="dev__brand">
-          agentloom
+          superchat
           <span>dev panels</span>
         </div>
         <nav>
@@ -38,9 +39,9 @@ export function Shell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="dev__foot">
-          <code className="al-mono">@agentloom/core</code>
-          <code className="al-mono">@agentloom/react</code>
-          <code className="al-mono">@agentloom/ui</code>
+          <code className="sc-mono">@superchat/core</code>
+          <code className="sc-mono">@superchat/react</code>
+          <code className="sc-mono">@superchat/ui</code>
         </div>
       </aside>
       <main className="dev__main">{children}</main>
@@ -63,7 +64,7 @@ export function SpecSplit({ spec, children, label }: { spec: unknown; children: 
     <div className="dev__split">
       <div className="dev__spec">
         {label ? <div className="dev__spec-label">{label}</div> : null}
-        <pre className="al-pre dev__code">{JSON.stringify(spec, null, 2)}</pre>
+        <pre className="sc-pre dev__code">{JSON.stringify(spec, null, 2)}</pre>
       </div>
       <div className="dev__preview">{children}</div>
     </div>
