@@ -104,6 +104,10 @@ export {
   type ThreadMeta,
 } from "./runtime/threads.js";
 
+// memory & retrieval seams
+export * from "./memory/index.js";
+export * from "./retrieval/index.js";
+
 // mcp
 export * from "./mcp/index.js";
 

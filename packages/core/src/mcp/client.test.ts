@@ -116,6 +116,88 @@ describe("McpClient", () => {
     expect(result.content).toEqual([{ type: "text", text: "Unknown tool: nope" }]);
   });
 
+  it("answers a mid-call elicitation and then receives the tool result", async () => {
+    // tools/call responds with SSE: first an elicitation REQUEST, then — after
+    // the client posts its answer — the final tool result.
+    let elicitAnswer: unknown;
+    const transport: Transport = {
+      kind: "custom",
+      credentialSafe: true,
+      async fetch(req: TransportRequest): Promise<Response> {
+        const rpc = req.body as JsonRpcRequest & { result?: unknown };
+        if (rpc.method === "initialize") {
+          // The client must DECLARE elicitation before a server may ask.
+          expect((rpc.params as { capabilities: Record<string, unknown> }).capabilities).toHaveProperty("elicitation");
+          return new Response(
+            JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { serverInfo: { name: "s" }, protocolVersion: "2025-06-18" } }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        if (rpc.method === "tools/call") {
+          const frames = [
+            `data: ${JSON.stringify({
+              jsonrpc: "2.0",
+              id: "srv_1",
+              method: "elicitation/create",
+              params: {
+                message: "Which region?",
+                requestedSchema: { type: "object", properties: { region: { type: "string" } }, required: ["region"] },
+              },
+            })}`,
+            `data: ${JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { content: [{ type: "text", text: "deployed" }] } })}`,
+          ].join("\n\n");
+          return new Response(`${frames}\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
+        }
+        if (rpc.method === undefined && "result" in rpc) {
+          elicitAnswer = rpc.result; // the client's answer to srv_1
+          return new Response(null, { status: 202 });
+        }
+        return new Response(null, { status: 202 });
+      },
+    };
+
+    const client = new McpClient({
+      transport,
+      onElicit: async (params) => {
+        expect(params.message).toBe("Which region?");
+        return { action: "accept", content: { region: "eu-west" } };
+      },
+    });
+
+    const result = await client.callTool("deploy", {});
+    expect(result.content).toEqual([{ type: "text", text: "deployed" }]);
+    expect(elicitAnswer).toEqual({ action: "accept", content: { region: "eu-west" } });
+  });
+
+  it("declines an elicitation when no handler is configured — never hangs", async () => {
+    let declined: unknown;
+    const transport: Transport = {
+      kind: "custom",
+      credentialSafe: true,
+      async fetch(req: TransportRequest): Promise<Response> {
+        const rpc = req.body as JsonRpcRequest & { result?: unknown };
+        if (rpc.method === "initialize") {
+          return new Response(JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { serverInfo: { name: "s" } } }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
+        if (rpc.method === "tools/call") {
+          const frames = [
+            `data: ${JSON.stringify({ jsonrpc: "2.0", id: "srv_1", method: "elicitation/create", params: { message: "?" } })}`,
+            `data: ${JSON.stringify({ jsonrpc: "2.0", id: rpc.id, result: { content: [], isError: true } })}`,
+          ].join("\n\n");
+          return new Response(`${frames}\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
+        }
+        if (rpc.method === undefined && "result" in rpc) declined = rpc.result;
+        return new Response(null, { status: 202 });
+      },
+    };
+    const client = new McpClient({ transport });
+    await client.callTool("x", {});
+    expect(declined).toEqual({ action: "decline" });
+  });
+
   it("propagates the abort signal to the transport", async () => {
     let seenSignal: AbortSignal | undefined;
     const { transport } = mcpTransport({

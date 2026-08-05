@@ -27,6 +27,23 @@ export type McpCallResult = {
   isError?: boolean;
 };
 
+/** `elicitation/create` — the server asks the USER for structured input mid-call. */
+export type McpElicitRequest = {
+  message: string;
+  requestedSchema?: {
+    type?: "object";
+    properties?: Record<string, { type?: string; title?: string; description?: string; enum?: unknown[]; default?: unknown }>;
+    required?: string[];
+  };
+};
+
+export type McpElicitResult =
+  | { action: "accept"; content: Record<string, unknown> }
+  | { action: "decline" }
+  | { action: "cancel" };
+
+export type McpElicitHandler = (params: McpElicitRequest) => Promise<McpElicitResult>;
+
 export type JsonRpcRequest = {
   jsonrpc: "2.0";
   id?: number | string;

@@ -7,10 +7,11 @@
 // server must not be able to walk its tools into the executor tier by being
 // connected.
 
+import type { CardSpec, FormField } from "../cards/types.js";
 import type { Skill } from "../skills/types.js";
 import type { ToolDefinition, ToolResult, ToolSide } from "../tools/types.js";
 import type { McpClient } from "./client.js";
-import type { McpCallResult, McpContent } from "./types.js";
+import type { McpCallResult, McpContent, McpElicitHandler, McpElicitRequest } from "./types.js";
 
 export type McpImportOptions = {
   /**
@@ -63,7 +64,12 @@ export async function importMcpTools(client: McpClient, opts: McpImportOptions =
       ...(opts.costHint != null ? { costHint: opts.costHint } : {}),
       execute: async (input, ctx) => {
         // The model calls the namespaced name; the server knows the original.
-        const result = await client.callTool(tool.name, input, { signal: ctx.signal });
+        // If the server elicits mid-call, the ask surfaces as an interactive
+        // form card — the same suspension a local `confirm` tool gets.
+        const result = await client.callTool(tool.name, input, {
+          signal: ctx.signal,
+          ...(ctx.requestCard ? { onElicit: elicitViaCard(ctx.requestCard) } : {}),
+        });
         return mapResult(result);
       },
     });
@@ -149,6 +155,57 @@ export function createMcpSkill(
       "Call them like any other tool.",
     ].join("\n"),
     tools: defs.map((d) => d.name),
+  };
+}
+
+/**
+ * MCP elicitation → interactive form card. The server's `requestedSchema`
+ * becomes form fields; the user's submission becomes the `accept` content, a
+ * dismissal becomes `decline`. This is the bridge that makes an eliciting MCP
+ * server feel like a first-class interactive tool instead of a hang.
+ */
+export function elicitViaCard(requestCard: (spec: CardSpec) => Promise<unknown>): McpElicitHandler {
+  return async (params: McpElicitRequest) => {
+    const props = params.requestedSchema?.properties ?? {};
+    const required = new Set(params.requestedSchema?.required ?? []);
+    const fields: FormField[] = Object.entries(props).map(([name, p]) => {
+      const label = p.title ?? name;
+      if (Array.isArray(p.enum) && p.enum.length) {
+        return {
+          name,
+          label,
+          type: "select",
+          options: p.enum.map((v) => ({ value: String(v), label: String(v) })),
+          ...(required.has(name) ? { required: true } : {}),
+        };
+      }
+      if (p.type === "boolean") return { name, label, type: "boolean", ...(p.default != null ? { value: Boolean(p.default) } : {}) };
+      if (p.type === "number" || p.type === "integer") {
+        return { name, label, type: "number", ...(required.has(name) ? { required: true } : {}) };
+      }
+      return {
+        name,
+        label,
+        type: "text",
+        ...(p.description ? { placeholder: p.description } : {}),
+        ...(required.has(name) ? { required: true } : {}),
+      };
+    });
+
+    const answer = await requestCard({
+      kind: "form",
+      title: "This tool needs your input",
+      description: params.message,
+      fields: fields.length ? fields : [{ name: "response", label: params.message || "Response", type: "text" }],
+      submitLabel: "Send",
+    });
+
+    if (answer && typeof answer === "object" && (answer as { cancelled?: boolean }).cancelled) {
+      return { action: "decline" };
+    }
+    const content =
+      answer && typeof answer === "object" && !Array.isArray(answer) ? (answer as Record<string, unknown>) : { response: answer };
+    return { action: "accept", content };
   };
 }
 

@@ -136,6 +136,47 @@ describe("registry change notification", () => {
   });
 });
 
+describe("elicitViaCard", () => {
+  it("turns the requested schema into a form card and the submission into accept content", async () => {
+    const { elicitViaCard } = await import("./import.js");
+    const specs: unknown[] = [];
+    const handler = elicitViaCard(async (spec) => {
+      specs.push(spec);
+      return { region: "eu-west", replicas: 2 };
+    });
+
+    const result = await handler({
+      message: "Where should this deploy?",
+      requestedSchema: {
+        type: "object",
+        properties: {
+          region: { type: "string", enum: ["eu-west", "us-east"] },
+          replicas: { type: "number", title: "Replica count" },
+          notify: { type: "boolean", default: true },
+        },
+        required: ["region"],
+      },
+    });
+
+    expect(specs[0]).toMatchObject({
+      kind: "form",
+      description: "Where should this deploy?",
+      fields: [
+        { name: "region", type: "select", required: true, options: [{ value: "eu-west", label: "eu-west" }, { value: "us-east", label: "us-east" }] },
+        { name: "replicas", label: "Replica count", type: "number" },
+        { name: "notify", type: "boolean", value: true },
+      ],
+    });
+    expect(result).toEqual({ action: "accept", content: { region: "eu-west", replicas: 2 } });
+  });
+
+  it("maps a dismissed card to decline", async () => {
+    const { elicitViaCard } = await import("./import.js");
+    const handler = elicitViaCard(async () => ({ cancelled: true, reason: "The user declined." }));
+    expect(await handler({ message: "?" })).toEqual({ action: "decline" });
+  });
+});
+
 describe("mapMcpResult", () => {
   it("prefers structuredContent verbatim", () => {
     expect(mapMcpResult({ content: [{ type: "text", text: "ignored" }], structuredContent: { a: 1 } })).toEqual({

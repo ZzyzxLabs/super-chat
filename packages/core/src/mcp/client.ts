@@ -15,7 +15,15 @@ import { AgentError } from "../errors.js";
 import { errorFromResponse } from "../transport/retry.js";
 import { parseSSEJson } from "../transport/sse.js";
 import type { Transport, TransportRequest } from "../transport/types.js";
-import type { JsonRpcRequest, JsonRpcResponse, McpCallResult, McpServerInfo, McpTool } from "./types.js";
+import type {
+  JsonRpcRequest,
+  JsonRpcResponse,
+  McpCallResult,
+  McpElicitHandler,
+  McpElicitRequest,
+  McpServerInfo,
+  McpTool,
+} from "./types.js";
 
 export type McpClientConfig = {
   transport: Transport;
@@ -25,6 +33,13 @@ export type McpClientConfig = {
   path?: string;
   protocolVersion?: string;
   clientInfo?: { name: string; version: string };
+  /**
+   * Answer `elicitation/create` — the server asking the USER for structured
+   * input mid-call. Without a handler, elicitations are declined (never hung).
+   * `importMcpTools` bridges this onto the interactive-card suspension, so an
+   * eliciting server gets the same form-card UX as a local `confirm` tool.
+   */
+  onElicit?: McpElicitHandler;
 };
 
 const DEFAULT_PROTOCOL = "2025-06-18";
@@ -47,6 +62,7 @@ export class McpClient {
   private readonly path: string;
   private readonly protocolVersion: string;
   private readonly clientInfo: { name: string; version: string };
+  private readonly onElicit: McpElicitHandler | undefined;
   private rpcId = 0;
   private sessionId: string | undefined;
   private handshake: { serverInfo: McpServerInfo; protocolVersion: string } | undefined;
@@ -57,6 +73,7 @@ export class McpClient {
     this.path = config.path ?? "/";
     this.protocolVersion = config.protocolVersion ?? DEFAULT_PROTOCOL;
     this.clientInfo = config.clientInfo ?? { name: "agentloom", version: "0.1.0" };
+    this.onElicit = config.onElicit;
   }
 
   /** Idempotent: a second call returns the cached handshake. */
@@ -64,7 +81,9 @@ export class McpClient {
     if (this.handshake) return this.handshake;
     const result = (await this.rpc("initialize", {
       protocolVersion: this.protocolVersion,
-      capabilities: {},
+      // Declaring elicitation is what permits the server to ask; without a
+      // handler we keep the capability undeclared and decline defensively.
+      capabilities: this.onElicit ? { elicitation: {} } : {},
       clientInfo: this.clientInfo,
     })) as { protocolVersion?: string; serverInfo?: McpServerInfo };
 
@@ -99,7 +118,11 @@ export class McpClient {
    * rather than a throw — tool errors are for the model to read, and an
    * exception here would abort the whole agent turn instead of one step.
    */
-  async callTool(name: string, args: unknown, opts: { signal?: AbortSignal } = {}): Promise<McpCallResult> {
+  async callTool(
+    name: string,
+    args: unknown,
+    opts: { signal?: AbortSignal; onElicit?: McpElicitHandler } = {},
+  ): Promise<McpCallResult> {
     await this.ensureConnected();
     try {
       const result = (await this.rpc("tools/call", { name, arguments: args ?? {} }, opts)) as McpCallResult;
@@ -150,7 +173,11 @@ export class McpClient {
     return res;
   }
 
-  private async rpc(method: string, params: unknown, opts: { signal?: AbortSignal } = {}): Promise<unknown> {
+  private async rpc(
+    method: string,
+    params: unknown,
+    opts: { signal?: AbortSignal; onElicit?: McpElicitHandler } = {},
+  ): Promise<unknown> {
     this.rpcId += 1;
     const id = this.rpcId;
     const res = await this.post({ jsonrpc: "2.0", id, method, params }, opts.signal);
@@ -158,15 +185,50 @@ export class McpClient {
     const contentType = res.headers.get("content-type") ?? "";
     if (contentType.includes("text/event-stream")) {
       if (!res.body) throw new AgentError("network", "MCP response had no body to stream.", { provider: this.provider });
-      // The stream carries our response and possibly server notifications;
-      // take the message answering OUR id and ignore the rest.
-      for await (const frame of parseSSEJson<JsonRpcResponse>(res.body)) {
-        if (frame.data && frame.data.id === id) return this.settle(frame.data);
+      // The stream carries our response, server notifications, AND possibly
+      // server-initiated REQUESTS (elicitation). Answer those inline — the
+      // final tool result cannot arrive until the elicitation is settled, so
+      // awaiting here is the correct ordering, not a stall.
+      for await (const frame of parseSSEJson<JsonRpcResponse & JsonRpcRequest>(res.body)) {
+        const msg = frame.data;
+        if (!msg) continue;
+        if (typeof msg.method === "string" && msg.id != null) {
+          await this.answerServerRequest(msg as JsonRpcRequest & { id: number | string }, opts.onElicit, opts.signal);
+          continue;
+        }
+        if (msg.id === id) return this.settle(msg as JsonRpcResponse);
       }
       throw new AgentError("network", `MCP stream ended without a response to "${method}".`, { provider: this.provider });
     }
 
     return this.settle((await res.json()) as JsonRpcResponse);
+  }
+
+  /** Answer a server-initiated request (elicitation); unknown methods get a JSON-RPC error. */
+  private async answerServerRequest(
+    request: JsonRpcRequest & { id: number | string },
+    override: McpElicitHandler | undefined,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (request.method === "elicitation/create") {
+      const handler = override ?? this.onElicit;
+      let result: unknown;
+      try {
+        result = handler ? await handler((request.params ?? { message: "" }) as McpElicitRequest) : { action: "decline" };
+      } catch {
+        result = { action: "cancel" }; // the user's card was dismissed / the run aborted
+      }
+      await this.post({ jsonrpc: "2.0", id: request.id, result } as unknown as JsonRpcRequest, signal).catch(() => {});
+      return;
+    }
+    await this.post(
+      {
+        jsonrpc: "2.0",
+        id: request.id,
+        error: { code: -32601, message: `Method not supported: ${request.method}` },
+      } as unknown as JsonRpcRequest,
+      signal,
+    ).catch(() => {});
   }
 
   private settle(response: JsonRpcResponse): unknown {
