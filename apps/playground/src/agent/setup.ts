@@ -186,6 +186,17 @@ export const threadStores: Record<ThreadBackend, typeof localThreads> = {
 /** Default backend; the /run panel can switch at runtime. */
 export const threadStore = localThreads;
 
+/**
+ * Provider-hosted web search, per vendor. These are the vendors' own tool
+ * declarations — no executor, no preset, no registry entry: the provider runs
+ * the search inside its own response. Presets gate what OUR executors may do,
+ * so a host that wants to gate this gates it here, at configuration time.
+ */
+export const WEB_SEARCH_TOOLS: Record<string, ({ type: string } & Record<string, unknown>)[]> = {
+  openai: [{ type: "web_search_20260209", name: "web_search" }],
+  anthropic: [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }],
+};
+
 export const MODELS: Record<Vendor, string[]> = {
   openai: ["gpt-5.2", "gpt-5.2-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"],
   anthropic: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],

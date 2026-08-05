@@ -76,6 +76,7 @@ export type AgentClientConfig = {
   toolTimeoutMs?: number;
   useServerHistory?: boolean;
   toolChoice?: RunConfig["toolChoice"];
+  providerTools?: RunConfig["providerTools"];
   responseFormat?: RunConfig["responseFormat"];
   topP?: number;
   stopSequences?: string[];
@@ -258,6 +259,7 @@ export class AgentClient {
       toolTimeoutMs: this.config.toolTimeoutMs,
       useServerHistory: this.config.useServerHistory,
       toolChoice: this.config.toolChoice,
+      providerTools: this.config.providerTools,
       responseFormat: this.config.responseFormat,
       topP: this.config.topP,
       stopSequences: this.config.stopSequences,

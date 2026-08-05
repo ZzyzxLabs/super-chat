@@ -14,7 +14,14 @@ import { CardRenderer, useCardRenderers } from "./renderer-registry.js";
 function partsOf(message: Message) {
   const cards: Card[] = [];
   const rest: ContentPart[] = [];
+  const providerTools: { id: string; kind: string }[] = [];
   for (const p of message.parts) {
+    if (p.type === "artifact" && p.kind.startsWith("provider-tool:")) {
+      // Work the PROVIDER did (web search, code interpreter) — no call of ours
+      // to render, but the user should see it happened.
+      providerTools.push({ id: p.id, kind: p.kind.slice("provider-tool:".length) });
+      continue;
+    }
     if (p.type === "artifact" && p.kind.startsWith("card:")) {
       // A persisted thread may have shed this card's payload under storage
       // quota; the stub carries `expired` so the renderer says so instead of
@@ -25,12 +32,34 @@ function partsOf(message: Message) {
     }
     rest.push(p);
   }
-  return { cards, rest };
+  return { cards, rest, providerTools };
+}
+
+const PROVIDER_TOOL_LABELS: Record<string, string> = {
+  web_search_call: "Searched the web",
+  web_fetch_tool_result: "Fetched a page",
+  code_interpreter_call: "Ran code",
+  server_tool_use: "Used a hosted tool",
+  web_search_tool_result: "Searched the web",
+  bash_code_execution_tool_result: "Ran code",
+};
+
+/** "Searched the web" chips — provider-side work, shown so answers aren't magic. */
+function ProviderToolChips({ items }: { items: { id: string; kind: string }[] }) {
+  return (
+    <div className="al-providertools" style={{ display: "flex", flexWrap: "wrap", gap: 6, margin: "4px 0" }}>
+      {items.map((t) => (
+        <span key={t.id} className="al-pill" title={t.kind}>
+          ⚙ {PROVIDER_TOOL_LABELS[t.kind] ?? t.kind.replace(/_/g, " ")}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 export function MessageView({ message, respond }: { message: Message; respond?: ReturnType<typeof useCardAction>["respond"] }) {
   const renderers = useCardRenderers();
-  const { cards, rest } = useMemo(() => partsOf(message), [message]);
+  const { cards, rest, providerTools } = useMemo(() => partsOf(message), [message]);
 
   const text = rest.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join("");
   const reasoning = rest.filter((p) => p.type === "reasoning").map((p) => (p as { text: string }).text).join("");
@@ -65,6 +94,7 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
     <div className="al-msg al-msg--assistant">
       {reasoning ? <ReasoningBlock text={reasoning} /> : null}
       {media.length ? <MediaParts parts={media} /> : null}
+      {providerTools.length ? <ProviderToolChips items={providerTools} /> : null}
       {calls.length || results.length ? <ToolActivity calls={calls} results={results} /> : null}
       {passive.map((c) => (
         <CardRenderer key={c.id} card={c} />
@@ -271,6 +301,9 @@ export function LiveTurn() {
   const reasoning = run.parts.filter((p) => p.type === "reasoning").map((p) => (p as { text: string }).text).join("");
   const calls = run.parts.filter((p): p is Extract<ContentPart, { type: "tool-call" }> => p.type === "tool-call");
   const results = run.parts.filter((p): p is Extract<ContentPart, { type: "tool-result" }> => p.type === "tool-result");
+  const providerTools = run.parts
+    .filter((p): p is Extract<ContentPart, { type: "artifact" }> => p.type === "artifact" && p.kind.startsWith("provider-tool:"))
+    .map((p) => ({ id: p.id, kind: p.kind.slice("provider-tool:".length) }));
 
   return (
     <div className="al-msg al-msg--assistant">
@@ -281,6 +314,7 @@ export function LiveTurn() {
         </div>
       ) : null}
       {reasoning ? <ReasoningBlock text={reasoning} /> : null}
+      {providerTools.length ? <ProviderToolChips items={providerTools} /> : null}
       {calls.length ? <ToolActivity calls={calls} results={results} /> : null}
       {cards
         .filter((c) => c.id !== pending?.id)

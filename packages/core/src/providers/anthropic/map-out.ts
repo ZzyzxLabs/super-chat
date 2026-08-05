@@ -22,8 +22,22 @@ export function partsFromAnthropic(response: AnthropicResponse): ContentPart[] {
       case "tool_use":
         parts.push({ type: "tool-call", callId: block.id, name: block.name, input: block.input, status: "pending" });
         break;
-      default:
-        break; // tool_result never appears in an assistant response
+      default: {
+        // `tool_result` never appears in an assistant response, so anything
+        // else here is a PROVIDER-HOSTED tool record (server_tool_use,
+        // web_search_tool_result, …): work done provider-side with no call for
+        // us to execute. Surface it as a UI-only artifact so the transcript
+        // shows the search happened; it is stripped before the next request.
+        const record = block as { type: string; id?: string };
+        if (record.type === "tool_result") break;
+        parts.push({
+          type: "artifact",
+          id: record.id ?? `${record.type}_${parts.length}`,
+          kind: `provider-tool:${record.type}`,
+          data: record,
+        });
+        break;
+      }
     }
   }
   return parts;

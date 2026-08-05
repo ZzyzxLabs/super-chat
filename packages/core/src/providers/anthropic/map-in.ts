@@ -187,10 +187,15 @@ export function buildAnthropicRequest(req: NormalizedRequest, opts: AnthropicBui
   };
   if (system) out.system = system;
 
-  if (req.tools?.length) {
-    out.tools = toAnthropicTools(req.tools);
-    const choice = toToolChoice(req, opts.parallelToolCalls !== false);
-    if (choice) out.tool_choice = choice;
+  // Provider-hosted tools (web search, code execution) share the tools array
+  // with function tools and are appended verbatim — the vendor owns the shape.
+  const nativeTools = (req.providerTools?.[providerId] ?? []) as Record<string, unknown>[];
+  if (req.tools?.length || nativeTools.length) {
+    out.tools = [...(req.tools?.length ? toAnthropicTools(req.tools) : []), ...nativeTools] as AnthropicTool[];
+    if (req.tools?.length) {
+      const choice = toToolChoice(req, opts.parallelToolCalls !== false);
+      if (choice) out.tool_choice = choice;
+    }
   }
 
   if (req.reasoning) {

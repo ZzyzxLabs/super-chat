@@ -6,6 +6,7 @@ import { BUILTIN_RENDERERS, CardRendererProvider, ContextInspector, Composer, Th
 import type { RunEvent, RunMode, StoredFile } from "@agentloom/core";
 import {
   MODELS,
+  WEB_SEARCH_TOOLS,
   buildContextBuilder,
   buildProvider,
   buildTransport,
@@ -36,6 +37,7 @@ export default function RunPanel() {
   const [mode, setMode] = useState<RunMode>("stream");
   const [presets, setPresets] = useState<string[]>(["observer", "executor"]);
   const [threadBackend, setThreadBackend] = useState<ThreadBackend>("local");
+  const [webSearch, setWebSearch] = useState(false);
   const threadStore = threadStores[threadBackend];
 
   // The SHARED registry singleton — tools imported on /tools are callable here.
@@ -113,8 +115,16 @@ export default function RunPanel() {
   };
 
   useEffect(() => {
-    client.configure({ model, mode, toolResolution: { presets } });
-  }, [client, model, mode, presets]);
+    client.configure({
+      model,
+      mode,
+      toolResolution: { presets },
+      // Provider-hosted: declared here, executed inside the provider's own
+      // response. No registry entry and no preset — there is no executor of
+      // ours to gate, so the gate is this toggle.
+      providerTools: webSearch ? WEB_SEARCH_TOOLS : undefined,
+    });
+  }, [client, model, mode, presets, webSearch]);
 
   // Reopen the live thread whenever the client is rebuilt (reload, transport
   // switch) — before this, both silently discarded the conversation.
@@ -185,6 +195,15 @@ export default function RunPanel() {
                   {p}
                 </label>
               ))}
+              <label className="dev__toggle" title="Provider-hosted web search — no executor, no preset">
+                <input
+                  type="checkbox"
+                  checked={webSearch}
+                  disabled={effectiveMode === "demo"}
+                  onChange={(e) => setWebSearch(e.target.checked)}
+                />
+                web search
+              </label>
               <ReattachPicker providerId={provider.id} />
               <ClearButton />
             </div>

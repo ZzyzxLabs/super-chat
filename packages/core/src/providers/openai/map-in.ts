@@ -210,9 +210,13 @@ export function buildResponsesRequest(req: NormalizedRequest, opts: BuildOptions
     input: toResponsesInput(messages.filter((m) => m.role !== "system"), opts.providerId),
   };
   if (instructions && !req.previousResponseId) out.instructions = instructions;
-  if (req.tools?.length) {
-    out.tools = toResponsesTools(req.tools);
-    out.tool_choice = toResponsesToolChoice(req);
+  // Provider-hosted tools ride in the SAME array as function tools — they are
+  // declarations, not executors — and are appended verbatim: the vendor owns
+  // this shape and versions it on their cadence, not ours.
+  const nativeTools = (req.providerTools?.[opts.providerId ?? "openai"] ?? []) as Record<string, unknown>[];
+  if (req.tools?.length || nativeTools.length) {
+    out.tools = [...(req.tools?.length ? toResponsesTools(req.tools) : []), ...nativeTools] as ResponsesTool[];
+    if (req.tools?.length) out.tool_choice = toResponsesToolChoice(req);
     if (opts.parallelToolCalls !== false) out.parallel_tool_calls = true;
   }
   if (req.maxOutputTokens != null) out.max_output_tokens = req.maxOutputTokens;
@@ -423,12 +427,13 @@ export function buildChatRequest(req: NormalizedRequest, opts: BuildOptions = {}
     model: req.model,
     messages: toChatMessages(req.messages, req.system, opts.providerId),
   };
-  if (req.tools?.length) {
+  const nativeChatTools = (req.providerTools?.[opts.providerId ?? "openai"] ?? []) as Record<string, unknown>[];
+  if (req.tools?.length || nativeChatTools.length) {
     // Chat Completions has no activeTools concept, so narrowing here really does
     // mean shipping fewer declarations.
-    const active = req.activeTools ? req.tools.filter((t) => req.activeTools!.includes(t.name)) : req.tools;
-    if (active.length) {
-      out.tools = toChatTools(active);
+    const active = req.activeTools ? (req.tools ?? []).filter((t) => req.activeTools!.includes(t.name)) : (req.tools ?? []);
+    if (active.length || nativeChatTools.length) {
+      out.tools = [...(active.length ? toChatTools(active) : []), ...nativeChatTools] as ChatTool[];
       if (opts.parallelToolCalls !== false) out.parallel_tool_calls = true;
       switch (req.toolChoice?.type) {
         case "none":

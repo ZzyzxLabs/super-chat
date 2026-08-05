@@ -42,6 +42,8 @@ export type RunConfig = {
   // Pass-throughs to NormalizedRequest — the adapter implements all of these;
   // without this block no runAgent caller could ever set them.
   toolChoice?: NormalizedRequest["toolChoice"];
+  /** Provider-hosted tools (web search, code interpreter), keyed by provider id. */
+  providerTools?: NormalizedRequest["providerTools"];
   responseFormat?: NormalizedRequest["responseFormat"];
   topP?: number;
   stopSequences?: string[];
@@ -121,6 +123,7 @@ export async function* runAgent(
         system: context.system,
         messages: working,
         ...(specs.length ? { tools: specs } : {}),
+        ...(config.providerTools ? { providerTools: config.providerTools } : {}),
         ...(config.toolChoice ? { toolChoice: config.toolChoice } : {}),
         ...(config.temperature != null ? { temperature: config.temperature } : {}),
         ...(config.topP != null ? { topP: config.topP } : {}),
