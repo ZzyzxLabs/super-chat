@@ -23,6 +23,32 @@ export type TransportRequest = {
   query?: Record<string, string | number | boolean | undefined>;
 };
 
+/**
+ * A multipart/form-data body (file uploads). `TransportRequest.body` stays
+ * `unknown`, so this is a convention, not a breaking change: adapters that
+ * upload build this shape, and each transport recognizes it with
+ * `isMultipartBody` and encodes it for its own wire — a real FormData on a
+ * direct connection, base64 inside the JSON envelope through the proxy.
+ *
+ * Bytes are `Uint8Array` everywhere in core. Only the wire encodes.
+ */
+export type MultipartBody = {
+  kind: "multipart";
+  /** Plain string form fields ("purpose"). */
+  fields: Record<string, string>;
+  /** Binary parts. Raw bytes in memory; the proxy base64-encodes on the wire. */
+  files: { field: string; filename: string; mediaType?: string; data: Uint8Array }[];
+};
+
+export function isMultipartBody(b: unknown): b is MultipartBody {
+  return (
+    typeof b === "object" &&
+    b !== null &&
+    (b as { kind?: unknown }).kind === "multipart" &&
+    Array.isArray((b as { files?: unknown }).files)
+  );
+}
+
 export type Transport = {
   readonly kind: "direct" | "proxy" | "custom";
   /**

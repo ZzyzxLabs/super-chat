@@ -8,10 +8,11 @@ export * from "./content/parts.js";
 export { AgentError, isAgentError, toAgentError, kindFromStatus, type AgentErrorKind } from "./errors.js";
 
 // transport
-export type { Transport, TransportRequest, RetryPolicy } from "./transport/types.js";
-export { DEFAULT_RETRY } from "./transport/types.js";
+export type { Transport, TransportRequest, RetryPolicy, MultipartBody } from "./transport/types.js";
+export { DEFAULT_RETRY, isMultipartBody } from "./transport/types.js";
+export { bytesToBase64, base64ToBytes } from "./transport/binary.js";
 export { createDirectTransport, buildUrl, type DirectTransportConfig } from "./transport/direct.js";
-export { createProxyTransport, type ProxyTransportConfig, type ProxyEnvelope } from "./transport/proxy.js";
+export { createProxyTransport, type ProxyTransportConfig, type ProxyEnvelope, type SerializedMultipartBody } from "./transport/proxy.js";
 export { createProxyHandler, pathMatches, type ProxyHandlerConfig, type ProxyProviderConfig } from "./transport/server.js";
 export { withRetry, backoffDelay, errorFromResponse, parseRetryAfter } from "./transport/retry.js";
 export { parseSSE, parseSSEJson, SSEDecoder, type SSEMessage } from "./transport/sse.js";
@@ -33,6 +34,8 @@ export type {
   ResponseFormat,
   ReasoningOptions,
   CallOptions,
+  FileUploadRequest,
+  ProviderFileRef,
 } from "./providers/types.js";
 
 // tokens
@@ -89,6 +92,7 @@ export { runAgent, type RunConfig } from "./runtime/run.js";
 export { executeToolCall, executeToolCalls, compactError, type ToolCallRequest, type ToolCallOutcome, type ExecuteToolOptions } from "./runtime/execute-tools.js";
 export * from "./runtime/stop.js";
 export { createMemoryJobStore, createLocalJobStore, resumeJobs, reap, isTerminal, awaitJob, type JobStore, type StoredJob, type ResumeResult } from "./runtime/jobs.js";
+export { createMemoryFileStore, createLocalFileStore, type FileStore, type StoredFile } from "./runtime/files.js";
 
 // providers — the OpenAI adapter is also available at "@agentloom/core/openai"
 // for hosts that want to keep it out of a bundle that never calls OpenAI.

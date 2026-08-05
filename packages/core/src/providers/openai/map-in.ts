@@ -32,12 +32,15 @@ function dataUrl(mediaType: string, base64: string): string {
   return `data:${mediaType};base64,${base64}`;
 }
 
-function assertOwnFile(source: { kind: "providerFile"; id: string; provider: string }) {
-  if (source.provider !== "openai") {
+// Compared against the ADAPTER's configured id, not a hardcoded "openai" — with
+// several instances (openai, groq, nvidia) a file id minted by one must be
+// refused by the others, and each must accept its own.
+function assertOwnFile(source: { kind: "providerFile"; id: string; provider: string }, providerId: string) {
+  if (source.provider !== providerId) {
     throw new AgentError(
       "invalid-request",
-      `File id "${source.id}" was uploaded to "${source.provider}" and cannot be used with OpenAI.`,
-      { provider: "openai" },
+      `File id "${source.id}" was uploaded to "${source.provider}" and cannot be used with "${providerId}".`,
+      { provider: providerId },
     );
   }
 }
@@ -47,7 +50,7 @@ const stringifyOutput = (output: unknown): string =>
 
 // ── Responses API ───────────────────────────────────────────────────────────
 
-function toResponsesContent(part: ContentPart, role: "user" | "assistant"): ResponsesInputContent | null {
+function toResponsesContent(part: ContentPart, role: "user" | "assistant", providerId: string): ResponsesInputContent | null {
   switch (part.type) {
     case "text":
       // Assistant turns replay as output_text; user turns as input_text. Sending
@@ -63,13 +66,13 @@ function toResponsesContent(part: ContentPart, role: "user" | "assistant"): Resp
           ...(part.detail ? { detail: part.detail } : {}),
         };
       }
-      assertOwnFile(s);
+      assertOwnFile(s, providerId);
       return { type: "input_image", file_id: s.id, ...(part.detail ? { detail: part.detail } : {}) };
     }
     case "file": {
       const s = part.source;
       if (s.kind === "providerFile") {
-        assertOwnFile(s);
+        assertOwnFile(s, providerId);
         return { type: "input_file", file_id: s.id };
       }
       if (s.kind === "base64") {
@@ -92,7 +95,7 @@ function toResponsesContent(part: ContentPart, role: "user" | "assistant"): Resp
   }
 }
 
-export function toResponsesInput(messages: readonly Message[]): ResponsesInputItem[] {
+export function toResponsesInput(messages: readonly Message[], providerId = "openai"): ResponsesInputItem[] {
   const items: ResponsesInputItem[] = [];
 
   for (const m of messages) {
@@ -142,7 +145,7 @@ export function toResponsesInput(messages: readonly Message[]): ResponsesInputIt
         }
         continue;
       }
-      const mapped = toResponsesContent(part, role);
+      const mapped = toResponsesContent(part, role, providerId);
       if (mapped) content.push(mapped);
     }
 
@@ -179,7 +182,10 @@ function toResponsesTools(tools: readonly ToolSpec[]): ResponsesTool[] {
   }));
 }
 
-export function buildResponsesRequest(req: NormalizedRequest, opts: { stream?: boolean } = {}): ResponsesRequest {
+export function buildResponsesRequest(
+  req: NormalizedRequest,
+  opts: { stream?: boolean; providerId?: string } = {},
+): ResponsesRequest {
   // Hoist leading system messages into `instructions`; that is where Responses
   // wants them and it keeps them out of the cacheable input array.
   const systemFromMessages = req.messages
@@ -194,7 +200,7 @@ export function buildResponsesRequest(req: NormalizedRequest, opts: { stream?: b
 
   const out: ResponsesRequest = {
     model: req.model,
-    input: toResponsesInput(messages.filter((m) => m.role !== "system")),
+    input: toResponsesInput(messages.filter((m) => m.role !== "system"), opts.providerId),
   };
   if (instructions && !req.previousResponseId) out.instructions = instructions;
   if (req.tools?.length) {
@@ -263,7 +269,7 @@ function toResponsesFormat(f: NonNullable<NormalizedRequest["responseFormat"]>):
 
 // ── Chat Completions ────────────────────────────────────────────────────────
 
-function toChatContent(part: ContentPart): ChatContentPart | null {
+function toChatContent(part: ContentPart, providerId: string): ChatContentPart | null {
   switch (part.type) {
     case "text":
       return { type: "text", text: part.text };
@@ -272,7 +278,7 @@ function toChatContent(part: ContentPart): ChatContentPart | null {
       const url =
         s.kind === "url" ? s.url : s.kind === "base64" ? dataUrl(part.mediaType ?? "image/png", s.data) : null;
       if (!url) {
-        assertOwnFile(s as { kind: "providerFile"; id: string; provider: string });
+        assertOwnFile(s as { kind: "providerFile"; id: string; provider: string }, providerId);
         // Chat Completions has no image-by-file_id form; the file part does.
         return { type: "file", file: { file_id: (s as { id: string }).id } };
       }
@@ -281,7 +287,7 @@ function toChatContent(part: ContentPart): ChatContentPart | null {
     case "file": {
       const s = part.source;
       if (s.kind === "providerFile") {
-        assertOwnFile(s);
+        assertOwnFile(s, providerId);
         return { type: "file", file: { file_id: s.id } };
       }
       if (s.kind === "base64") {
@@ -302,7 +308,7 @@ function toChatContent(part: ContentPart): ChatContentPart | null {
   }
 }
 
-export function toChatMessages(messages: readonly Message[], system?: string): ChatMessage[] {
+export function toChatMessages(messages: readonly Message[], system?: string, providerId = "openai"): ChatMessage[] {
   const out: ChatMessage[] = [];
   if (system) out.push({ role: "system", content: system });
 
@@ -349,7 +355,7 @@ export function toChatMessages(messages: readonly Message[], system?: string): C
       out.push({ role: "tool", tool_call_id: p.callId, content: stringifyOutput(p.output) });
     }
 
-    const content = m.parts.map(toChatContent).filter((c): c is ChatContentPart => c !== null);
+    const content = m.parts.map((p) => toChatContent(p, providerId)).filter((c): c is ChatContentPart => c !== null);
     if (content.length) {
       // Collapse a lone text part to a bare string — the shape every
       // OpenAI-compatible router understands, including older ones.
@@ -393,10 +399,13 @@ function toChatTools(tools: readonly ToolSpec[]): ChatTool[] {
   }));
 }
 
-export function buildChatRequest(req: NormalizedRequest, opts: { stream?: boolean } = {}): ChatRequest {
+export function buildChatRequest(
+  req: NormalizedRequest,
+  opts: { stream?: boolean; providerId?: string } = {},
+): ChatRequest {
   const out: ChatRequest = {
     model: req.model,
-    messages: toChatMessages(req.messages, req.system),
+    messages: toChatMessages(req.messages, req.system, opts.providerId),
   };
   if (req.tools?.length) {
     // Chat Completions has no activeTools concept, so narrowing here really does

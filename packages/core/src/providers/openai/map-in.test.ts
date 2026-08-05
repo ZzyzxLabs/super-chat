@@ -61,6 +61,18 @@ describe("toResponsesInput", () => {
     ).toThrow(/anthropic/);
   });
 
+  it("checks file ownership against the configured provider id", () => {
+    const own = (provider: string) =>
+      msg("user", [{ type: "file", source: { kind: "providerFile", id: "f1", provider }, mediaType: "application/pdf" }]);
+    // A groq-id'd adapter accepts its own file ids…
+    expect(toResponsesInput([own("groq")], "groq")[0]).toMatchObject({
+      content: [{ type: "input_file", file_id: "f1" }],
+    });
+    // …and refuses openai-minted ones, exactly as openai refuses groq's.
+    expect(() => toResponsesInput([own("openai")], "groq")).toThrow(/"groq"/);
+    expect(() => toChatMessages([own("groq")], undefined, "openai")).toThrow(/"openai"/);
+  });
+
   it("replays reasoning only when it carries a provider item id", () => {
     const withId = toResponsesInput([msg("assistant", [{ type: "reasoning", text: "hm", signature: "rs_1" }])]);
     expect(withId[0]).toMatchObject({ type: "reasoning", id: "rs_1" });

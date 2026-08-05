@@ -10,14 +10,19 @@
 //   • the client can never set Authorization (we drop inbound auth headers);
 //   • `authorize` gets the raw Request so you can attach your own session check.
 
-import type { ProxyEnvelope } from "./proxy.js";
+import { base64ToBytes } from "./binary.js";
+import type { ProxyEnvelope, SerializedMultipartBody } from "./proxy.js";
 
 export type ProxyProviderConfig = {
   baseUrl: string;
   apiKey: string | (() => string | Promise<string>);
   // Allowed provider paths. A single `*` matches one segment; a double `*`
-  // matches the remaining path.
-  // e.g. ["/responses", "/responses/*", "/responses/*/cancel", "/chat/completions"]
+  // matches the remaining path. An entry may carry a method prefix
+  // ("POST /files") to allow only that method — without one, any method
+  // matches. That distinction matters: "POST /files" is an upload, while a
+  // bare "/files" would also open GET /files, which lists every file on the
+  // account.
+  // e.g. ["/responses", "/responses/*", "/responses/*/cancel", "POST /files"]
   allowPaths: string[];
   headers?: Record<string, string>;
 };
@@ -49,6 +54,23 @@ export function pathMatches(pattern: string, path: string): boolean {
   return new RegExp(`^${source}$`).test(path);
 }
 
+/** Split an allowlist entry into its optional method prefix and path pattern. */
+function entryMatches(entry: string, method: string, path: string): boolean {
+  const space = entry.indexOf(" ");
+  if (space > 0 && !entry.startsWith("/")) {
+    const wantMethod = entry.slice(0, space).toUpperCase();
+    return method.toUpperCase() === wantMethod && pathMatches(entry.slice(space + 1).trim(), path);
+  }
+  return pathMatches(entry, path);
+}
+
+const isSerializedMultipart = (b: unknown): b is SerializedMultipartBody =>
+  typeof b === "object" &&
+  b !== null &&
+  (b as { kind?: unknown }).kind === "multipart" &&
+  Array.isArray((b as { files?: unknown }).files) &&
+  (b as { files: { data?: unknown }[] }).files.every((f) => typeof f?.data === "string");
+
 const json = (body: unknown, status: number) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
@@ -72,7 +94,7 @@ export function createProxyHandler(config: ProxyHandlerConfig) {
     // Normalize before matching so "/responses/../files" can't slip past the
     // allowlist and reach an endpoint the operator never opened up.
     const path = normalizePath(envelope.path);
-    if (!path || !provider.allowPaths.some((p) => pathMatches(p, path))) {
+    if (!path || !provider.allowPaths.some((p) => entryMatches(p, envelope.method, path))) {
       return json({ error: { message: `Path "${envelope.path}" is not allowed for ${envelope.provider}.` } }, 403);
     }
 
@@ -92,15 +114,35 @@ export function createProxyHandler(config: ProxyHandlerConfig) {
       authorization: `Bearer ${apiKey}`,
       ...provider.headers,
     };
-    if (envelope.body !== undefined) headers["content-type"] = "application/json";
     if (envelope.stream) headers["accept"] = "text/event-stream";
+
+    let body: BodyInit | undefined;
+    if (isSerializedMultipart(envelope.body)) {
+      // Rebuild the FormData the client couldn't send through the JSON
+      // envelope. No content-type — fetch supplies the multipart boundary.
+      const form = new FormData();
+      for (const [k, v] of Object.entries(envelope.body.fields ?? {})) form.set(k, v);
+      for (const f of envelope.body.files) {
+        let bytes: Uint8Array;
+        try {
+          bytes = base64ToBytes(f.data);
+        } catch {
+          return json({ error: { message: `File part "${f.field}" is not valid base64.` } }, 400);
+        }
+        form.set(f.field, new Blob([bytes as BlobPart], f.mediaType ? { type: f.mediaType } : {}), f.filename);
+      }
+      body = form;
+    } else if (envelope.body !== undefined) {
+      headers["content-type"] = "application/json";
+      body = JSON.stringify(envelope.body);
+    }
 
     let upstream: Response;
     try {
       upstream = await doFetch(url.toString(), {
         method: envelope.method,
         headers,
-        body: envelope.body === undefined ? undefined : JSON.stringify(envelope.body),
+        body,
         signal: request.signal,
       });
     } catch (e) {

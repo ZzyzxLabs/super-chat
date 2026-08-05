@@ -29,6 +29,9 @@ const handler = createProxyHandler({
         "/responses/*/cancel",
         "/chat/completions",
         "/models",
+        // Method-scoped on purpose: uploads only. A bare "/files" would also
+        // open GET /files (list every file on the account) and DELETE.
+        "POST /files",
       ],
     },
   },

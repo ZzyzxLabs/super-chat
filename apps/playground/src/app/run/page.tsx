@@ -3,13 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentClient, AgentProvider, useAgentState, useThread } from "@agentloom/react";
 import { BUILTIN_RENDERERS, CardRendererProvider, ContextInspector, Composer, Thread } from "@agentloom/ui";
-import type { RunEvent, RunMode } from "@agentloom/core";
+import type { RunEvent, RunMode, StoredFile } from "@agentloom/core";
 import {
   MODELS,
   buildContextBuilder,
   buildProvider,
   buildToolRegistry,
   buildTransport,
+  fileStore,
   jobStore,
   type TransportMode,
 } from "@/agent/setup";
@@ -31,13 +32,22 @@ export default function RunPanel() {
   const [mode, setMode] = useState<RunMode>("stream");
   const [presets, setPresets] = useState<string[]>(["observer", "executor"]);
 
+  const [attachments, setAttachments] = useState<StoredFile[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const pendingFiles = useRef<StoredFile[]>([]);
+
   const tools = useMemo(() => buildToolRegistry(), []);
   const contextBuilder = useMemo(() => buildContextBuilder(), []);
 
-  const client = useMemo(() => {
+  const provider = useMemo(() => {
     const effective = transportMode === "direct" && !apiKey.trim() ? "demo" : transportMode;
-    return new AgentClient({
-      provider: buildProvider(buildTransport(effective, apiKey || undefined)),
+    return buildProvider(buildTransport(effective, apiKey || undefined));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transportMode, transportMode === "direct" ? apiKey : "static"]);
+
+  const client = useMemo(() => {
+    const c = new AgentClient({
+      provider,
       model,
       contextBuilder,
       tools,
@@ -46,8 +56,53 @@ export default function RunPanel() {
       maxSteps: 8,
       jobStore,
     });
+    // Splice pending attachments into the next send. The ui Composer passes
+    // text only; the client's send already accepts ContentPart[], so the panel
+    // wraps the instance rather than forking the Composer.
+    const plainSend = c.send.bind(c);
+    c.send = (input) => {
+      const attached = pendingFiles.current.splice(0);
+      setAttachments([]);
+      if (attached.length && typeof input === "string") {
+        return plainSend([
+          { type: "text", text: input },
+          ...attached.map((f) => ({
+            type: "file" as const,
+            source: f.ref,
+            mediaType: f.mediaType ?? "application/octet-stream",
+            filename: f.filename,
+          })),
+        ]);
+      }
+      return plainSend(input);
+    };
+    return c;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transportMode, transportMode === "direct" ? apiKey : "static"]);
+  }, [provider]);
+
+  const pickFile = async (picked: File | undefined) => {
+    if (!picked || !provider.uploadFile) return;
+    setUploading(true);
+    try {
+      const ref = await provider.uploadFile({
+        data: picked,
+        filename: picked.name,
+        ...(picked.type ? { mediaType: picked.type } : {}),
+      });
+      const stored: StoredFile = {
+        ref,
+        filename: picked.name,
+        ...(picked.type ? { mediaType: picked.type } : {}),
+        sizeBytes: picked.size,
+        createdAt: Date.now(),
+      };
+      void fileStore.put(stored);
+      pendingFiles.current.push(stored);
+      setAttachments((prev) => [...prev, stored]);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   useEffect(() => {
     client.configure({ model, mode, toolResolution: { presets } });
@@ -89,8 +144,42 @@ export default function RunPanel() {
                   {p}
                 </label>
               ))}
+              <label className="al-btn al-btn--ghost al-btn--sm" title="Attach a file (uploaded once, referenced by id)">
+                {uploading ? "Uploading…" : "📎 Attach"}
+                <input
+                  type="file"
+                  style={{ display: "none" }}
+                  disabled={uploading}
+                  onChange={(e) => {
+                    const picked = e.target.files?.[0];
+                    e.target.value = "";
+                    void pickFile(picked);
+                  }}
+                />
+              </label>
               <ClearButton />
             </div>
+
+            {attachments.length ? (
+              <div className="dev__prompts" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {attachments.map((f) => (
+                  <span key={f.ref.id} className="al-btn al-btn--ghost al-btn--sm" title={f.ref.id}>
+                    📄 {f.filename}
+                    <button
+                      type="button"
+                      className="al-btn al-btn--ghost al-btn--sm"
+                      aria-label={`Remove ${f.filename}`}
+                      onClick={() => {
+                        pendingFiles.current = pendingFiles.current.filter((p) => p.ref.id !== f.ref.id);
+                        setAttachments((prev) => prev.filter((p) => p.ref.id !== f.ref.id));
+                      }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : null}
 
             {transportMode === "demo" ? (
               <p className="dev__banner">

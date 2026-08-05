@@ -157,6 +157,32 @@ export type ProviderCapabilities = {
   strictJsonSchema: boolean;
   /** Provider stores the conversation, enabling `previousResponseId`. */
   serverSideHistory: boolean;
+  /** Can upload binaries and mint providerFile ids (`files` = accepts file parts). */
+  fileUpload: boolean;
+};
+
+export type FileUploadRequest = {
+  data: Blob | ArrayBuffer | Uint8Array;
+  filename: string;
+  mediaType?: string;
+  /** Provider-specific purpose tag. OpenAI defaults to "user_data". */
+  purpose?: string;
+};
+
+/**
+ * Structurally a `MediaSource` `providerFile` variant, so an upload result
+ * drops straight into `file(ref, mediaType)` / `image(ref)` with no glue.
+ * `provider` is the ADAPTER's configured id — that is what `assertOwnFile`
+ * checks against, so a ref minted by one provider instance is refused by
+ * another instead of producing a guaranteed 400.
+ */
+export type ProviderFileRef = {
+  kind: "providerFile";
+  id: string;
+  provider: string;
+  filename?: string;
+  sizeBytes?: number;
+  createdAt?: number;
 };
 
 export type CallOptions = {
@@ -180,6 +206,10 @@ export type Provider = {
   cancelJob?(handle: JobHandle, opts?: CallOptions): Promise<JobSnapshot>;
   /** Attach to a running background job's event stream from `handle.cursor`. */
   streamJob?(handle: JobHandle, opts?: CallOptions): AsyncIterable<StreamEvent>;
+
+  /** Upload a binary once and get back a reusable providerFile ref. */
+  uploadFile?(req: FileUploadRequest, opts?: CallOptions): Promise<ProviderFileRef>;
+  deleteFile?(fileId: string, opts?: CallOptions): Promise<void>;
 
   listModels?(opts?: CallOptions): Promise<ModelInfo[]>;
 };

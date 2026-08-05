@@ -100,6 +100,26 @@ describe("createProxyHandler", () => {
     expect(url).toContain("starting_after=12");
   });
 
+  it("scopes an allowlist entry to its method prefix", async () => {
+    // "POST /files" is an upload; a bare "/files" would also open GET /files,
+    // which lists every file on the account.
+    const upstream = okUpstream();
+    const cfg = {
+      providers: { openai: { baseUrl: "https://api.openai.com/v1", apiKey: "sk-test", allowPaths: ["POST /files"] } },
+      fetchImpl: upstream as never,
+    };
+    const post = await createProxyHandler(cfg)(envelope({ path: "/files" }));
+    expect(post.status).toBe(200);
+    const get = await createProxyHandler(cfg)(envelope({ path: "/files", method: "GET" }));
+    expect(get.status).toBe(403);
+  });
+
+  it("matches any method for an entry without a prefix", async () => {
+    const upstream = okUpstream();
+    const res = await createProxyHandler(config(upstream as never))(envelope({ path: "/responses/resp_1", method: "GET" }));
+    expect(res.status).toBe(200);
+  });
+
   it("round-trips a request built by ProxyTransport", async () => {
     // The two halves must agree on the envelope shape; this is the contract test.
     const upstream = okUpstream();

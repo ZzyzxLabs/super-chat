@@ -306,6 +306,23 @@ export function createDemoTransport(opts: { latencyMs?: number } = {}): Transpor
     async fetch(req: TransportRequest): Promise<Response> {
       await new Promise((r) => setTimeout(r, latency));
 
+      // Uploads get a fake file id, so the attach flow works keyless too.
+      if (req.path === "/files" && req.method === "POST") {
+        seq += 1;
+        const upload = req.body as { files?: { filename?: string; data?: Uint8Array }[] } | undefined;
+        const file = upload?.files?.[0];
+        return new Response(
+          JSON.stringify({
+            id: `file_demo_${seq}`,
+            object: "file",
+            bytes: file?.data?.length ?? 0,
+            created_at: Date.now() / 1000,
+            filename: file?.filename ?? "demo",
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
       const body = (req.body ?? {}) as { model?: string; input?: ResponsesItem[]; stream?: boolean };
       const input = body.input ?? [];
       const text = lastUserText(input);

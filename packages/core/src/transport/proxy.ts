@@ -8,7 +8,8 @@
 // and it allowlists paths — a proxy that forwards any path is an open relay for
 // your API key.
 
-import type { Transport, TransportRequest } from "./types.js";
+import { bytesToBase64 } from "./binary.js";
+import { isMultipartBody, type Transport, type TransportRequest } from "./types.js";
 
 export type ProxyTransportConfig = {
   /** Base path of your proxy route, e.g. "/api/agent". */
@@ -29,6 +30,18 @@ export type ProxyEnvelope = {
   stream?: boolean;
 };
 
+/**
+ * A `MultipartBody` as it travels inside the JSON envelope: bytes become
+ * base64 strings so the client→BFF wire stays one method, one body shape.
+ * Base64 costs +33%, so treat ~20 MB per upload as the practical ceiling —
+ * beyond that, use a direct transport or your own upload route.
+ */
+export type SerializedMultipartBody = {
+  kind: "multipart";
+  fields: Record<string, string>;
+  files: { field: string; filename: string; mediaType?: string; data: string }[];
+};
+
 export function createProxyTransport(config: ProxyTransportConfig): Transport {
   const doFetch = config.fetchImpl ?? globalThis.fetch;
 
@@ -37,11 +50,24 @@ export function createProxyTransport(config: ProxyTransportConfig): Transport {
     credentialSafe: true,
     async fetch(req: TransportRequest): Promise<Response> {
       const extra = typeof config.headers === "function" ? await config.headers() : config.headers;
+      const body: unknown = isMultipartBody(req.body)
+        ? ({
+            kind: "multipart",
+            fields: req.body.fields,
+            files: req.body.files.map((f) => ({
+              field: f.field,
+              filename: f.filename,
+              ...(f.mediaType ? { mediaType: f.mediaType } : {}),
+              data: bytesToBase64(f.data),
+            })),
+          } satisfies SerializedMultipartBody)
+        : req.body;
+
       const envelope: ProxyEnvelope = {
         provider: req.provider,
         path: req.path,
         method: req.method,
-        body: req.body,
+        body,
         query: req.query,
         stream: req.stream,
       };

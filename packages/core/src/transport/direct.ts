@@ -7,7 +7,7 @@
 // warn, and `assertBrowserUseAcknowledged` makes the footgun explicit rather
 // than silent.
 
-import type { Transport, TransportRequest } from "./types.js";
+import { isMultipartBody, type Transport, type TransportRequest } from "./types.js";
 
 export type DirectTransportConfig = {
   /** Provider API root, no trailing slash. e.g. "https://api.openai.com/v1". */
@@ -53,13 +53,26 @@ export function createDirectTransport(config: DirectTransportConfig): Transport 
         ...config.headers,
         ...req.headers,
       };
-      if (req.body !== undefined) headers["content-type"] = "application/json";
       if (req.stream) headers["accept"] = "text/event-stream";
+
+      let body: BodyInit | undefined;
+      if (isMultipartBody(req.body)) {
+        // No content-type here — fetch sets multipart/form-data with the boundary.
+        const form = new FormData();
+        for (const [k, v] of Object.entries(req.body.fields)) form.set(k, v);
+        for (const f of req.body.files) {
+          form.set(f.field, new Blob([f.data as BlobPart], f.mediaType ? { type: f.mediaType } : {}), f.filename);
+        }
+        body = form;
+      } else if (req.body !== undefined) {
+        headers["content-type"] = "application/json";
+        body = JSON.stringify(req.body);
+      }
 
       return doFetch(buildUrl(config.baseUrl, req.path, req.query), {
         method: req.method,
         headers,
-        body: req.body === undefined ? undefined : JSON.stringify(req.body),
+        body,
         signal: req.signal,
       });
     },
