@@ -19,7 +19,7 @@ apps/playground   Next.js dev panels. runs with NO API key.
 
 ```bash
 pnpm install && pnpm build && pnpm dev     # → http://localhost:3210
-pnpm test                                  # 212 tests, ~3s
+pnpm test                                  # 237 tests, ~3s
 ```
 
 The playground is **not a product**. It is six panels, one per capability, aimed
@@ -162,13 +162,17 @@ audit fixed the seams that existed but didn't connect (loadSkill unlock,
 updateCard upsert, shared playground registry, thread-switch generation guard,
 job-resume routing, foreign-file degrade). What remains:
 
-1. **Streaming through the proxy under load.** The BFF streams the upstream body
-   straight through, which is correct, but nothing has been tested with more than
-   one concurrent stream.
-2. **Server-backed ThreadStore + provider-native tools** (web search, code
-   interpreter) are the next competitive gaps worth closing; the app-state seam
-   (agent ↔ host application state, CopilotKit-style) is the biggest thesis-level
-   one.
+Nothing on the previous roadmap is outstanding — concurrent proxy streaming now
+has a test, the REST `ThreadStore` ships, provider-native tools pass through,
+and the app-state seam landed. What is genuinely open:
+
+1. **A third provider (Gemini).** Two adapters proved the normalized content
+   model holds; a third is now routine rather than risky.
+2. **Nobody has driven the app-state panel against a live model.** The demo
+   transport is scripted, so the board actions are exercised by tests and by
+   hand — not by an actual model deciding to call them.
+3. **The `agentloom` / `SuperChat` naming split is still unresolved** (see
+   below). It touches every import; ask before renaming.
 
 Deliberately *not* done, and worth leaving alone unless asked: multi-agent
 orchestration, a plugin system, and any kind of visual builder. The framework's

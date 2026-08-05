@@ -260,9 +260,10 @@ the transport selector to **Server proxy**, or pick **BYOK direct** and paste a 
 pnpm test
 ```
 
-212 tests. The runtime suite drives the real OpenAI and Anthropic adapters
-against mocked transports, so the tool loop, card suspension, thinking replay
-and background polling are all exercised with no key and no network.
+237 tests. The runtime suite drives the real OpenAI and Anthropic adapters
+against mocked transports, so the tool loop, card suspension, thinking replay,
+background polling and concurrent proxy streaming are all exercised with no key
+and no network.
 
 ---
 
@@ -281,9 +282,14 @@ interactive form cards, `createMcpSkill` for the relevance half), memory seam
 + cited-evidence context source + lexical reference impl), skills, context
 assembly, tools + presets, 20 card kinds, React bindings, UI kit, dev panels.
 
-**Not built yet:** a Gemini adapter, a server-backed `ThreadStore`
-implementation (the interface supports it; a REST impl is four fetch calls),
-and provider-native web search / code-interpreter tools.
+Also built: an **app-state seam** (the agent reads and operates host
+application state through the same context-source and tool machinery), a REST
+`ThreadStore` alongside the memory and localStorage ones, and **provider-native
+tool passthrough** (web search, code interpreter — declared per provider, their
+activity surfaced in the transcript).
+
+**Not built yet:** a Gemini adapter, and voice / image generation (out of scope
+for a framework — they belong to the host's own product surface).
 
 Prior art read closely: Open WebUI's tools/functions/knowledge split, LibreChat's
 multi-provider handling, and the Sup Wallet agent in `zzyzx-full-repo` — whose
