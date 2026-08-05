@@ -7,6 +7,7 @@
 // server must not be able to walk its tools into the executor tier by being
 // connected.
 
+import type { Skill } from "../skills/types.js";
 import type { ToolDefinition, ToolResult, ToolSide } from "../tools/types.js";
 import type { McpClient } from "./client.js";
 import type { McpCallResult, McpContent } from "./types.js";
@@ -115,6 +116,39 @@ export function mapMcpResult(result: McpCallResult): ToolResult {
           },
         }
       : {}),
+  };
+}
+
+/**
+ * The relevance half of the composition: a `matched` skill that names the
+ * imported tools, so they surface when the conversation is about them —
+ * exactly how a locally defined domain tool becomes visible. Registering the
+ * tools makes them EXIST; registering this skill makes them REACHABLE. The
+ * authority tier still comes from presets, which this never touches.
+ */
+export function createMcpSkill(
+  serverName: string,
+  defs: readonly ToolDefinition[],
+  opts: { id?: string; priority?: number } = {},
+): Skill {
+  // "utils_word_count" → alias "word count"; the original tool vocabulary is
+  // what a user's request will actually contain.
+  const bare = (name: string) => name.slice(name.indexOf("_") + 1);
+  const aliases = [...new Set(defs.flatMap((d) => [bare(d.name).replace(/_/g, " "), bare(d.name)]))];
+
+  return {
+    id: opts.id ?? `mcp-${serverName.toLowerCase().replace(/[^a-z0-9-]+/g, "-")}`,
+    name: `MCP: ${serverName}`,
+    description: `Tools provided by the ${serverName} MCP server.`,
+    mode: "matched",
+    aliases,
+    ...(opts.priority != null ? { priority: opts.priority } : {}),
+    body: [
+      `The ${serverName} MCP server provides these tools:`,
+      ...defs.map((d) => `- ${d.name}: ${d.description.split("\n")[0]}`),
+      "Call them like any other tool.",
+    ].join("\n"),
+    tools: defs.map((d) => d.name),
   };
 }
 

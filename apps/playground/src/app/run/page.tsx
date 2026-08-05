@@ -8,11 +8,11 @@ import {
   MODELS,
   buildContextBuilder,
   buildProvider,
-  buildToolRegistry,
   buildTransport,
   fileStore,
   jobStore,
   threadStore,
+  toolRegistry,
   type TransportMode,
 } from "@/agent/setup";
 
@@ -33,7 +33,8 @@ export default function RunPanel() {
   const [mode, setMode] = useState<RunMode>("stream");
   const [presets, setPresets] = useState<string[]>(["observer", "executor"]);
 
-  const tools = useMemo(() => buildToolRegistry(), []);
+  // The SHARED registry singleton — tools imported on /tools are callable here.
+  const tools = toolRegistry;
   const contextBuilder = useMemo(() => buildContextBuilder(), []);
 
   // BYOK with an empty key falls back to demo — track that as a VISIBLE fact,

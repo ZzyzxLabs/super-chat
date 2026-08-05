@@ -1,14 +1,20 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { McpClient, createHttpTransport, importMcpTools } from "@agentloom/core";
+import { useState, useSyncExternalStore } from "react";
+import { McpClient, createHttpTransport, createMcpSkill, importMcpTools } from "@agentloom/core";
 import { PanelHeader } from "@/components/Shell";
-import { buildToolRegistry } from "@/agent/setup";
+import { skills, toolRegistry } from "@/agent/setup";
 
 const PRESETS = ["observer", "executor"] as const;
 
 export default function ToolsPanel() {
-  const registry = useMemo(() => buildToolRegistry(), []);
+  // The SHARED registry — imports done here are live in the /run agent too.
+  const registry = toolRegistry;
+  useSyncExternalStore(
+    (cb) => registry.subscribe(cb),
+    () => registry.getVersion(),
+    () => registry.getVersion(),
+  );
   const [enabled, setEnabled] = useState<string[]>(["observer"]);
   const [open, setOpen] = useState<string | null>(null);
 
@@ -23,10 +29,14 @@ export default function ToolsPanel() {
     setImportError(null);
     try {
       const client = new McpClient({ transport: createHttpTransport({ baseUrl: mcpUrl }) });
+      const { serverInfo } = await client.connect();
       const defs = await importMcpTools(client);
       // NO preset: imported tools are skill-gated/private, like every other
       // domain tool. Import grants existence, never authority.
       registry.registerAll(defs);
+      // The relevance half: a matched skill naming the tools, so the /run
+      // agent surfaces them when the conversation is about them.
+      skills.register(createMcpSkill(serverInfo.name, defs));
       setImported(defs.map((d) => d.name));
     } catch (e) {
       setImportError(e instanceof Error ? e.message : String(e));
@@ -144,10 +154,11 @@ export default function ToolsPanel() {
         <p className="dev__section-note">
           <code className="al-mono">importMcpTools()</code> maps an MCP server&apos;s tool list onto{" "}
           <code className="al-mono">ToolDefinition</code>s — namespaced, with an executor that calls back through the
-          server. Imported tools register with <strong>no preset</strong>, so they land as{" "}
-          <em>private</em> in the table above: visible to nothing until a skill (or the allow toggle below, standing in
-          for one) surfaces them. Import grants existence, never authority. The default URL is this playground&apos;s own
-          mock MCP route — no key, real HTTP.
+          server. Imported tools register into the <strong>shared</strong> registry with <strong>no preset</strong>{" "}
+          (private — import grants existence, never authority), and <code className="al-mono">createMcpSkill()</code>{" "}
+          registers a matched skill naming them — so on <code className="al-mono">/run</code>, asking about e.g. a word
+          count surfaces and unlocks them like any domain tool. The allow toggle below simulates that match manually.
+          The default URL is this playground&apos;s own mock MCP route — no key, real HTTP.
         </p>
         <div className="dev__row">
           <input

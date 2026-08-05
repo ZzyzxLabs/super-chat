@@ -155,6 +155,12 @@ export function useTools(): { all: ToolDefinition[]; active: string[]; presets: 
     (a, b) => a?.length === b?.length && (a ?? []).every((n, i) => n === b?.[i]),
   );
   const config = client.getConfig();
+  // Re-read after LATE registrations (an MCP import lands long after mount).
+  const registryVersion = useSyncExternalStore(
+    useCallback((cb: () => void) => config.tools.subscribe(cb), [config.tools]),
+    () => config.tools.getVersion(),
+    () => config.tools.getVersion(),
+  );
 
   return useMemo(() => {
     const base = config.tools.resolve(config.toolResolution).map((t) => t.name);
@@ -167,7 +173,7 @@ export function useTools(): { all: ToolDefinition[]; active: string[]; presets: 
       presets: [...config.toolResolution.presets],
       fromRun: Boolean(recorded?.length),
     };
-  }, [config, recorded]);
+  }, [config, recorded, registryVersion]);
 }
 
 export function useJobs() {

@@ -36,6 +36,11 @@ export const skills = new SkillRegistry(SKILLS, { maxMatched: 3 });
  */
 export function buildToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
+  populateToolRegistry(registry);
+  return registry;
+}
+
+function populateToolRegistry(registry: ToolRegistry): void {
 
   // Built-ins (visualize, updateCard, loadSkill) are always-available reads.
   registry.registerAll(createBuiltinTools({ cards, skills }), ["observer"]);
@@ -52,9 +57,15 @@ export function buildToolRegistry(): ToolRegistry {
     if (tool.name === "createAlert") registry.register(tool, ["executor"]);
     else registry.register(tool);
   }
-
-  return registry;
 }
+
+/**
+ * THE registry — a module singleton, like `cards` and `skills` above. Every
+ * panel (and the /run agent) shares this instance, so a tool imported on
+ * /tools is callable on /run. A fresh-registry-per-page looks the same in a
+ * table and is dead everywhere else.
+ */
+export const toolRegistry = buildToolRegistry();
 
 export function buildTransport(mode: TransportMode, apiKey?: string): Transport {
   // Demo replaces only the network. The adapter, runtime, tools, cards and

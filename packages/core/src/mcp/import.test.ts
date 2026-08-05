@@ -97,6 +97,45 @@ describe("importMcpTools", () => {
   });
 });
 
+describe("createMcpSkill", () => {
+  it("names the imported tools and derives aliases from their bare names", async () => {
+    const client = new McpClient({
+      transport: serverTransport({ name: "utils", tools: [{ name: "word_count" }, { name: "slugify" }] }),
+    });
+    const defs = await importMcpTools(client);
+    const { createMcpSkill } = await import("./import.js");
+    const skill = createMcpSkill("utils", defs);
+
+    expect(skill.mode).toBe("matched");
+    expect(skill.tools).toEqual(["utils_word_count", "utils_slugify"]);
+    expect(skill.aliases).toContain("word count");
+    expect(skill.aliases).toContain("slugify");
+    // The whole point: registry(allow: skill.tools) resolves the imports.
+    const registry = new ToolRegistry();
+    registry.registerAll(defs);
+    expect(registry.resolve({ presets: [], allow: skill.tools! }).map((t) => t.name)).toEqual(
+      ["utils_slugify", "utils_word_count"],
+    );
+  });
+});
+
+describe("registry change notification", () => {
+  it("notifies subscribers and bumps the version on late registration", () => {
+    const registry = new ToolRegistry();
+    let notified = 0;
+    const unsub = registry.subscribe(() => {
+      notified += 1;
+    });
+    const before = registry.getVersion();
+    registry.register({ name: "late", description: "d", inputSchema: { type: "object" } });
+    expect(notified).toBe(1);
+    expect(registry.getVersion()).toBeGreaterThan(before);
+    unsub();
+    registry.register({ name: "later", description: "d", inputSchema: { type: "object" } });
+    expect(notified).toBe(1);
+  });
+});
+
 describe("mapMcpResult", () => {
   it("prefers structuredContent verbatim", () => {
     expect(mapMcpResult({ content: [{ type: "text", text: "ignored" }], structuredContent: { a: 1 } })).toEqual({
