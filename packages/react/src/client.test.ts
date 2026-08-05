@@ -146,4 +146,46 @@ describe("AgentClient + ThreadStore", () => {
     await client.send("hi");
     expect(client.store.get().messages).toHaveLength(2);
   });
+
+  it("clear() persists the emptied thread so reload does not resurrect it", async () => {
+    const store = createMemoryThreadStore();
+    const client = makeClient([respondText("hi")], { threadStore: store });
+    await client.send("hello");
+    await flush();
+    const id = client.store.get().id;
+    client.clear();
+    await flush();
+    expect((await store.load(id))?.messages).toEqual([]);
+  });
+});
+
+describe("attachments", () => {
+  it("staged parts join the next send and are consumed by it", async () => {
+    const client = makeClient([respondText("got it")]);
+    client.attach({
+      type: "file",
+      source: { kind: "providerFile", id: "file_1", provider: "openai" },
+      mediaType: "application/pdf",
+      filename: "doc.pdf",
+    });
+    expect(client.store.get().attachments).toHaveLength(1);
+
+    await client.send("summarize this");
+    const user = client.store.get().messages[0]!;
+    expect(user.parts.map((p) => p.type)).toEqual(["text", "file"]);
+    // Consumed: the next send must not re-attach.
+    expect(client.store.get().attachments).toEqual([]);
+  });
+
+  it("removeAttachment unstages by index and thread switches drop staged parts", async () => {
+    const client = makeClient([respondText("x")]);
+    client.attach({ type: "file", source: { kind: "providerFile", id: "a", provider: "openai" }, mediaType: "text/plain" });
+    client.attach({ type: "file", source: { kind: "providerFile", id: "b", provider: "openai" }, mediaType: "text/plain" });
+    client.removeAttachment(0);
+    expect(client.store.get().attachments).toHaveLength(1);
+
+    client.newThread();
+    // An attached-but-unsent file must not silently ride into another thread.
+    expect(client.store.get().attachments).toEqual([]);
+  });
 });

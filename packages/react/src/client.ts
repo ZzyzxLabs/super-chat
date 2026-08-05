@@ -40,6 +40,8 @@ export type ThreadState = {
   /** Cards from the CURRENT run; committed to messages when the run finishes. */
   cards: Card[];
   jobs: StoredJob[];
+  /** Parts staged for the NEXT send (file/image attachments). Thread-scoped. */
+  attachments: ContentPart[];
   status: RunState["status"];
   error?: unknown;
 };
@@ -96,8 +98,25 @@ export class AgentClient {
       run: initialRunState("", config.mode ?? "stream"),
       cards: [],
       jobs: [],
+      attachments: [],
       status: "idle",
     });
+  }
+
+  /**
+   * Stage a part (a file/image the host uploaded) for the next send. The
+   * Composer only carries text; this is how binary content joins the turn.
+   */
+  attach(part: ContentPart): void {
+    this.store.set((s) => ({ ...s, attachments: [...s.attachments, part] }));
+  }
+
+  removeAttachment(index: number): void {
+    this.store.set((s) => ({ ...s, attachments: s.attachments.filter((_, i) => i !== index) }));
+  }
+
+  clearAttachments(): void {
+    this.store.set((s) => (s.attachments.length ? { ...s, attachments: [] } : s));
   }
 
   /** Update config in place (model switch, preset toggle) without losing the thread. */
@@ -114,11 +133,13 @@ export class AgentClient {
     return status === "running" || status === "awaiting-user";
   }
 
-  /** Append a user message and run a turn. */
+  /** Append a user message (plus any staged attachments) and run a turn. */
   async send(input: string | ContentPart[], opts: { forceSkillIds?: string[] } = {}): Promise<void> {
     if (this.isRunning) throw new Error("A run is already in progress. Call stop() first.");
-    const message = userMessage(input);
-    this.store.set((s) => ({ ...s, messages: [...s.messages, message] }));
+    const staged = this.store.get().attachments;
+    const parts: ContentPart[] = typeof input === "string" ? [{ type: "text", text: input }] : [...input];
+    const message = userMessage(staged.length ? [...parts, ...staged] : input);
+    this.store.set((s) => ({ ...s, messages: [...s.messages, message], attachments: [] }));
     // Persist the user turn before running — a reload mid-run keeps it.
     this.persist();
     await this.run([...this.store.get().messages], opts);
@@ -285,6 +306,7 @@ export class AgentClient {
       id: stored.meta.id,
       messages: stored.messages,
       cards: [],
+      attachments: [],
       run: initialRunState("", this.config.mode ?? "stream"),
       status: "idle",
       error: undefined,
@@ -301,6 +323,7 @@ export class AgentClient {
       id: nextId("thread"),
       messages: [],
       cards: [],
+      attachments: [],
       run: initialRunState("", this.config.mode ?? "stream"),
       status: "idle",
       error: undefined,
@@ -331,7 +354,17 @@ export class AgentClient {
 
   clear(): void {
     this.stop();
-    this.store.set((s) => ({ ...s, messages: [], cards: [], run: initialRunState("", this.config.mode ?? "stream"), status: "idle", error: undefined }));
+    this.store.set((s) => ({
+      ...s,
+      messages: [],
+      cards: [],
+      attachments: [],
+      run: initialRunState("", this.config.mode ?? "stream"),
+      status: "idle",
+      error: undefined,
+    }));
+    // Without this, reload restores the conversation the user just cleared.
+    this.persist();
   }
 
   /** Re-poll background jobs from a previous session. Call on mount. */

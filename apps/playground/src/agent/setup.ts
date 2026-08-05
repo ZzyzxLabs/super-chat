@@ -72,8 +72,12 @@ export function buildTransport(mode: TransportMode, apiKey?: string): Transport 
   return createProxyTransport({ url: "/api/agent" });
 }
 
-export function buildProvider(transport: Transport): Provider {
-  return createOpenAIProvider({ transport, dialect: "responses" });
+export function buildProvider(transport: Transport, mode: TransportMode = "proxy"): Provider {
+  // Demo gets its OWN provider id: providerFile refs are stamped with the id
+  // that minted them, so a fake `file_demo_N` attached in demo mode degrades
+  // to a readable placeholder when the thread is replayed against real
+  // OpenAI, instead of 400ing the thread forever.
+  return createOpenAIProvider({ transport, dialect: "responses", ...(mode === "demo" ? { id: "demo" } : {}) });
 }
 
 export function buildContextBuilder(contextWindow = 128_000): ContextBuilder {

@@ -14,7 +14,7 @@ import {
   useSyncExternalStore,
   type ReactNode,
 } from "react";
-import type { Card, CardAction, ContextTrace, Message, Skill, ThreadMeta, ToolDefinition } from "@agentloom/core";
+import type { Card, CardAction, ContentPart, ContextTrace, Message, Skill, ThreadMeta, ToolDefinition } from "@agentloom/core";
 import { AgentClient, type AgentClientConfig, type ThreadState } from "./client.js";
 
 const AgentContext = createContext<AgentClient | null>(null);
@@ -184,6 +184,26 @@ export function useJobs() {
   }, [client]);
 
   return jobs;
+}
+
+/** Parts staged for the next send, plus the stage/unstage actions. */
+export function useAttachments(): {
+  attachments: ContentPart[];
+  attach: (part: ContentPart) => void;
+  remove: (index: number) => void;
+  clear: () => void;
+} {
+  const client = useAgentClient();
+  const attachments = useAgentState((s) => s.attachments);
+  return useMemo(
+    () => ({
+      attachments,
+      attach: (part: ContentPart) => client.attach(part),
+      remove: (index: number) => client.removeAttachment(index),
+      clear: () => client.clearAttachments(),
+    }),
+    [client, attachments],
+  );
 }
 
 /**

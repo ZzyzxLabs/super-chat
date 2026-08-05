@@ -7,8 +7,8 @@
 // collapse — a turn that made six lookups should not push the answer off screen.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { isCardCarrier, type Card, type ContentPart, type Message } from "@agentloom/core";
-import { useCardAction, useCards, useRun, useThread } from "@agentloom/react";
+import { isCardCarrier, type Card, type ContentPart, type MediaSource, type Message } from "@agentloom/core";
+import { useAttachments, useCardAction, useCards, useRun, useThread } from "@agentloom/react";
 import { CardRenderer, useCardRenderers } from "./renderer-registry.js";
 
 function partsOf(message: Message) {
@@ -42,10 +42,16 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
   const interactive = cards.filter((c) => isInteractiveKind((c.spec as { kind?: string }).kind));
   const passive = cards.filter((c) => !interactive.includes(c));
 
+  const media = rest.filter(
+    (p): p is Extract<ContentPart, { type: "image" | "file" | "audio" }> =>
+      p.type === "image" || p.type === "file" || p.type === "audio",
+  );
+
   if (message.role === "user") {
     return (
       <div className="al-msg al-msg--user">
-        <div className="al-bubble">{text}</div>
+        {media.length ? <MediaParts parts={media} /> : null}
+        {text ? <div className="al-bubble">{text}</div> : null}
       </div>
     );
   }
@@ -57,6 +63,7 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
   return (
     <div className="al-msg al-msg--assistant">
       {reasoning ? <ReasoningBlock text={reasoning} /> : null}
+      {media.length ? <MediaParts parts={media} /> : null}
       {calls.length || results.length ? <ToolActivity calls={calls} results={results} /> : null}
       {passive.map((c) => (
         <CardRenderer key={c.id} card={c} />
@@ -72,6 +79,49 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
 
 const INTERACTIVE_KINDS = new Set(["choice", "form", "confirm"]);
 const isInteractiveKind = (kind?: string) => (kind ? INTERACTIVE_KINDS.has(kind) : false);
+
+const mediaSrc = (source: MediaSource, mediaType?: string): string | null => {
+  if (source.kind === "url") return source.url;
+  if (source.kind === "base64") return `data:${mediaType ?? "image/png"};base64,${source.data}`;
+  return null; // providerFile lives server-side; there is nothing to inline
+};
+
+/**
+ * Attached media, rendered instead of silently dropped — a file the user
+ * attached (and is billed for on every turn) must stay visible in the
+ * transcript, including after a reload.
+ */
+function MediaParts({ parts }: { parts: Extract<ContentPart, { type: "image" | "file" | "audio" }>[] }) {
+  return (
+    <div className="al-media">
+      {parts.map((p, i) => {
+        if (p.type === "image") {
+          const src = mediaSrc(p.source, p.mediaType);
+          return src ? (
+            <img key={i} className="al-media__img" src={src} alt="attached image" style={{ maxWidth: "min(100%, 360px)", borderRadius: 8 }} />
+          ) : (
+            <span key={i} className="al-pill" title={(p.source as { id?: string }).id}>
+              🖼 attached image
+            </span>
+          );
+        }
+        if (p.type === "file") {
+          const name = p.filename ?? (p.source.kind === "providerFile" ? p.source.id : "attachment");
+          return (
+            <span key={i} className="al-pill" title={p.mediaType}>
+              📄 {name}
+            </span>
+          );
+        }
+        return (
+          <span key={i} className="al-pill">
+            🔊 audio{p.transcript ? ` — “${p.transcript.slice(0, 60)}${p.transcript.length > 60 ? "…" : ""}”` : ""}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
 
 function ReasoningBlock({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
@@ -201,15 +251,38 @@ export function Thread({ empty }: { empty?: ReactNode }) {
   );
 }
 
-export function Composer({ placeholder = "Ask anything…" }: { placeholder?: string }) {
+export type ComposerProps = {
+  placeholder?: string;
+  /**
+   * Turn a picked browser File into staged attachment part(s) — typically
+   * upload via `provider.uploadFile` and then `client.attach(file(ref, …))`.
+   * When absent, the attach button is not rendered.
+   */
+  onAttachFile?: (file: File) => void | Promise<void>;
+};
+
+export function Composer({ placeholder = "Ask anything…", onAttachFile }: ComposerProps) {
   const { send, stop, isRunning } = useThread();
+  const { attachments, remove } = useAttachments();
   const [value, setValue] = useState("");
+  const [attaching, setAttaching] = useState(false);
 
   const submit = () => {
     const text = value.trim();
-    if (!text || isRunning) return;
+    // Attachments alone are a valid send — "summarize this file" is the text-less case.
+    if ((!text && !attachments.length) || isRunning) return;
     setValue("");
     void send(text);
+  };
+
+  const pick = async (file: File | undefined) => {
+    if (!file || !onAttachFile) return;
+    setAttaching(true);
+    try {
+      await onAttachFile(file);
+    } finally {
+      setAttaching(false);
+    }
   };
 
   return (
@@ -220,6 +293,39 @@ export function Composer({ placeholder = "Ask anything…" }: { placeholder?: st
         submit();
       }}
     >
+      {attachments.length ? (
+        <div className="al-composer__attachments" style={{ display: "flex", flexWrap: "wrap", gap: 6, width: "100%" }}>
+          {attachments.map((p, i) => (
+            <span key={i} className="al-pill">
+              {p.type === "image" ? "🖼" : p.type === "audio" ? "🔊" : "📄"}{" "}
+              {(p as { filename?: string }).filename ?? p.type}
+              <button
+                type="button"
+                className="al-btn al-btn--ghost al-btn--sm"
+                aria-label="Remove attachment"
+                onClick={() => remove(i)}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {onAttachFile ? (
+        <label className="al-btn al-btn--ghost" title="Attach a file" aria-disabled={attaching || isRunning}>
+          {attaching ? "…" : "📎"}
+          <input
+            type="file"
+            style={{ display: "none" }}
+            disabled={attaching || isRunning}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              void pick(file);
+            }}
+          />
+        </label>
+      ) : null}
       <textarea
         className="al-composer__input"
         rows={1}
@@ -240,7 +346,7 @@ export function Composer({ placeholder = "Ask anything…" }: { placeholder?: st
           Stop
         </button>
       ) : (
-        <button type="submit" className="al-btn al-btn--primary" disabled={!value.trim()}>
+        <button type="submit" className="al-btn al-btn--primary" disabled={!value.trim() && !attachments.length}>
           Send
         </button>
       )}

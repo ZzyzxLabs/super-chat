@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AgentClient, AgentProvider, useAgentState, useThread, useThreadList } from "@agentloom/react";
+import { AgentClient, AgentProvider, useAgentClient, useAgentState, useAttachments, useThread, useThreadList } from "@agentloom/react";
 import { BUILTIN_RENDERERS, CardRendererProvider, ContextInspector, Composer, Thread } from "@agentloom/ui";
 import type { RunEvent, RunMode, StoredFile } from "@agentloom/core";
 import {
@@ -33,21 +33,21 @@ export default function RunPanel() {
   const [mode, setMode] = useState<RunMode>("stream");
   const [presets, setPresets] = useState<string[]>(["observer", "executor"]);
 
-  const [attachments, setAttachments] = useState<StoredFile[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const pendingFiles = useRef<StoredFile[]>([]);
-
   const tools = useMemo(() => buildToolRegistry(), []);
   const contextBuilder = useMemo(() => buildContextBuilder(), []);
 
+  // BYOK with an empty key falls back to demo — track that as a VISIBLE fact,
+  // not a silent one, so nobody attaches a demo-minted file id believing it is
+  // real.
+  const effectiveMode: TransportMode = transportMode === "direct" && !apiKey.trim() ? "demo" : transportMode;
+
   const provider = useMemo(() => {
-    const effective = transportMode === "direct" && !apiKey.trim() ? "demo" : transportMode;
-    return buildProvider(buildTransport(effective, apiKey || undefined));
+    return buildProvider(buildTransport(effectiveMode, apiKey || undefined), effectiveMode);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [transportMode, transportMode === "direct" ? apiKey : "static"]);
 
   const client = useMemo(() => {
-    const c = new AgentClient({
+    return new AgentClient({
       provider,
       model,
       contextBuilder,
@@ -58,52 +58,42 @@ export default function RunPanel() {
       jobStore,
       threadStore,
     });
-    // Splice pending attachments into the next send. The ui Composer passes
-    // text only; the client's send already accepts ContentPart[], so the panel
-    // wraps the instance rather than forking the Composer.
-    const plainSend = c.send.bind(c);
-    c.send = (input) => {
-      const attached = pendingFiles.current.splice(0);
-      setAttachments([]);
-      if (attached.length && typeof input === "string") {
-        return plainSend([
-          { type: "text", text: input },
-          ...attached.map((f) => ({
-            type: "file" as const,
-            source: f.ref,
-            mediaType: f.mediaType ?? "application/octet-stream",
-            filename: f.filename,
-          })),
-        ]);
-      }
-      return plainSend(input);
-    };
-    return c;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider]);
 
-  const pickFile = async (picked: File | undefined) => {
-    if (!picked || !provider.uploadFile) return;
-    setUploading(true);
-    try {
-      const ref = await provider.uploadFile({
-        data: picked,
-        filename: picked.name,
-        ...(picked.type ? { mediaType: picked.type } : {}),
-      });
-      const stored: StoredFile = {
-        ref,
-        filename: picked.name,
-        ...(picked.type ? { mediaType: picked.type } : {}),
-        sizeBytes: picked.size,
-        createdAt: Date.now(),
-      };
-      void fileStore.put(stored);
-      pendingFiles.current.push(stored);
-      setAttachments((prev) => [...prev, stored]);
-    } finally {
-      setUploading(false);
-    }
+  /** Upload (or reuse a previous upload of the same file) and stage the part. */
+  const attachFile = async (picked: File) => {
+    if (!provider.uploadFile) return;
+    // Dedup: the same filename+size already uploaded to THIS provider means
+    // "reference the existing id", not "mint a second one".
+    const prior = (await fileStore.list()).find(
+      (f) => f.filename === picked.name && f.sizeBytes === picked.size && f.ref.provider === provider.id,
+    );
+    const stored: StoredFile =
+      prior ??
+      (await (async () => {
+        const ref = await provider.uploadFile!({
+          data: picked,
+          filename: picked.name,
+          ...(picked.type ? { mediaType: picked.type } : {}),
+        });
+        const fresh: StoredFile = {
+          ref,
+          filename: picked.name,
+          ...(picked.type ? { mediaType: picked.type } : {}),
+          sizeBytes: picked.size,
+          threadId: client.store.get().id,
+          createdAt: Date.now(),
+        };
+        await fileStore.put(fresh);
+        return fresh;
+      })());
+    client.attach({
+      type: "file",
+      source: stored.ref,
+      mediaType: stored.mediaType ?? "application/octet-stream",
+      filename: stored.filename,
+    });
   };
 
   useEffect(() => {
@@ -119,6 +109,10 @@ export default function RunPanel() {
     });
     void (async () => {
       const target = lastThreadId.current ?? (await threadStore.list())[0]?.id;
+      // Guard against the fast-first-send race: if the user already started
+      // talking to the fresh client while we awaited the list, opening the old
+      // thread now would DISCARD their turn. Their action wins.
+      if (client.isRunning || client.store.get().messages.length) return;
       if (target && target !== client.store.get().id) await client.openThread(target);
     })();
     return unsub;
@@ -160,52 +154,20 @@ export default function RunPanel() {
                   {p}
                 </label>
               ))}
-              <label className="al-btn al-btn--ghost al-btn--sm" title="Attach a file (uploaded once, referenced by id)">
-                {uploading ? "Uploading…" : "📎 Attach"}
-                <input
-                  type="file"
-                  style={{ display: "none" }}
-                  disabled={uploading}
-                  onChange={(e) => {
-                    const picked = e.target.files?.[0];
-                    e.target.value = "";
-                    void pickFile(picked);
-                  }}
-                />
-              </label>
+              <ReattachPicker providerId={provider.id} />
               <ClearButton />
             </div>
 
-            {attachments.length ? (
-              <div className="dev__prompts" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {attachments.map((f) => (
-                  <span key={f.ref.id} className="al-btn al-btn--ghost al-btn--sm" title={f.ref.id}>
-                    📄 {f.filename}
-                    <button
-                      type="button"
-                      className="al-btn al-btn--ghost al-btn--sm"
-                      aria-label={`Remove ${f.filename}`}
-                      onClick={() => {
-                        pendingFiles.current = pendingFiles.current.filter((p) => p.ref.id !== f.ref.id);
-                        setAttachments((prev) => prev.filter((p) => p.ref.id !== f.ref.id));
-                      }}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-
-            {transportMode === "demo" ? (
+            {effectiveMode === "demo" ? (
               <p className="dev__banner">
-                Demo transport: replies are scripted, but everything below the provider is real — request building, the
-                tool loop, card suspension and context assembly. Switch to proxy or BYOK for a live model.
+                {transportMode === "direct"
+                  ? "No API key entered — running on the DEMO transport until you paste one. Uploads mint demo ids, not real ones."
+                  : "Demo transport: replies are scripted, but everything below the provider is real — request building, the tool loop, card suspension and context assembly. Switch to proxy or BYOK for a live model."}
               </p>
             ) : null}
 
             <Thread empty={<Examples />} />
-            <Composer placeholder="Ask about a contract, a funnel, or a market…" />
+            <Composer placeholder="Ask about a contract, a funnel, or a market…" onAttachFile={attachFile} />
           </div>
 
           <aside className="dev__runside">
@@ -274,6 +236,51 @@ function ThreadsPanel() {
         ))
       )}
     </div>
+  );
+}
+
+/**
+ * Re-attach a previous upload without re-uploading — the FileStore's read
+ * path. Only refs minted by the CURRENT provider are offered; a foreign ref
+ * would degrade to a placeholder.
+ */
+function ReattachPicker({ providerId }: { providerId: string }) {
+  const client = useAgentClient();
+  const { attachments } = useAttachments();
+  const [files, setFiles] = useState<StoredFile[]>([]);
+
+  useEffect(() => {
+    void fileStore.list().then((all) => setFiles(all.filter((f) => f.ref.provider === providerId)));
+  }, [providerId, attachments.length]);
+
+  if (!files.length) return null;
+  return (
+    <select
+      className="dev__select"
+      value=""
+      title="Attach a previous upload by id — no re-upload"
+      onChange={(e) => {
+        const picked = files.find((f) => f.ref.id === e.target.value);
+        if (picked) {
+          client.attach({
+            type: "file",
+            source: picked.ref,
+            mediaType: picked.mediaType ?? "application/octet-stream",
+            filename: picked.filename,
+          });
+        }
+        e.target.value = "";
+      }}
+    >
+      <option value="" disabled>
+        ↻ Re-attach…
+      </option>
+      {files.map((f) => (
+        <option key={f.ref.id} value={f.ref.id}>
+          {f.filename}
+        </option>
+      ))}
+    </select>
   );
 }
 

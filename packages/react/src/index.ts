@@ -15,4 +15,5 @@ export {
   useTools,
   useJobs,
   useThreadList,
+  useAttachments,
 } from "./hooks.js";

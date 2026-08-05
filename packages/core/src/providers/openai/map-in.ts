@@ -12,7 +12,6 @@
 //   4. Reasoning parts are echoed back only when they carry a provider id —
 //      a summary without its item id is not a valid input item.
 
-import { AgentError } from "../../errors.js";
 import type { ContentPart, Message } from "../../content/types.js";
 import type { NormalizedRequest, ToolSpec } from "../types.js";
 import type {
@@ -33,16 +32,20 @@ function dataUrl(mediaType: string, base64: string): string {
 }
 
 // Compared against the ADAPTER's configured id, not a hardcoded "openai" — with
-// several instances (openai, groq, nvidia) a file id minted by one must be
-// refused by the others, and each must accept its own.
-function assertOwnFile(source: { kind: "providerFile"; id: string; provider: string }, providerId: string) {
-  if (source.provider !== providerId) {
-    throw new AgentError(
-      "invalid-request",
-      `File id "${source.id}" was uploaded to "${source.provider}" and cannot be used with "${providerId}".`,
-      { provider: providerId },
-    );
-  }
+// several instances (openai, groq, nvidia, demo) a file id minted by one is
+// meaningless to the others.
+const ownFile = (source: { provider: string }, providerId: string): boolean => source.provider === providerId;
+
+/**
+ * A foreign file ref DEGRADES to text instead of throwing. Throwing would be
+ * correct for the turn that attached it — but the ref lives in persisted
+ * history, so a throw poisons every subsequent turn of the thread (the exact
+ * failure mode dropOrphanToolCalls exists to prevent for tool calls). The
+ * model reading "[attachment unavailable]" can say so; a permanently 400ing
+ * thread can't say anything.
+ */
+function foreignFileText(kind: "image" | "file", filename: string | undefined, source: { id: string; provider: string }) {
+  return `[${kind} "${filename ?? source.id}" unavailable — it was uploaded to "${source.provider}" and cannot be read here. Ask the user to re-attach it.]`;
 }
 
 const stringifyOutput = (output: unknown): string =>
@@ -66,13 +69,13 @@ function toResponsesContent(part: ContentPart, role: "user" | "assistant", provi
           ...(part.detail ? { detail: part.detail } : {}),
         };
       }
-      assertOwnFile(s, providerId);
+      if (!ownFile(s, providerId)) return { type: "input_text", text: foreignFileText("image", undefined, s) };
       return { type: "input_image", file_id: s.id, ...(part.detail ? { detail: part.detail } : {}) };
     }
     case "file": {
       const s = part.source;
       if (s.kind === "providerFile") {
-        assertOwnFile(s, providerId);
+        if (!ownFile(s, providerId)) return { type: "input_text", text: foreignFileText("file", part.filename, s) };
         return { type: "input_file", file_id: s.id };
       }
       if (s.kind === "base64") {
@@ -293,16 +296,17 @@ function toChatContent(part: ContentPart, providerId: string): ChatContentPart |
       const url =
         s.kind === "url" ? s.url : s.kind === "base64" ? dataUrl(part.mediaType ?? "image/png", s.data) : null;
       if (!url) {
-        assertOwnFile(s as { kind: "providerFile"; id: string; provider: string }, providerId);
+        const pf = s as { kind: "providerFile"; id: string; provider: string };
+        if (!ownFile(pf, providerId)) return { type: "text", text: foreignFileText("image", undefined, pf) };
         // Chat Completions has no image-by-file_id form; the file part does.
-        return { type: "file", file: { file_id: (s as { id: string }).id } };
+        return { type: "file", file: { file_id: pf.id } };
       }
       return { type: "image_url", image_url: { url, ...(part.detail ? { detail: part.detail } : {}) } };
     }
     case "file": {
       const s = part.source;
       if (s.kind === "providerFile") {
-        assertOwnFile(s, providerId);
+        if (!ownFile(s, providerId)) return { type: "text", text: foreignFileText("file", part.filename, s) };
         return { type: "file", file: { file_id: s.id } };
       }
       if (s.kind === "base64") {

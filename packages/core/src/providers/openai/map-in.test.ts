@@ -53,12 +53,15 @@ describe("toResponsesInput", () => {
     });
   });
 
-  it("rejects a file id minted by another provider", () => {
-    expect(() =>
-      toResponsesInput([
-        msg("user", [{ type: "file", source: { kind: "providerFile", id: "f1", provider: "anthropic" }, mediaType: "application/pdf" }]),
-      ]),
-    ).toThrow(/anthropic/);
+  it("degrades a file id minted by another provider to text instead of poisoning the thread", () => {
+    // A throw here would 400 EVERY subsequent turn, because the ref lives in
+    // persisted history. Degrading keeps the thread alive and tells the model.
+    const items = toResponsesInput([
+      msg("user", [{ type: "file", source: { kind: "providerFile", id: "f1", provider: "anthropic" }, mediaType: "application/pdf" }]),
+    ]);
+    expect(items[0]).toMatchObject({
+      content: [{ type: "input_text", text: expect.stringContaining('"anthropic"') }],
+    });
   });
 
   it("checks file ownership against the configured provider id", () => {
@@ -68,9 +71,13 @@ describe("toResponsesInput", () => {
     expect(toResponsesInput([own("groq")], "groq")[0]).toMatchObject({
       content: [{ type: "input_file", file_id: "f1" }],
     });
-    // …and refuses openai-minted ones, exactly as openai refuses groq's.
-    expect(() => toResponsesInput([own("openai")], "groq")).toThrow(/"groq"/);
-    expect(() => toChatMessages([own("groq")], undefined, "openai")).toThrow(/"openai"/);
+    // …and degrades openai-minted ones to text, exactly as openai degrades groq's.
+    expect(toResponsesInput([own("openai")], "groq")[0]).toMatchObject({
+      content: [{ type: "input_text", text: expect.stringContaining('"openai"') }],
+    });
+    expect(toChatMessages([own("groq")], undefined, "openai")[0]).toMatchObject({
+      content: expect.stringContaining('"groq"'),
+    });
   });
 
   it("replays reasoning only when it carries a provider item id", () => {
