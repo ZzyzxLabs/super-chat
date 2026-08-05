@@ -19,7 +19,7 @@ apps/playground   Next.js dev panels. runs with NO API key.
 
 ```bash
 pnpm install && pnpm build && pnpm dev     # → http://localhost:3210
-pnpm test                                  # 107 tests, ~3s
+pnpm test                                  # 160 tests, ~3s
 ```
 
 The playground is **not a product**. It is six panels, one per capability, aimed
@@ -155,27 +155,11 @@ check the work instead of trusting a summary.
 
 ## Where to pick up
 
-Roughly in value order.
+Since the original handoff, three of the items here were built (file upload,
+thread persistence, MCP tool import — see the Status section of README.md), and
+the first two were removed as stale. What remains:
 
-1. **Look at the panels in a browser.** See the caveat above. This is genuinely
-   step one.
-2. **A second provider adapter — Anthropic or Gemini.** The `Provider` seam was
-   designed for exactly this: `capabilities` describes what a provider can do and
-   `providerOptions` is the per-provider escape hatch. Doing this is also the
-   real test of whether the normalized content model holds up. Anthropic's
-   thinking-signature replay is the interesting part; the `reasoning` part's
-   `signature` field already exists for it.
-3. **File upload (`/v1/files`).** `MediaSource` already has a `providerFile`
-   variant and the adapters already refuse a file id minted by another provider.
-   What's missing is the upload call and a place to keep the ids.
-4. **Persistence beyond `localStorage`.** `JobStore` is the interface; there is a
-   memory impl and a localStorage impl. A thread store does not exist at all —
-   `AgentClient` holds messages in memory and the host is expected to persist
-   them. That gap should be closed deliberately, not by bolting state onto the
-   client.
-5. **MCP tool import.** `ToolDefinition` is already plain JSON Schema plus an
-   executor, so an MCP server's tool list maps onto it almost directly.
-6. **Streaming through the proxy under load.** The BFF streams the upstream body
+1. **Streaming through the proxy under load.** The BFF streams the upstream body
    straight through, which is correct, but nothing has been tested with more than
    one concurrent stream.
 

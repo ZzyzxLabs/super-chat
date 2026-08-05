@@ -260,7 +260,7 @@ the transport selector to **Server proxy**, or pick **BYOK direct** and paste a 
 pnpm test
 ```
 
-107 tests. The runtime suite drives the real OpenAI adapter against a mocked
+160 tests. The runtime suite drives the real OpenAI adapter against a mocked
 transport, so the tool loop, card suspension and background polling are all
 exercised with no key and no network.
 
@@ -271,12 +271,16 @@ exercised with no key and no network.
 v0.1. Working and tested; API not frozen.
 
 **Built:** OpenAI adapter (Responses + Chat Completions + background jobs),
-transport layer, skills, context assembly, tools + presets, 20 card kinds, React
-bindings, UI kit, dev panels.
+transport layer (including multipart upload through the proxy), file upload to
+`/v1/files` with a cross-thread `FileStore`, thread persistence (`ThreadStore`,
+snapshot-per-thread, memory + localStorage), MCP tool import (hand-rolled
+Streamable HTTP client), skills, context assembly, tools + presets, 20 card
+kinds, React bindings, UI kit, dev panels.
 
-**Not built yet:** an Anthropic/Gemini adapter (the `Provider` seam is designed for
-it — `capabilities` and `providerOptions` exist for exactly this), file upload to
-`/v1/files`, a persistence adapter beyond `localStorage`, and MCP tool import.
+**Not built yet:** an Anthropic/Gemini adapter (the `Provider` seam is designed
+for it — `capabilities` and `providerOptions` exist for exactly this), and a
+server-backed `ThreadStore` implementation (the interface supports it; a REST
+impl is four fetch calls).
 
 Prior art read closely: Open WebUI's tools/functions/knowledge split, LibreChat's
 multi-provider handling, and the Sup Wallet agent in `zzyzx-full-repo` — whose
