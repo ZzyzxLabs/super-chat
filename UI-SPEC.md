@@ -1,0 +1,742 @@
+# UI 規範 — 設計點盤點（Phase 1）
+
+2026-08-04 起草。本文件是 agentic chat flow 會出現的 UI 表示的**全量清單**，
+作為後續逐節展開規範（tokens、行為、無障礙、動效）的骨架。
+
+參考對象：Open WebUI、Claude（claude.ai / Cowork / Claude Code）、Gemini、
+ChatGPT、Perplexity 等產品的流程。
+
+現況標記：✅ 已有｜🟡 部分（樣式或狀態存在但不完整）｜❌ 未有。
+現況對應的程式位置：樣式集中在 `packages/ui/src/styles.css`，
+行為在 `packages/ui/src/Thread.tsx` 與 `packages/ui/src/cards/*`。
+
+章節對應最初提出的四大點：**B = 卡片與裝飾物件、C = 聊天框、D = 思考狀態、
+E = 執行狀態**。A 是它們共同的載體（訊息流），0 是所有章節共用的基底。
+
+---
+
+## 0. 設計基底（tokens）
+
+所有章節共用的底層，先定它才有「規範」可言。
+
+| # | 設計點 | 要規範什麼 | 現況 |
+|---|--------|-----------|------|
+| 0.1 | 色彩 tokens | 語意色（bg/surface/border/text/accent/positive…）、light/dark 對應 | ✅ `--sc-*` 三段定義齊全 |
+| 0.2 | 間距 scale | 2–48 的固定 scale，全檔遷移完成 | ✅ Batch 2 |
+| 0.3 | 字級 scale | 角色化 token（body/ui/meta/micro/stat/hero）+ 三段行高 | ✅ Batch 2＋4.1 |
+| 0.4 | 圓角 / 邊框 | radius 兩級已有；邊框寬度、何時用 dashed | ✅ `--sc-radius` / `--sc-radius-sm` |
+| 0.5 | 動效 tokens | dur-1/2/3 + 兩條 easing；每個動效都有 reduced-motion 退化（CSSOM 驗過 4 條） | ✅ Batch 2 |
+| 0.6 | 圖示系統 | 維持字元 glyph，訂出 canonical 表（見 2.0.6），不引 icon 庫 | ✅ 規範定案 |
+| 0.7 | 層級 / elevation | z scale 五級 + overlay 陰影（含 dark 變體）；in-flow 一律 border-only | ✅ Batch 2 |
+
+## A. 訊息流基礎（thread）
+
+| # | 設計點 | 要規範什麼 | 參考 | 現況 |
+|---|--------|-----------|------|------|
+| A.1 | 使用者氣泡 | 寬度上限 + 氣泡內附件（縮圖／檔名 chip）；過長內容摺疊未做 | 各家皆同構 | ✅ Batch B |
+| A.2 | 助理訊息本文 | thread 內助理文字經共用 `renderMarkdown`（escape-first、含 fenced code）渲染；表格、數學式仍無 | Open WebUI 的完整 markdown + code toolbar | ✅ 基本（Batch 1） |
+| A.3 | streaming 游標 | `.sc-msg__text--streaming::after` 方塊游標，1s step-end 閃爍；reduced-motion 靜止 | ChatGPT / Gemini | ✅ Batch B |
+| A.4 | 訊息操作列 | `.sc-msgmeta` 常駐 Copy／Retry（**不做 hover 顯示**——觸控裝置上不存在）；編輯與回饋未做 | Open WebUI 每則訊息下方 action row | 🟡 Batch B |
+| A.5 | 版本與分支 | regenerate 後的 ‹ 2/3 › 分頁、編輯後分支 | ChatGPT | ❌ |
+| A.6 | 錯誤訊息與 retry | 行內 error 卡 + Retry（走 `regenerate()`）；reducer 終態修正——失敗維持 `error`、使用者取消映射為 `done` | 各家 | ✅（Batch 1） |
+| A.7 | 空狀態 | 首屏問候、建議 prompts（starter chips） | Gemini / ChatGPT 首屏 | 🟡 `sc-empty` 有、starter 無 |
+| A.8 | 捲動行為 | pinning + `.sc-jump` 置中膠囊（僅未貼底時出現）；新訊息計數未做 | 各家 | ✅ Batch B |
+| A.9 | 分隔與章節 | `.sc-daydivider`：Today／Yesterday／寫出日期，僅在跨日時插入；章節標記未做 | Claude Code chapters | 🟡 Batch B |
+| A.10 | 訊息 meta | `TurnMeta`（model／耗時／tokens）由 `commitRun` 寫進 message metadata，`.sc-msgmeta` 顯示 | Open WebUI（info icon） | ✅ Batch A+B |
+
+## B. 卡片與裝飾性物件
+
+| # | 設計點 | 要規範什麼 | 參考 | 現況 |
+|---|--------|-----------|------|------|
+| B.1 | 卡片基底 | padding / radius / border / title / caption / footnote 結構 | — | ✅ `.sc-card` + 子元素 |
+| B.2 | tone 變體 | interactive / danger / muted / error 的邊框與底色規則 | — | ✅ 四變體 |
+| B.3 | 裝飾物件 | 三條規則成文並稽核全部卡片（pill 不當按鈕、callout 不巢狀、divider 每卡至多一條）；`.sc-divider` 已備 | — | ✅ Batch C |
+| B.4 | 20 種內建卡 | 各 kind 的欄位密度、對齊、數字排版（tabular-nums） | — | ✅ 全數實作，**但從未在瀏覽器實看過**（HANDOFF 警告） |
+| B.5 | 卡片 loading 骨架 | `CardSkeleton`：延遲 200ms 才出現、aria-busy + sr-only 標籤 | Cowork、Gemini 的 tool 卡 | ✅ Batch 4 |
+| B.6 | 卡片 error / 未知 fallback | 未註冊 kind、render 拋錯、payload 過期三種退化態 | — | ✅ `CardBoundary` + unrendered + expired 都有 |
+| B.7 | 卡片操作 | 共用 `CardActions`：table/markdown/code 皆有 Copy+Download，失敗顯示 `Copy failed`；全螢幕與 refresh 未做 | Open WebUI code toolbar、ChatGPT 圖表展開 | 🟡 Batch C |
+| B.8 | 長內容截斷 | 表格 >30 列收成 `Show all (N)`，且作用在**排序後**的順序上 | — | ✅ Batch C |
+| B.9 | 響應式 | 375px 實測：無頁面橫向溢出、22 張卡皆不撐破、氣泡 254/375 | — | ✅ 已驗證 |
+
+## C. 聊天框（composer）
+
+| # | 設計點 | 要規範什麼 | 參考 | 現況 |
+|---|--------|-----------|------|------|
+| C.1 | 輸入區 | auto-grow 40→180 封頂、送出後縮回、`resize: none` | 各家 | ✅（Batch 1） |
+| C.2 | IME 組字 | Enter 檢查 `isComposing` + keyCode 229，組字確認不再誤送出 | 中文輸入必修 | ✅（Batch 1） |
+| C.3 | 送出 / 停止 | 按鈕狀態機 + `stopping` 中間態（Stopping… 且 disabled）；running 中排隊未做 | ChatGPT 可排隊 | 🟡 Batch A+B |
+| C.4 | 附件 | 拖放＋貼上 → base64 `MediaSource` part；chips 可移除、依身分去重；**無上傳進度**（kit 無儲存層，host 可換成 providerFile） | 各家 | 🟡 Batch D |
+| C.5 | 模型 / 模式選擇 | `models`/`model`/`onModelChange` 槽位，位於 composer 內下列左側；清單由 host 給，kit 不臆造 | Open WebUI composer 上緣 | ✅ Batch D |
+| C.6 | 工具開關 | `toolToggles` 槽位，`aria-pressed` + 邊框/字重雙訊號（不只靠顏色） | Gemini / ChatGPT | ✅ Batch D |
+| C.7 | slash 指令 | `/` 開 skills 選單；僅在詞首觸發（路徑不誤觸發）、↑↓/Enter/Tab/Esc 全支援 | Claude Code / Cowork | ✅ Batch D |
+| C.8 | @ 提及 | `@` 開 tools 選單，與 `/` 共用一套元件；email 不誤觸發 | Cursor / Cowork | ✅ Batch D |
+| C.9 | 長度與限制 | `estimateTokens` 即時計數，>400 才顯示；`maxInputTokens` 超限則變紅並擋住送出 | — | ✅ Batch D |
+| C.10 | 鍵盤規範 | Enter 送出 / Shift+Enter 換行 / Esc 停止 / ↑ 空白時召回上一則；全部有 IME 組字防護 | 各家 | ✅ Batch 4+B |
+
+### C.3-gap — 停止沒有回饋（✅ 已修 Batch A+B）
+
+`stop()` 只 abort signal。工具若不理會 `ctx.signal`（自行 `await` 到底），
+run 會一路跑完，而 UI **完全沒有任何表示**：按鈕仍是 Stop、沒有
+「停止中…」、也沒有「已送出停止要求」。使用者只會覺得按鈕壞了。
+
+實測佐證：對一個忽略 signal 的工具按 Esc，`preventDefault` 有生效、
+`stop()` 有被呼叫，但畫面毫無變化；同一情境下點 Stop 按鈕結果相同——
+所以這不是 Esc 的問題，是停止語意本身缺一個中間態。在正常路徑
+（等待模型／串流中）Esc 與 Stop 都能正常結束 run，已實測。
+
+**已實作**：`ThreadState.stopping` 由 `AgentClient.stop()` 立刻設起、
+`commitRun` 清除，`useThread()` 暴露；按鈕按下即變 `Stopping…` 並 disabled。
+逾時提示（「這個工具不支援中斷」）未做——需要一個逾時門檻，而合理的門檻
+取決於 host 的工具特性，kit 不該替它猜。
+
+**由此收斂出一條通則**：任何「已收到請求但尚未完成」的動作都需要中間態。
+同一個模式在這輪又出現一次——copy 失敗時原本靜默 catch，使用者看到的
+是按鈕毫無反應，與按鈕壞掉無法區分。已改為顯示 `Copy failed`。
+判準：**沒有可見結果的點擊，等於壞掉的按鈕**。
+
+## D. 思考狀態（thinking / reasoning）
+
+| # | 設計點 | 要規範什麼 | 參考 | 現況 |
+|---|--------|-----------|------|------|
+| D.1 | 等待指示 | 尚無任何輸出時的 spinner + 文字 | — | ✅ 「Thinking…」 |
+| D.2 | reasoning 即時展示 | `.sc-think` 收合但帶即時尾行預覽 + shimmer | Gemini「Show thinking」、claude.ai 思考面板 | ✅ Batch 3 |
+| D.3 | 完成後摘要 | `Thought for Ns`（UI 量測，live-only；歷史退化為 `Thought`） | ChatGPT / Gemini | ✅ Batch 3 |
+| D.4 | 多階段狀態文字 | `statusLine()` **由 run 狀態推導**（job／待回應／執行中工具名／步數），不做假字串輪播 | Gemini deep research | ✅ Batch D |
+| D.5 | 動效 | shimmer + reduced-motion 退化（整條關閉而非放慢） | — | ✅ Batch 3 |
+
+## E. 執行狀態（tool / job / agent）
+
+| # | 設計點 | 要規範什麼 | 參考 | 現況 |
+|---|--------|-----------|------|------|
+| E.1 | 單一 tool call | glyph／spinner 狀態欄（固定 12px）+ 名稱 + 靠右耗時 | Claude Code 的 tool 行 | ✅ Batch 3 |
+| E.2 | tool call 群組 | 執行中顯示 `Running tools n/N · name…` 並只露出當前那顆；完成後收合為總耗時 | — | ✅ Batch 3 |
+| E.3 | 失敗與重試 | failure pill 已有；單一 call 的錯誤詳情、retry 動作 | — | 🟡 |
+| E.4 | 背景 job | job chip（id、狀態、spinner）；缺單一 job 的進度與取消（現在只有全域 Stop） | — | 🟡 `.sc-jobchip` |
+| E.5 | plan / todo | runtime 綁定的任務清單（進行中高亮、完成打勾），非僅靜態 checklist 卡 | Claude Code TodoWrite、Cowork 任務面板 | 🟡 checklist/progress 卡可充當 |
+| E.6 | 子代理 / 巢狀活動 | subagent 的活動如何巢狀顯示、標籤 | Claude Code subagent 行 | ❌ |
+| E.7 | HITL 卡 | confirm / choice / form；**永不收合**（"a hidden deposit form is an unreachable deposit form"）；answered 後 disable | — | ✅ 規則與實作都在 |
+| E.8 | 權限請求 | allow once / always / deny 的樣式（比一般 confirm 更重的語氣） | Claude Code permission prompt | ❌ |
+| E.9 | 產出物 | 檔案交付 chip / 卡（檔名、大小、下載、預覽） | Cowork outputs、ChatGPT 檔案卡 | ❌ |
+| E.10 | 即時 log 視圖 | 長任務的 streaming log（終端輸出、自動捲動、等寬） | Claude Code、Cowork | ❌ |
+| E.11 | 執行摘要 | 併入 `.sc-msgmeta`：耗時 · 步數（>1 才顯示）· model · tokens | Gemini deep research 報告頭 | ✅ Batch A+B |
+
+### 執行不了的項目，以及缺什麼（2026-08-04 盤點）
+
+這些不是沒做，是**做不了**——runtime 沒有對應概念，硬做出來的 UI 會是假的。
+
+| # | 缺的東西 | 為什麼不硬做 |
+|---|---------|-------------|
+| A.5 版本與分支 | `AgentClient` 的 `messages` 是一維陣列，沒有訊息樹；`regenerate()` 直接截斷重跑 | 分頁器要能來回切換版本，需要保存被丟棄的分支。做成假的 ‹1/2› 只會在重載後消失 |
+| E.3 單一 call retry | runtime 沒有「重跑某一個 tool call」的入口，工具執行綁在 agent loop 裡 | 錯誤詳情已可展開看；retry 按鈕若只是重跑整個 turn，就是掛羊頭 |
+| E.4 單一 job 取消 | `stop()` 是全域 abort，`JobStore` 沒有 per-job cancel | 一個取消不了的取消鍵比沒有更糟 |
+| E.5 runtime plan/todo | runtime 沒有任務清單概念，checklist/progress 是**模型產生的卡**而非執行狀態 | 要做真的，得先在 core 定義 plan 的生命週期事件 |
+| E.6 子代理巢狀 | runtime 沒有 subagent 概念，事件流是平的 | 沒有巢狀資料就畫不出巢狀 UI |
+| E.10 即時 log 視圖 | 沒有 log 串流通道；工具只在結束時回傳一次 output | 需要 core 開一條 `tool-log` 事件 |
+| F.1 thread 側欄 | **thread 持久化完全不存在**（`AgentClient` 訊息在記憶體，只有 `JobStore` 有持久層） | 側欄的內容就是持久化的對話列表，前置不在則整項落空 |
+| F.4 分享連結 | 需要後端存放與短連結 | 匯出（markdown 下載）已做；分享用 data: URL 是自欺 |
+
+HANDOFF 的專案級待辦中，**thread 持久化**是卡住最多 UI 項目的一個
+（F.1、F.4 的分享、以及 A.9 章節標記的長期價值都壓在它上面）。
+
+## F. 訊息流之外（shell 周邊）
+
+暫列存目，不在四大點內，之後再議優先序。
+
+| # | 設計點 | 參考 | 現況 |
+|---|--------|------|------|
+| F.1 | thread 側欄（列表、搜尋、改名、資料夾） | Open WebUI / ChatGPT | ❌（playground 是 dev panels，非產品；且 thread 持久化本身未做） |
+| F.2 | context / usage 檢視 | — | ✅ `ContextInspector` |
+| F.3 | toast / 全域錯誤 / 斷線重連 | — | ✅ Batch D：`ToastProvider`（事件，自動消失）+ `ConnectionBanner`（狀態，不自動消失） |
+| F.4 | 對話分享 / 匯出 | ChatGPT share | 🟡 Batch D：`threadToMarkdown`／`downloadThread` 已做；分享需後端，未做 |
+| F.5 | 主題切換 | — | ✅ tokens 已支援 `[data-theme]` |
+
+---
+
+## 觀察與建議切入點
+
+1. **Quick wins（缺陷級，先修）**：C.2 IME 組字誤送出、A.2 thread 內
+   markdown 渲染、A.6 錯誤狀態沒有 UI、C.1 auto-grow。→ 修理中（Batch 1）。
+2. **四大點裡最值得先展開的規範**：0.2/0.3（spacing、字級 tokens——
+   B/C/D/E 全部壓在它上面）、E.1（per-call 狀態是 agentic UI 的核心觀感）、
+   D.2/D.3（thinking 的即時感）。→ 已展開為下方 Phase 2。
+3. ~~先開瀏覽器看一次~~ 已完成目視。
+
+---
+
+# Phase 2 — 基礎規範（草案 v0）
+
+2026-08-04。值是從現況 CSS 收斂出來的決定，不是憑空另起爐灶；
+與現況衝突處標「遷移」。待審後進入 Phase 3 實施批次。
+
+## 規範原則
+
+1. **零依賴**：`packages/ui` 不引入 icon 庫、動畫庫、markdown 庫。
+   裝飾用字元 glyph、動效用 CSS、markdown 用內建的 escape-first 渲染器。
+2. **Border-first flat**：層次靠邊框與底色（surface / surface-2），不靠陰影。
+   陰影只保留給真正的浮層（dropdown / modal / toast）。
+3. **顏色只走 tokens**：任何元件不得出現 raw hex；tone 一律
+   positive / negative / warning / info 四語意 + accent。
+4. **非顏色訊號**：每個用顏色表達的狀態都要有第二訊號
+   （glyph、文字、邊框樣式），色盲環境不失義。
+5. **Reduced-motion 是一等公民**：每加一個動效，同一個 PR 要寫它的
+   `prefers-reduced-motion` 退化。
+
+## 2.0 Tokens
+
+### 2.0.2 間距 scale（新增）
+
+以 px 值命名（自我說明，查表零成本）：
+
+```css
+--sc-sp-2: 2px;  --sc-sp-4: 4px;  --sc-sp-6: 6px;  --sc-sp-8: 8px;
+--sc-sp-10: 10px; --sc-sp-12: 12px; --sc-sp-16: 16px; --sc-sp-20: 20px;
+--sc-sp-24: 24px; --sc-sp-32: 32px; --sc-sp-48: 48px;
+```
+
+用法規則：
+
+| 層級 | 值 |
+|------|----|
+| 元件內 glyph↔文字、pill 內距 | 4 / 6 |
+| 元件內欄位間、按鈕 gap | 6 / 8 |
+| 卡片內段落間、actions 上緣 | 10 / 12 |
+| 卡片 padding | **12 × 16**（現況 14×16 → 遷移） |
+| 卡片與卡片、訊息元素之間 | 12 |
+| 訊息與訊息之間 | 20 |
+| thread 外框 padding | 20 |
+| 空狀態、大留白 | 48 |
+
+遷移規則：現有奇數值就近吸附（7→8、9→8、11→12、13→12、14→12 或 16）。
+圖表 SVG 內部座標豁免。
+
+### 2.0.3 字級與字重
+
+```css
+--sc-fs-11 / --sc-fs-12 / --sc-fs-13 / --sc-fs-14 / --sc-fs-22 / --sc-fs-26
+--sc-lh-tight: 1.25;  /* 大數字、stat value */
+--sc-lh-ui: 1.4;      /* 標籤、按鈕、chip */
+--sc-lh-prose: 1.6;   /* 訊息本文、callout body */
+```
+
+| 用途 | 字級 | 字重 |
+|------|------|------|
+| meta / overline / pill / footnote | 11 | 400（overline 加 uppercase + letter-spacing 0.04em） |
+| 輔助文字、detail、表頭 | 12 | 400；表頭 600 |
+| UI 預設（卡片內文、按鈕、表格） | 13 | 400；標題 600、強調 500 |
+| 訊息本文、composer | 14 | 400 |
+| stat 數值 | 22 | 600 |
+| gauge 主數值 | 26 | 600 |
+
+字重只用 400 / 500 / 600，禁 700（現況 callout icon 的 700 → 遷移為 600）。
+所有數據數字一律 `font-variant-numeric: tabular-nums`。
+
+### 2.0.5 動效
+
+```css
+--sc-dur-1: 120ms;  /* hover、按鈕狀態 */
+--sc-dur-2: 240ms;  /* 寬度/高度變化、進場 */
+--sc-dur-3: 400ms;  /* 面板展開收合 */
+--sc-ease-out: cubic-bezier(0.2, 0, 0, 1);      /* 進場 */
+--sc-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1); /* 尺寸變化 */
+```
+
+- 進場：streaming 中新出現的卡片/狀態條用 fade + 4px 上移，dur-2 ease-out。
+- **無退場動畫**——內容上移補位比退場動畫重要，退場一律瞬時。
+- spinner 維持 700ms linear；shimmer 週期 1.2s。
+- reduced-motion：transition 全歸零、shimmer 靜態化（維持 muted 色）、
+  spinner 放慢到 2s（現況已做）。
+
+### 2.0.6 圖示（glyph 制）
+
+不引入 icon 庫。canonical glyph 表——**只准用這些，新增要先進表**：
+
+| glyph | 語意 | 出現處 |
+|-------|------|--------|
+| ▸ / ▾ | 收合 / 展開 | tools chip、reasoning 條、tree |
+| ○ | pending | step、call |
+| ◐ | active（無動畫場合） | step |
+| ● | done | step、call、timeline dot |
+| ✕ | failed | step、call |
+| – | skipped / n.a. | step、checklist |
+| ↑ / ↓ | 排序方向 | 表頭 |
+| ＋ / − | diff 增刪 | diff 卡 |
+
+規則：glyph 一律 `aria-hidden` 且旁邊有文字（或 sr-only）；清單場合
+glyph 欄固定寬（12px）保持對齊；**不用 emoji**。
+
+### 2.0.7 層級與陰影
+
+```css
+--sc-z-base: 0;  --sc-z-sticky: 10;   /* composer、吸底列 */
+--sc-z-menu: 20; /* dropdown、mention 選單 */
+--sc-z-toast: 30; --sc-z-modal: 40;
+--sc-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.16);  /* dark: / 0.5 */
+```
+
+浮層（menu 以上）才有陰影；所有 in-flow 元素維持 border-only。
+
+## 2.A 訊息流與空狀態（參考整合）
+
+從五張參考截圖（Canva AI 首屏／思考態、Sprout 對話、Gemini 首屏／思考態）
+抽出的共同規律，作為 A/C/D 章規則的依據：
+
+| # | 規律 | 樣本 |
+|---|------|------|
+| R1 | 空狀態把 composer 當主角：大字問候（問句、可個人化）置中 + composer 置中 + 建議 chips 直接掛在 composer 下方 | Canva、Gemini |
+| R2 | composer 是獨立圓角卡片、不是貼邊 bar；槽位語意固定——左 = 加內容（+）、右 = 送出與輸入方式（mic/send）、模型選擇貼著輸入區（單列時右內、雙列時下左） | Canva、Gemini、Sprout |
+| R3 | 助理回覆下緣一行 muted meta：耗時 · 費用 · 模型 · 重跑 | Sprout |
+| R4 | 等待指示極輕、status 文字用「正在…」動詞句；最簡形是三點 | Gemini、Canva |
+| R5 | 使用者訊息深／強色右對齊，助理淺色或無底左對齊 | 全部（kit 現況同構） |
+
+### A.7 空狀態（規範）
+
+- 結構（垂直置中，上到下）：**問候 headline**（26/600、問句語氣、
+  host 可個人化）→ **composer**（置中，寬度上限 640）→
+  **starter chips 列**（gap sp-8）。
+- starter chip：高 32、13px、glyph + 文字，`sc-pill` 的放大形
+  （新增 `.sc-starter`）；點擊 = 預填 composer 或直接送出，由 host 決定。
+- 出現第一則訊息後整組退場（瞬時、無動畫，v1），composer 回到吸底位。
+- kit 只給樣式與 slot（`empty` prop 已在），文案與 chips 內容一律 host 給。
+
+### A.10 助理 meta 行（規範，依 R3）
+
+- 完成的 assistant turn 下緣一行 11px muted：`{耗時}s · {model}`；
+  可選插槽：tokens / cost（待 core 暴露 usage——列待辦）。
+- 行尾 actions **常駐**（不做 hover 才浮現，觸控裝置吃虧）：copy、
+  regenerate，`sc-btn--ghost sc-btn--sm`。
+- streaming 中不顯示；error turn 不顯示（error 區塊自帶 retry）。
+
+## 2.B 卡片與裝飾性物件
+
+**解剖**（自上而下，全部可選）：`head`（title 13/600 + 右側最多 2 個
+pill）→ `prompt/body` → `caption`（12 muted）→ `footnote`（12 muted）→
+`actions`（上緣 sp-12，gap sp-8）。
+
+- 卡片 padding 12×16、圓角 `--sc-radius`、卡間距 12、無陰影。
+- **tone 邊框公式統一**：`color-mix(tone 45%, var(--sc-border))`（現況已是，成文化）。
+- 裝飾物分工：**pill = 狀態與 metadata**（不可當按鈕）；**callout = 卡內
+  唯一的區塊級強調**（不可巢狀在另一個 callout / 強調區塊內）；
+  divider 用 `1px var(--sc-border)`，一張卡最多一條。
+- 數字欄右對齊 + tabular-nums；文字欄左對齊；置中只給 comparison 矩陣。
+- **Loading 骨架（新增）**：三條 shimmer bar（標題 40%、內容 100% / 80%），
+  延遲 200ms 才出現（避免閃爍）、一旦出現至少停留 300ms 再換內容。
+- 五態齊備：loading（新增）/ ready / render 失敗（CardBoundary）/
+  未註冊 kind（unrendered + raw JSON）/ expired。後三者現況已有，不動。
+- 截斷：`sc-pre` 類最高 220px 內捲；表格 > 30 列收成「Show all (N)」；
+  寬內容一律在卡內 `overflow-x: auto`，**永不撐破 thread 橫向**。
+
+## 2.C 聊天框
+
+**結構（槽位制，依 R2）**：composer 是獨立圓角面（`--sc-radius`、
+1px border、bg surface、`--sc-z-sticky`），不是貼邊 bar。
+
+- 單列（現況，無 accessory）：`[+ 附件（未來）] [textarea] [Send｜Stop]`
+- 雙列（任一 accessory 啟用時自動升級）：上列 textarea 全寬；
+  下列左 = **model picker**（ghost 樣式），右 = 工具 toggles + Send。
+- 槽位語意固定：**左 = 加內容、右 = 送出與輸入方式、模型／模式貼著
+  輸入區**——不另設頂部工具列（C.5 的位置之爭就此定案）。
+
+- textarea：min-height 40 / max-height 180、auto-grow、`resize: none`、
+  14 / lh-prose、focus ring `2px accent inset`（現況）。
+- **鍵盤表**：Enter 送出；Shift+Enter 換行；**組字中（isComposing /
+  keyCode 229）Enter 永不送出**；Esc 在 running 時 = Stop。
+- 按鈕狀態機：空值/純空白 → Send disabled；running → 換 Stop（ghost），
+  輸入框保持可編輯；**running 中不排隊**（v1 決定，簡單優先）。
+- 附件（Phase 3 後段）：chips 列於輸入框上方，高 32、含檔名+大小+移除+
+  上傳進度；拖放與貼上圖片都落到同一條 chips 列。
+
+## 2.D 思考狀態
+
+**狀態機**：`waiting`（無任何輸出：spinner + "Thinking…"）→
+`reasoning`（思考條出現，即時預覽）→ `answering`（本文開始 stream，
+思考條收合成摘要）→ `done`（"Thought for Ns"）。
+
+**等待指示分級（依 R4）**：kit 預設 = spinner + status 文字；文字用
+「正在…」動詞句，接 D.4 的輪替槽位。純三點的極簡形與品牌 orb／avatar
+屬 host 裝飾層，kit 不內建——裝飾換皮不該動到狀態機。
+
+**資料前置**：reasoning 沒有任何時間戳事件，`Thought for Ns` 的 N 只能由
+UI 自行量測（首個 `reasoning-delta` → 首個 `text-delta` 的 wall-clock）。
+因此**時長是 live-only**：重載的歷史對話沒有 N，摘要行退化為
+`Thought`（仍可展開）。不為了這個把時間寫進 message metadata——
+一個裝飾性數字不值得擴張持久化格式。
+
+**DOM 契約**（批次 3 實作）：
+
+```
+.sc-think                     ← 取代現行 .sc-reasoning
+  button.sc-think__head       ← 整行可點，aria-expanded
+    span.sc-think__icon       ← ▸ / ▾（aria-hidden）
+    span.sc-think__label      ← "Thinking…" | "Thought for 12s" | "Thought"
+    span.sc-think__peek       ← 尾行預覽，單行 ellipsis；僅 streaming 中
+  pre.sc-think__body          ← 展開時；max-height 260 內捲
+```
+
+`.sc-think--live` 時 label 掛 shimmer。狀態由 `run.status` 與是否已有
+text part 推導，不新增 store 欄位。
+
+**思考條解剖**（一行，12px muted）：
+`[▸/▾] Thinking…（shimmer） — 最後一行即時預覽（單行 ellipsis）`
+
+- 預設收合但**帶即時尾行預覽**（Gemini 式）；點開 → 全文，
+  max-height 260 內捲（現況值），dur-3 ease-in-out 展開。
+- 完成後 label 換成 `Thought for {N}s`（N = 首個 reasoning delta 到
+  首個 text delta 的秒數），預覽行消失，仍可展開。
+- shimmer 只在 reasoning streaming 中出現；reduced-motion → 靜態 muted。
+
+## 2.E 執行狀態
+
+**資料前置（批次 3 的第一步，必須先做）**：`tool-result` **事件**帶了
+`ms: number`，但 reducer 在寫入 part 時把它丟掉了，`ContentPart` 的
+tool-result 型別也沒有這個欄位——所以耗時目前在 UI 端拿不到。
+
+修法（小且正確，資料本來就在）：`ContentPart` 的 tool-result 加
+`ms?: number`，reducer 的 `tool-result` case 一併寫入。因為 `commitRun`
+是把 `run.parts` 原樣折進 assistant message，這一改**同時**讓 live 與
+重載後的歷史都有耗時，不需要第二套機制。這點與 D.3 不同——那邊沒有
+現成資料，這邊只是撿回被丟掉的。
+
+**單一 call 生命週期**（glyph 依 2.0.6）：
+`○ pending → [spinner] running → ● done（右側 muted 耗時） → ✕ failed（+ failure pill）`
+
+- **成功是預設，不慶祝**：done 用 muted，不用 positive 綠——
+  綠色留給 step/checklist 這種「進度達成」語意。
+- call 行：`[glyph 12px 固定寬] name（mono 12） …右緣耗時`；
+  args 一行截斷、點開才是 `sc-pre`；result 同。
+- **群組行為**：running 中 chip 顯示活動計數「Running tools 2/3 · {name}…」
+  並在 chip 下方露出**當前這一顆** call 的行（不整組展開）；
+  完成後全收合為「N tool calls · {總耗時}」+ failures badge（現況樣式）。
+- 背景 job chip：spinner + label + status pill + 已耗時；
+  job 級取消按鈕（Phase 3，等 core 支援單 job cancel）。
+- **不變式（重申，最高優先）**：interactive card（confirm/choice/form）
+  永不收合、永不被自動回答、answered 後 disable。
+
+### E.7-bug — transcript 謊報使用者的決定（✅ 已修，2026-08-04）
+
+瀏覽器實測發現：按下「Create alert」→ 警報確實建立（另一張卡有
+`alert_SUI_5`），但同一張 confirm 卡在 turn 結束後顯示 **「Declined.」**。
+這直接違反 `Interactive.tsx` 檔頭自己寫的不變式（「答完後留著，
+讓 transcript 記錄使用者實際選了什麼」）。
+
+**成因**：答案只活在 component 的 local state。run 結束時 `commitRun`
+把卡片折成 artifact part，`MessageView` 用 `answered` 重新掛載一個**全新
+實例**——local state 沒了，於是：
+
+| 卡 | 重掛後顯示 | 實際 |
+|----|-----------|------|
+| confirm | 一律「Declined.」（三元運算的 fallback 分支） | 可能是 confirmed |
+| choice | 沒有任何選項是選取狀態 | 使用者選過 |
+| form | 顯示 `spec.fields` 的**預設值** | 使用者填的值 |
+
+form 那格最危險：它看起來像使用者送出了預設值。
+
+**資料在，只是被丟掉**（與 E.1 的 `ms` 同一個模式）：`user-responded`
+事件帶著完整的 `action`，reducer 的該 case 只清掉 `pendingCard`，
+把 action 丟棄。
+
+**修法**（批次 3 實作，需含測試）：
+
+1. `Card` 加 `action?: CardAction`。
+2. reducer 的 `user-responded`：依 `callId` 把 action 掛到對應的 card 上。
+3. `commitRun` 的 artifact `data` 改帶 `{ spec, action }`（現在只帶 spec），
+   `Thread.partsOf` 對應讀回。**不做舊格式相容**——尚未有持久化層出貨，
+   為一個沒有使用者的格式背相容債不划算。
+4. 三個 renderer 改為**優先讀 `card.action`**，local state 只服務
+   「送出後、run 結束前」這段空窗。confirm 讀 `action.type`、
+   choice 讀 `action.value.selected`、form 讀 `action.value`。
+
+**規範（通則）**：凡是「使用者做過的動作」，UI 一律以持久化資料為準，
+local state 只能當尚未落地前的暫態。任何在 fallback 分支**斷言**某個
+結果的三元運算都是這個 bug 的溫床——不知道就顯示中性文字，不要猜。
+
+**實作結果**：四層照上述修法改完，`confirm` 另補「decision 不明 →
+中性 `Answered.`」分支，choice/form 的收尾文案也依 action 分辨
+（`Skipped.` / `Cancelled.`）。core 加 2 個回歸測試（confirm 與 cancel
+各一，斷言 action 落在 card 上），共 119 passed。瀏覽器覆驗：按下
+Create alert 後 transcript 顯示 `Confirmed.`（positive 色）。
+
+**DOM 契約**（批次 3 實作，沿用現有 `.sc-tools*` 命名）：
+
+```
+.sc-tools
+  button.sc-tools__head       ← 收合切換
+    span.sc-tools__icon       ← ▸ / ▾
+    span.sc-tools__summary    ← "Running tools 2/3 · fetchPrice…" | "3 tool calls · 1.4s"
+    span.sc-pill--negative    ← 失敗數，僅 failures > 0
+  ul.sc-tools__list           ← 展開時全部；running 時只掛當前那一顆
+    li.sc-tools__item
+      span.sc-tools__status   ← glyph 或 spinner，固定寬 12
+      code.sc-mono            ← 工具名
+      span.sc-tools__ms       ← 耗時，右緣 muted，僅 done/failed
+```
+
+耗時格式：`< 1000ms` 顯示 `{n}ms`，否則 `{n.n}s`。群組總耗時 = 各 call
+`ms` 相加（非 wall-clock，因為工具可能並行——標示為總計而非經過時間）。
+
+## 標準化完成聲明（2026-08-04）
+
+四大點的**標準化**到此完成：0.x tokens、B 卡片、C 聊天框、D 思考狀態、
+E 執行狀態，全部有規範、有實作、有瀏覽器實測。120 tests / 4 專案
+typecheck 全綠。
+
+**仍是 ❌ 但不屬於標準化的項目**——它們是「還沒有的功能」，不是「已有
+但沒規範的行為」，混進標準化只會讓完成的定義失焦：
+
+- A.3 streaming 游標、A.4 訊息操作列、A.5 版本分支、A.9 日期分隔、
+  A.10 meta 行：都是新增的訊息流功能。
+- C.4 附件、C.5 模型選擇、C.6 工具開關、C.7 slash、C.8 @ 提及、
+  C.9 長度提示：composer 的新功能，各自需要協定與資料來源決策。
+- D.4 多階段狀態文字、E.5 plan/todo、E.6 子代理、E.8 權限請求、
+  E.9 產出物、E.10 即時 log、E.11 執行摘要：都需要 runtime 先送出
+  對應事件，UI 無中生有不了（與 D.3 的取捨同理）。
+- F 全章（側欄、toast、分享）：thread 之外的 shell。
+
+**判準**：標準化 = 把既有行為收斂成可依循的規則；新功能 = 需要先決定
+它該存在與如何運作。前者已完成，後者另案。
+
+**Phase 4（設計）是另一條佇列，不是這條的續集**，編號用 D1/D2/D3 以免
+被讀成接在批次 4 後面。D1、D2 已實作（順序上先做了，是錯的），D3 未做
+且不排在任何待辦之前。
+
+## Phase 3 — 實施批次
+
+| 批次 | 內容 | 狀態 |
+|------|------|------|
+| 1 | Quick wins：IME、auto-grow、error UI、thread markdown | ✅ 完成並瀏覽器驗證 |
+| 2 | Token 化：2.0.2/2.0.3/2.0.5/2.0.7 寫入 styles.css 並全檔遷移 | ✅ 完成並瀏覽器驗證 |
+| 3 | **E.7-bug（transcript 謊報決定）** → E per-call 狀態 + 群組行為 → D 思考條 | ✅ 完成並瀏覽器驗證 |
+| 4 | Composer 擴充：Esc=Stop、卡片骨架 | ✅ 完成並瀏覽器驗證 |
+| — | 附件槽位（C.4） | 移出標準化：見下方說明 |
+
+### Batch 4 結案紀錄（2026-08-04）
+
+**Esc = Stop**（C.10）：同樣加上組字防護——Esc 是 IME 取消候選字的按鍵，
+那一下不能順手把整個 turn 也殺掉。驗證方式是**對照實驗**：分別用 Stop
+按鈕與 Esc 各跑一次，兩者都得到 `run-finish cancelled · 1 step(s)`，
+證明接線正確。過程中一度誤判 Esc 失效，實際是 demo 工具的 `setTimeout`
+不理會 abort signal，UI 當然不會立刻停——**驗證失敗時要先確認測具本身**。
+
+**卡片骨架**（B.5）：`CardSkeleton` 已匯出。延遲 200ms 才出現（閃一下就
+消失的骨架比沒有更糟），bar 用 shimmer，`aria-busy` + sr-only「Loading…」
+——bar 沒有文字，不加標籤會被輔助技術讀成一張空卡。同時補上 kit 先前
+沒有的 `.sc-sr-only` 工具類別。
+
+**`.sc-skeleton__bar` 與思考條的 shimmer 都寫了 reduced-motion 退化**，
+經 CSSOM 檢查確認四條規則都在 media query 內。
+
+**附件槽位（C.4）不屬於標準化**：它需要決定上傳協定、預覽尺寸、
+錯誤處理與 `ContentPart` 的檔案型別如何在 composer 表達——那是新功能
+設計，不是把既有行為規範化。標準化階段到此為止；附件另案處理。
+
+### Batch 3 結案紀錄（2026-08-04）
+
+`ms` 撿回：`ContentPart` 的 tool-result 加 `ms?`、reducer 一併寫入，
+因 `commitRun` 原樣折進訊息，live 與歷史同時有耗時。`ToolActivity`
+與 `ThinkBlock` 依 DOM 契約重寫，`.sc-reasoning` 全面汰換為 `.sc-think`。
+
+**驗證方法值得記錄**：demo transport 的工具是瞬時完成、也不產生
+reasoning，所以「執行中」與「思考中」這兩個狀態在正常操作下**永遠
+一閃而過**——實作了卻沒人看過，正是批次 1 那個崩頁 bug 的成因。
+因此採取**暫時注入、驗完還原**：先在一個 demo 工具塞 2.5s 延遲觀察執行中，
+再往 demo transport 注入 reasoning deltas 並放慢到 700ms 觀察思考條，
+兩者都以 `git checkout` 還原（含被 Python 寫檔改掉的行尾）。
+
+實測結果：
+- 執行中 → `Running tools 0/1 · reviewContract…`，該列帶 spinner，
+  且 `aria-expanded="false"`——**沒有展開整組**就露出當前那顆，符合規範。
+- 完成後 → `1 tool call · 2.5s`、`2 tool calls · 67ms`；展開後每列為
+  `● reviewContract 56ms`，glyph 固定 12px 欄對齊、耗時靠右。
+- 思考條 → `Thinking…`（shimmer 生效）+ 尾行預覽逐句更新
+  → 收成 `Thought for 3s`。
+
+### Batch 1 結案紀錄（2026-08-04）
+
+實作：`markdown.ts`（從 Basic.tsx 抽出、加 fenced code 保護）、Thread 的
+IME guard／auto-grow／ErrorBlock、`client.ts` 的 commitRun 狀態保留。
+測試 117 passed，瀏覽器實測 markdown 渲染成真 `<p>`、auto-grow 40→180→40、
+error 卡與 Retry 皆正常。
+
+三個 review 抓出、subagent 沒發現的問題（值得記住的模式）：
+
+1. **Rules of Hooks 崩頁**：`useMemo` 被加在 `LiveTurn` 早退 return 之後，
+   run 一開始 hook 數就變動，整頁白畫面。**規範：hook 一律在早退之上**。
+2. **href 屬性逃逸**：`renderMarkdown` 只 escape `< > &`，URL 內的 `"`
+   可關閉 href 屬性夾帶 `onmouseover`。已補 `&quot;` 與回歸測試。
+   **規範：值進 HTML 屬性就必須 escape 引號**。
+3. **run-finish 蓋掉 error**：reducer 無條件寫 `status:"done"`，
+   使得失敗的 run 在 UI 看起來成功。已改為依 `finishReason` 判定
+   （cancelled → done，error → error），並補 3 個 reducer 終態測試。
+
+### Batch 2 結案紀錄（2026-08-04）
+
+204 處硬編碼值換成 token。驗證方式：因為 CSS 不進 typecheck、測試也
+照不到樣式，改用**腳本 + 瀏覽器 computed style** 雙重確認——
+腳本掃出 34 個被使用的 token 全部有宣告（缺一個就會讓整條宣告靜默失效）、
+括號 212/212 平衡；瀏覽器實測 card padding `12px 16px`、pill line-height
+`15.4px`（11×1.4）、訊息本文 `22.4px`（14×1.6）、composer `sticky` z-index 10、
+22 張卡無一橫向溢出、dark 模式 token 正常切換且 shadow 取到 0.5 alpha 版本。
+
+補完 agent 遺留的半完成狀態：`--sc-lh-*` 三個 token 原本宣告了卻無人使用，
+依規範接上 `.sc-stat__value`（tight）、`.sc-msg__text` 與 `.sc-callout__body`
+（prose）、`.sc-pill`（ui）。程式碼字型的 1.5 與 gauge 的 1.1 維持不動——
+規範沒有涵蓋等寬與量表幾何。
+
+刻意保留未消費的 token：`--sc-sp-24/32`、`--sc-z-menu/toast/modal`、
+`--sc-shadow-overlay`、`--sc-dur-3`、`--sc-ease-out`——都是批次 3/4
+（浮層、思考條展開、進場動畫）的前置，先宣告不算浪費。
+`--sc-series-*` 由 `Chart.tsx` 以 `var()` 字串消費，不在 CSS 內出現。
+
+---
+
+# Phase 4 — 設計（v0 決策）
+
+2026-08-04。**規範化 ≠ 設計**：Phase 2 是把既有數值吸附到尺規上，讓它
+一致；沒有人決定過那個「既有樣貌」該長什麼樣。本章補上真正的設計決策。
+
+**已定立場**：有主張的好看預設 + 全可換皮。推論出的硬性約束——
+**視覺不得寫死在規則裡，一律走 token**；host 覆蓋 token 就能整體改觀，
+不需要改一行元件程式碼。這條約束直接決定了下面 4.1 的做法。
+
+## 4.1 Token 的角色化（結構性前提）
+
+Phase 2 的字級 token 用數值命名（`--sc-fs-14`）。這在設計階段就壞了：
+只要密度決策把本文從 14 改成 15，token 名字就開始說謊，host 也無從
+知道哪個 token 代表「本文」。**值命名的 token 擋住設計迭代**。
+
+改為角色命名（本章其餘決策都建立在這之上）：
+
+```css
+--sc-fs-body:  15px;  /* 訊息本文、composer */
+--sc-fs-ui:    13px;  /* 卡片內文、按鈕、表格 — UI 預設 */
+--sc-fs-meta:  12px;  /* 輔助說明、detail、表頭 */
+--sc-fs-micro: 11px;  /* pill、overline、footnote */
+--sc-fs-stat:  22px;  /* stat 數值 */
+--sc-fs-hero:  26px;  /* gauge 主數值 */
+```
+
+間距維持數值命名——它是尺規不是決策，host 要調的是個別元件而非整條尺規。
+
+## 4.2 字體（本專案從未決定過）
+
+kit 目前**沒有任何 sans 宣告**，字體是跟著 host 繼承來的。這是觀感最大的
+槓桿卻從未被選擇。
+
+```css
+--sc-sans:
+  "Inter", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont,
+  "Helvetica Neue", Arial, Roboto,
+  "PingFang TC", "Microsoft JhengHei", "Noto Sans TC", "Hiragino Sans",
+  ui-sans-serif, system-ui, sans-serif,
+  "Apple Color Emoji", "Segoe UI Emoji";
+```
+
+**排序規則：明確的 Latin 字體 → CJK 字體 → 泛型關鍵字，泛型必須墊底。**
+
+這條規則是實測出來的，不是推導的。初版把 `ui-sans-serif, system-ui`
+排在第二、三位，瀏覽器實測發現**所有 Latin 文字都掉進 Microsoft
+JhengHei**（量測寬度與 JhengHei 完全相同）——因為 `system-ui` 是**依
+OS 語系解析**的，在繁中 Windows 上它就是 JhengHei，而 JhengHei 的
+Latin 字形很弱。等於我為了防「中文掉進 Latin 字體」寫的那行，反而造成
+了「Latin 掉進中文字體」。
+
+泛型關鍵字的解析結果不可預期，所以不能排在明確選擇前面。修正後實測：
+Latin 落在 **Segoe UI Variable Text**、CJK 落在 JhengHei，中英混排字串
+的寬度介於兩者之間——證明兩段文字各自用了對的字體。
+
+**另一條**：值裡面不可以寫註解。custom property 會把註解保留在 token
+流中，host 讀回 `--sc-sans` 會連註解字串一起拿到——對一個以「覆蓋 token
+換皮」為賣點的 kit，這會直接破壞契約。註解一律寫在宣告之外。
+
+**不載入 webfont**——kit 是純 CSS、零依賴、可離線，拉 Google Fonts 會
+破壞這三點並踩到嚴格 CSP。Inter 排第一是「host 有就用、沒有就退回系統」，
+不強加網路成本。CJK 明確列出繁中字體，因為中英混排時中文掉進預設字體
+是最常見也最醜的失誤。
+
+光學調整：`--sc-fs-stat` 以上加 `letter-spacing: -0.01em`（大字視覺過鬆）；
+overline 維持 `+0.04em`；數據一律 `tabular-nums`（Phase 2 已做）。
+
+## 4.3 密度：對話優先
+
+主要活動是閱讀，不是掃描儀表板。
+
+| 項目 | 原 | 新 | 理由 |
+|------|----|----|------|
+| 訊息本文 | 14px / 1.6 | **15px / 1.7** | 各家聊天產品都在 15–16；1.7 讓長段落好讀 |
+| 訊息間距 | 20 | **24** | 加大發話輪替的呼吸 |
+| 卡片內文 | 13px | 13px（不變） | 卡片要保留資訊密度，與本文刻意拉開層級 |
+
+**設計主張**：對話放鬆、卡片收緊。兩者的密度差本身就是層次——
+卡片因此讀起來像「嵌在對話裡的一塊資料」，而不是另一段話。
+
+## 4.4 色彩：accent 節制
+
+現行 `#3a6df0` 是預設藍，沒有個性；但真正的問題不是色相，是**用量**。
+
+**使用者氣泡目前是整塊飽和藍**——這是全畫面最大的色塊，它會跟卡片
+搶注意力，觀感也偏舊（iMessage 時代語彙）。Claude、Gemini 都已改用
+中性氣泡。
+
+改：使用者氣泡改為 `--sc-surface-2` 底 + 1px border，文字用一般 text 色。
+
+**accent 節制規則**：accent 只用於——primary 按鈕、focus ring、連結、
+hover／選取／進行中等**互動或狀態**訊號。**不得**用於氣泡、資料強調、
+裝飾性填色、標題。色彩的說服力來自稀缺；到處都是 accent 等於沒有 accent。
+
+**規則的適用範圍**（實作時發現需要界定）：稀缺性是相對於**同一個表面**
+而言的，規則因此只約束 **thread 表面**。`ContextInspector` 之類的獨立
+面板是另一個表面，有自己的預算——那裡的 bar 用 accent 不與任何東西
+競爭。反例：`.sc-compare__best` 原本用 accent 8% 填色標示「最佳」欄，
+但它在 thread 表面上，而且是**資料強調不是可點擊**，已改為中性
+`--sc-surface-2`。判準就是這個：**這塊顏色在暗示可以動它嗎？**
+
+## 4.5 形狀
+
+```css
+--sc-radius:    12px;  /* 卡片、composer 等面（原 10） */
+--sc-radius-sm:  8px;  /* 按鈕、輸入框、選項（原 6） */
+--sc-radius-xs:  4px;  /* 行內 code、swatch、序號方塊 */
+```
+
+略微放軟，與 4.3 的放鬆一致。氣泡保留不對稱尾角（`12px 12px 4px 12px`）
+——它是歸屬感的視覺線索，換成中性色後更需要這個線索。
+
+## 4.6 層次：border-first，但 composer 例外
+
+in-flow 元素一律 border-only（好換皮、深淺色都穩）。唯一例外是
+**composer**：它 sticky 疊在內容上，只靠 border 會讓文字從底下穿出來。
+
+規則：內容捲動到被遮住時才浮現向上陰影，捲到底時消失——
+陰影是**狀態指示**（下面還有內容），不是裝飾。
+
+## 4.7 動效個性：快而不搶戲
+
+Phase 2 的進場 240ms 對一個**持續 streaming** 的介面太慢——每顆 token、
+每張卡都在動，慢動畫會累積成拖沓。
+
+```css
+--sc-dur-1: 120ms;  /* hover */
+--sc-dur-2: 160ms;  /* 進場、尺寸變化（原 240） */
+--sc-dur-3: 320ms;  /* 面板展開收合（原 400） */
+```
+
+維持「無退場動畫」。個性定調：**快、短、不彈跳**——不用 overshoot／
+spring，agent 介面的可信度來自穩定，不是活潑。
+
+## 4.8 實施批次
+
+**這是與 Phase 3 各自獨立的佇列，編號另起。** 原本沿用 1–4 往下編成
+5/6/7，讀起來像「批次 4 之後就輪到批次 7」——把設計混成標準化的續集，
+而兩者的完成定義並不相同。編號本身就是一種宣稱，所以改掉。
+
+| 批次 | 內容 | 狀態 |
+|------|------|------|
+| D1 | 4.1 角色化 token + 4.2 字體 + 4.3 密度 | ✅ 完成並瀏覽器驗證 |
+| D2 | 4.4 色彩節制（氣泡改中性）+ 4.5 形狀 + 4.7 動效值 | ✅ 完成並瀏覽器驗證 |
+| D3 | 4.6 composer 捲動陰影（需 scroll 狀態） | 未做 |
+
+D1／D2 於標準化尚未完成時就先做了，順序上是錯的（使用者事後明確要求
+標準化優先）。D3 未做，且**不是待辦佇列裡的下一項**——標準化已收尾，
+要不要做 D3 是獨立的決定。
+
+補充 D3 的歸類理由：composer 已有 `border-top` 作為分隔，捲動陰影是在
+既有分隔之上再加一層視覺提示，屬於精緻化而非缺失的行為，因此歸設計。

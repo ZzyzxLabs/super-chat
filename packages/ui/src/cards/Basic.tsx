@@ -12,15 +12,35 @@ import type {
   ProgressCard,
   StatsCard,
   TableCard,
+  TableColumn,
   TimelineCard,
 } from "@superchat/core";
 import type { CardRendererProps } from "../renderer-registry.js";
 import { deltaTone, formatDelta, formatValue, toneClass } from "../format.js";
 import { CodeBlock } from "../agent/CodeBlock.js";
+import { renderMarkdown } from "../markdown.js";
+import { CardActions } from "./CardActions.js";
+
+// Rows beyond this render behind a "Show all" toggle — a 200-row agent result
+// would otherwise turn the card into the entire scroll surface.
+const TABLE_TRUNCATE_AT = 30;
+
+/** Header row + data rows, tab-separated — what Copy/Download hand off for
+ * TableCardView. Values go through the same formatValue() the cells render,
+ * so the export matches what's on screen rather than raw payload values. Tabs
+ * and newlines inside a cell are flattened to a space; TSV has no escaping
+ * mechanism for them. */
+function tableToTsv(columns: TableColumn[], rows: Record<string, unknown>[]): string {
+  const cell = (v: string) => v.replace(/[\t\r\n]+/g, " ");
+  const header = columns.map((c) => cell(c.label)).join("\t");
+  const body = rows.map((row) => columns.map((c) => cell(formatValue(row[c.key], c.format))).join("\t")).join("\n");
+  return rows.length ? `${header}\n${body}` : header;
+}
 
 export function TableCardView({ spec }: CardRendererProps<TableCard>) {
   const [sortBy, setSortBy] = useState(spec.sortBy);
   const [sortDir, setSortDir] = useState<"asc" | "desc">(spec.sortDir ?? "desc");
+  const [showAll, setShowAll] = useState(false);
 
   const rows = useMemo(() => {
     if (!sortBy) return spec.rows;
@@ -36,6 +56,12 @@ export function TableCardView({ spec }: CardRendererProps<TableCard>) {
       return sortDir === "asc" ? cmp : -cmp;
     });
   }, [spec.rows, sortBy, sortDir]);
+
+  // Truncation reads off the sorted array, not spec.rows — the user asked to
+  // see the top 30 of *this* ordering, not the top 30 of whatever order the
+  // agent originally sent.
+  const truncated = rows.length > TABLE_TRUNCATE_AT;
+  const visibleRows = showAll ? rows : rows.slice(0, TABLE_TRUNCATE_AT);
 
   const toggle = (key: string) => {
     if (sortBy === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -63,14 +89,14 @@ export function TableCardView({ spec }: CardRendererProps<TableCard>) {
             </tr>
           </thead>
           <tbody>
-            {rows.length === 0 ? (
+            {visibleRows.length === 0 ? (
               <tr>
                 <td colSpan={spec.columns.length} className="sc-muted">
                   No rows.
                 </td>
               </tr>
             ) : (
-              rows.map((row, i) => (
+              visibleRows.map((row, i) => (
                 <tr key={i}>
                   {spec.columns.map((c) => (
                     <td key={c.key} style={{ textAlign: c.align ?? "left" }}>
@@ -87,7 +113,13 @@ export function TableCardView({ spec }: CardRendererProps<TableCard>) {
           </tbody>
         </table>
       </div>
+      {truncated ? (
+        <button type="button" className="sc-btn sc-btn--ghost sc-btn--sm sc-table__more" onClick={() => setShowAll((v) => !v)}>
+          {showAll ? "Show less" : `Show all (${rows.length})`}
+        </button>
+      ) : null}
       {spec.caption ? <div className="sc-muted sc-card__caption">{spec.caption}</div> : null}
+      <CardActions getText={() => tableToTsv(spec.columns, rows)} filename="table.tsv" mimeType="text/tab-separated-values" />
     </div>
   );
 }
@@ -200,53 +232,51 @@ export function MediaCardView({ spec }: CardRendererProps<MediaCard>) {
   );
 }
 
-/**
- * Minimal markdown: headings, bold, italic, inline code, links and lists.
- *
- * Deliberately not a full parser — a card body is short, and pulling in a
- * markdown library plus a sanitizer for this is disproportionate. Everything is
- * escaped first, so model output cannot inject markup.
- */
-function renderMarkdown(src: string): string {
-  const escaped = src
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-
-  return escaped
-    .replace(/^### (.*)$/gm, "<h4>$1</h4>")
-    .replace(/^## (.*)$/gm, "<h3>$1</h3>")
-    .replace(/^# (.*)$/gm, "<h2>$1</h2>")
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
-    // Only http(s) links — a javascript: URL must never survive.
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-    .replace(/^[-*] (.*)$/gm, "<li>$1</li>")
-    .replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, "<ul>$1</ul>")
-    .split(/\n{2,}/)
-    .map((block) => (block.trim().startsWith("<") ? block : `<p>${block.replace(/\n/g, "<br/>")}</p>`))
-    .join("");
-}
-
 export function MarkdownCardView({ spec }: CardRendererProps<MarkdownCard>) {
   const html = useMemo(() => renderMarkdown(spec.body), [spec.body]);
   return (
     <div className="sc-card">
       {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
       <div className="sc-prose" dangerouslySetInnerHTML={{ __html: html }} />
+      <CardActions getText={() => spec.body} filename="note.md" mimeType="text/markdown" />
     </div>
   );
 }
 
+// Best-effort language → extension map for the download filename when the
+// card has no explicit `filename`. Deliberately not exhaustive — "txt" is a
+// safe fallback, not a bug, for anything not listed.
+const CODE_EXT: Record<string, string> = {
+  javascript: "js", js: "js", jsx: "jsx",
+  typescript: "ts", ts: "ts", tsx: "tsx",
+  python: "py", py: "py",
+  json: "json", html: "html", css: "css", scss: "scss", less: "less",
+  markdown: "md", md: "md",
+  bash: "sh", shell: "sh", sh: "sh", zsh: "sh",
+  yaml: "yml", yml: "yml",
+  rust: "rs", go: "go", java: "java",
+  c: "c", cpp: "cpp", "c++": "cpp", csharp: "cs", "c#": "cs",
+  ruby: "rb", rb: "rb", php: "php", sql: "sql",
+  swift: "swift", kotlin: "kt", kt: "kt",
+};
+
+function codeFilename(spec: CodeCard): string {
+  if (spec.filename) return spec.filename;
+  const ext = (spec.language && CODE_EXT[spec.language.toLowerCase()]) || "txt";
+  return `snippet.${ext}`;
+}
+
 export function CodeCardView({ spec }: CardRendererProps<CodeCard>) {
-  // The card is the code block — no surrounding sc-card shell, because
-  // CodeBlock already carries its own header, border and copy affordance.
+  // No surrounding sc-card shell: CodeBlock already carries its own header,
+  // border and actions. It takes the download filename rather than pairing
+  // with CardActions, so the card offers one action row instead of two Copy
+  // buttons that behave slightly differently.
   return (
     <CodeBlock
       code={spec.code}
       lang={spec.language}
       filename={spec.filename ?? spec.title}
+      downloadName={codeFilename(spec)}
       // A single line needs no gutter; numbering it is just noise.
       lineNumbers={spec.code.trimEnd().includes("\n")}
     />

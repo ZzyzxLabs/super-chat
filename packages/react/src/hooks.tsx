@@ -69,12 +69,15 @@ export function useThread() {
   const messages = useAgentState((s) => s.messages);
   const status = useAgentState((s) => s.status);
   const error = useAgentState((s) => s.error);
+  const stopping = useAgentState((s) => s.stopping ?? false);
 
   return useMemo(
     () => ({
       messages,
       status,
       error,
+      /** A stop was requested; the run has not unwound yet. */
+      stopping,
       send: (input: Parameters<AgentClient["send"]>[0], opts?: Parameters<AgentClient["send"]>[1]) => client.send(input, opts),
       regenerate: () => client.regenerate(),
       editMessage: (id: string, input: Parameters<AgentClient["send"]>[0]) => client.editMessage(id, input),
@@ -82,7 +85,7 @@ export function useThread() {
       clear: () => client.clear(),
       isRunning: status === "running" || status === "awaiting-user",
     }),
-    [client, messages, status, error],
+    [client, messages, status, error, stopping],
   );
 }
 

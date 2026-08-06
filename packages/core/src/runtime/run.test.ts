@@ -17,7 +17,8 @@ import { createVisualizeTool } from "../tools/builtin.js";
 import { userMessage } from "../content/parts.js";
 import { isCardCarrier, withCard } from "../cards/types.js";
 import { runAgent } from "./run.js";
-import type { RunEvent } from "./events.js";
+import { initialRunState, reduceRunEvent, type RunEvent } from "./events.js";
+import type { ContentPart } from "../content/types.js";
 import type { Transport, TransportRequest } from "../transport/types.js";
 import type { ToolDefinition } from "../tools/types.js";
 
@@ -566,5 +567,149 @@ describe("runAgent", () => {
     );
 
     expect(events.at(-1)).toMatchObject({ type: "run-finish", finishReason: "cancelled" });
+  });
+});
+
+describe("reduceRunEvent terminal states", () => {
+  const finish = (finishReason: string) =>
+    ({ type: "run-finish", runId: "run", finishReason, usage: {}, steps: 1 }) as RunEvent;
+  const fail = { type: "error", error: new Error("boom"), recoverable: false } as RunEvent;
+
+  it("keeps a failed run failed through run-finish", () => {
+    const state = [fail, finish("error")].reduce(reduceRunEvent, initialRunState("run", "sync"));
+    expect(state.status).toBe("error");
+    expect(state.error).toBeInstanceOf(Error);
+  });
+
+  it("maps a cancelled run to done — a user abort is not a fault", () => {
+    const state = [fail, finish("cancelled")].reduce(reduceRunEvent, initialRunState("run", "sync"));
+    expect(state.status).toBe("done");
+  });
+
+  it("surfaces a transport failure as status error end to end", async () => {
+    const transport: Transport = {
+      kind: "custom",
+      credentialSafe: true,
+      fetch: async () =>
+        new Response(JSON.stringify({ error: { message: "upstream down" } }), {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        }),
+    };
+    const provider = createOpenAIProvider({ transport, dialect: "responses" });
+    const registry = new ToolRegistry().registerAll([echoTool], ["observer"]);
+    const contextBuilder = new ContextBuilder({ identity: "You are a test agent.", contextWindow: 32_000 });
+
+    const events = await collect(
+      runAgent([userMessage("hi")], {
+        provider,
+        model: "gpt-5.2",
+        contextBuilder,
+        tools: registry,
+        toolResolution: { presets: ["observer"] },
+        mode: "sync",
+      }),
+    );
+
+    const state = events.reduce(reduceRunEvent, initialRunState("run", "sync"));
+    expect(events.some((e) => e.type === "error")).toBe(true);
+    expect(state.status).toBe("error");
+    expect(state.finishReason).toBe("error");
+  });
+});
+
+describe("interactive card answers survive the turn", () => {
+  it("records the action on the card so a committed transcript is not a guess", async () => {
+    // The regression: the answer lived only in the renderer's state, so a card
+    // re-mounted from history showed the fallback branch — a confirmed action
+    // read back as "Declined."
+    const cards = new CardRegistry(BUILTIN_CARDS);
+    const h = harness(
+      [
+        respondToolCall("visualize", {
+          kind: "confirm",
+          spec: { title: "Create alert", summary: [{ label: "Asset", value: "SUI" }] },
+        }),
+        respondText("Done."),
+      ],
+      [createVisualizeTool({ cards })],
+    );
+
+    const events = await collect(
+      runAgent([userMessage("set an alert")], {
+        provider: h.provider,
+        model: "gpt-5.2",
+        contextBuilder: h.contextBuilder,
+        tools: h.registry,
+        toolResolution: { presets: ["observer"] },
+        mode: "sync",
+        onUserDecision: async (callId, card) => ({
+          cardId: card.id,
+          callId,
+          kind: "confirm",
+          type: "confirm",
+          value: { confirmed: true },
+          at: 0,
+        }),
+      }),
+    );
+
+    const state = events.reduce(reduceRunEvent, initialRunState("run", "sync"));
+    const answered = state.cards.find((c) => (c.spec as { kind?: string }).kind === "confirm");
+    expect(answered?.action?.type).toBe("confirm");
+  });
+
+  it("records a cancel distinctly from a confirm", async () => {
+    const cards = new CardRegistry(BUILTIN_CARDS);
+    const h = harness(
+      [
+        respondToolCall("visualize", {
+          kind: "confirm",
+          spec: { title: "Delete everything", summary: [{ label: "Scope", value: "all" }] },
+        }),
+        respondText("Cancelled."),
+      ],
+      [createVisualizeTool({ cards })],
+    );
+
+    const events = await collect(
+      runAgent([userMessage("delete it")], {
+        provider: h.provider,
+        model: "gpt-5.2",
+        contextBuilder: h.contextBuilder,
+        tools: h.registry,
+        toolResolution: { presets: ["observer"] },
+        mode: "sync",
+        onUserDecision: async (callId, card) => ({ cardId: card.id, callId, kind: "confirm", type: "cancel", at: 0 }),
+      }),
+    );
+
+    const state = events.reduce(reduceRunEvent, initialRunState("run", "sync"));
+    const answered = state.cards.find((c) => (c.spec as { kind?: string }).kind === "confirm");
+    expect(answered?.action?.type).toBe("cancel");
+  });
+});
+
+describe("tool duration reaches the rendered part", () => {
+  it("keeps ms on the tool-result part, not just on the event", async () => {
+    // The event always carried `ms`; the reducer dropped it, so no UI could show
+    // how long a call took — live or in a reloaded thread.
+    const h = harness([respondToolCall("echo", { value: "ping" }), respondText("done")]);
+    const events = await collect(
+      runAgent([userMessage("go")], {
+        provider: h.provider,
+        model: "gpt-5.2",
+        contextBuilder: h.contextBuilder,
+        tools: h.registry,
+        toolResolution: { presets: ["observer"] },
+        mode: "sync",
+      }),
+    );
+
+    const state = events.reduce(reduceRunEvent, initialRunState("run", "sync"));
+    const part = state.parts.find((p): p is Extract<ContentPart, { type: "tool-result" }> => p.type === "tool-result");
+    expect(part).toBeDefined();
+    expect(typeof part!.ms).toBe("number");
+    expect(part!.ms).toBeGreaterThanOrEqual(0);
   });
 });

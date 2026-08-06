@@ -56,7 +56,18 @@ export type ThreadState = {
   attachments: ContentPart[];
   status: RunState["status"];
   error?: unknown;
+  /**
+   * A stop was requested but the run has not unwound yet.
+   *
+   * Needed because `stop()` only aborts a signal — a tool that ignores its
+   * signal keeps running, and without this the UI cannot distinguish "stopping"
+   * from "the button did nothing".
+   */
+  stopping?: boolean;
 };
+
+/** What a finished turn cost, attached to the committed message. */
+export type TurnMeta = { model: string; ms: number; usage?: RunState["usage"]; steps?: number };
 
 export type AgentClientConfig = {
   provider: Provider;
@@ -111,6 +122,8 @@ export class AgentClient {
    * thread the user just opened.
    */
   private generation = 0;
+  /** Wall-clock start of the current turn, for the committed TurnMeta. */
+  private turnStartedAt = 0;
 
   constructor(config: AgentClientConfig) {
     this.config = config;
@@ -235,12 +248,14 @@ export class AgentClient {
     const gen = this.generation;
     this.controller = new AbortController();
     const mode = this.config.mode ?? "stream";
+    this.turnStartedAt = Date.now();
     this.store.set((s) => ({
       ...s,
       run: initialRunState(nextId("run"), mode),
       cards: [],
       status: "running",
       error: undefined,
+      stopping: false,
     }));
 
     const runConfig: RunConfig = {
@@ -322,17 +337,39 @@ export class AgentClient {
    */
   private commitRun(): void {
     this.store.set((s) => {
+      // run.status reflects only what the agent loop itself saw, never a
+      // throw caught in run()'s catch block — so a caught error must win
+      // over it here, or the catch's "error" status gets overwritten back
+      // to whatever the loop last reduced to (e.g. "running").
+      const status = s.status === "error" ? "error" : s.run.status;
       const parts = s.run.parts;
-      if (!parts.length && !s.run.cards.length) return { ...s, status: s.run.status };
+      if (!parts.length && !s.run.cards.length) return { ...s, status };
 
+      // `data` carries the answer alongside the spec: an answered card that
+      // re-renders from history has to show what the user actually chose, and
+      // the renderer's own state is gone by then.
       const cardParts: ContentPart[] = s.run.cards.map((c) => ({
         type: "artifact",
         id: c.id,
         kind: `card:${(c.spec as { kind?: string }).kind ?? "unknown"}`,
         data: c.spec,
+        ...(c.action ? { action: c.action } : {}),
       }));
 
-      const linked: Message = { ...assistantMessage([...parts, ...cardParts]), parentId: s.headId };
+      // What the turn cost, recorded on the message. The UI has no other way to
+      // show it after the fact: run state is reset by the next turn.
+      const meta: TurnMeta = {
+        model: this.config.model,
+        ms: this.turnStartedAt ? Date.now() - this.turnStartedAt : 0,
+        ...(s.run.usage && Object.keys(s.run.usage).length ? { usage: s.run.usage } : {}),
+        ...(s.run.steps ? { steps: s.run.steps } : {}),
+      };
+
+      const linked: Message = {
+        ...assistantMessage([...parts, ...cardParts]),
+        parentId: s.headId,
+        metadata: { turn: meta },
+      };
       const tree = [...s.tree, linked];
       return {
         ...s,
@@ -340,6 +377,7 @@ export class AgentClient {
         headId: linked.id,
         messages: pathTo(tree, linked.id),
         status: s.run.status,
+        stopping: false,
       };
     });
     this.persist();
@@ -430,6 +468,11 @@ export class AgentClient {
   }
 
   stop(): void {
+    if (!this.isRunning) return;
+    // Mark the request immediately. Aborting is not the same as having stopped:
+    // a tool that ignores its signal runs to completion, and the UI has to be
+    // able to say "stopping" instead of looking inert.
+    this.store.set((s) => ({ ...s, stopping: true }));
     this.controller?.abort();
     // A background job keeps running (and billing) server-side after a local
     // abort — cancel it there too, best-effort.
@@ -458,6 +501,7 @@ export class AgentClient {
       run: initialRunState("", this.config.mode ?? "stream"),
       status: "idle",
       error: undefined,
+      stopping: false,
     }));
     // Without this, reload restores the conversation the user just cleared.
     this.persist();

@@ -15,9 +15,12 @@ import type { CardRendererProps } from "../renderer-registry.js";
 import { formatValue, toneClass } from "../format.js";
 
 export function ChoiceCardView({ spec, card, respond, answered }: CardRendererProps<ChoiceCard>) {
+  // `card.action` is the durable record; local state only covers the gap between
+  // answering and the turn committing.
+  const recorded = card.action?.type === "select" ? ((card.action.value as { selected?: string[] })?.selected ?? []) : null;
   const [selected, setSelected] = useState<string[]>([]);
   const [submitted, setSubmitted] = useState<string[] | null>(null);
-  const done = answered || submitted !== null;
+  const done = answered || submitted !== null || card.action != null;
 
   const toggle = (id: string) => {
     if (done) return;
@@ -37,7 +40,7 @@ export function ChoiceCardView({ spec, card, respond, answered }: CardRendererPr
 
       <div className="sc-choices" role={spec.multiple ? "group" : "radiogroup"}>
         {spec.options.map((opt) => {
-          const isSelected = (submitted ?? selected).includes(opt.id);
+          const isSelected = (recorded ?? submitted ?? selected).includes(opt.id);
           return (
             <button
               key={opt.id}
@@ -92,7 +95,11 @@ export function ChoiceCardView({ spec, card, respond, answered }: CardRendererPr
         </div>
       ) : null}
 
-      {done ? <div className="sc-muted sc-card__footnote">Answered.</div> : null}
+      {done ? (
+        <div className="sc-muted sc-card__footnote">
+          {card.action?.type === "cancel" || card.action?.type === "dismiss" ? "Skipped." : "Answered."}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -109,9 +116,13 @@ function initialValues(fields: FormField[]): Record<string, unknown> {
 }
 
 export function FormCardView({ spec, card, respond, answered }: CardRendererProps<FormCard>) {
+  // Submitted values come from the card once recorded — rendering the spec's
+  // defaults after the fact would show values the user never entered.
+  const recorded = card.action?.type === "submit" ? (card.action.value as Record<string, unknown> | undefined) : undefined;
   const [values, setValues] = useState<Record<string, unknown>>(() => initialValues(spec.fields));
   const [submitted, setSubmitted] = useState(false);
-  const done = answered || submitted;
+  const done = answered || submitted || card.action != null;
+  const shown = recorded ?? values;
 
   const missing = spec.fields.filter(
     (f) => "required" in f && f.required && (values[f.name] === "" || values[f.name] == null),
@@ -149,11 +160,11 @@ export function FormCardView({ spec, card, respond, answered }: CardRendererProp
                 rows={3}
                 disabled={done}
                 placeholder={f.placeholder}
-                value={String(values[f.name] ?? "")}
+                value={String(shown[f.name] ?? "")}
                 onChange={(e) => set(f.name, e.target.value)}
               />
             ) : f.type === "select" ? (
-              <select className="sc-input" disabled={done} value={String(values[f.name] ?? "")} onChange={(e) => set(f.name, e.target.value)}>
+              <select className="sc-input" disabled={done} value={String(shown[f.name] ?? "")} onChange={(e) => set(f.name, e.target.value)}>
                 {f.options.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
@@ -161,7 +172,7 @@ export function FormCardView({ spec, card, respond, answered }: CardRendererProp
                 ))}
               </select>
             ) : f.type === "boolean" ? (
-              <input type="checkbox" disabled={done} checked={Boolean(values[f.name])} onChange={(e) => set(f.name, e.target.checked)} />
+              <input type="checkbox" disabled={done} checked={Boolean(shown[f.name])} onChange={(e) => set(f.name, e.target.checked)} />
             ) : (
               <span className="sc-input-group">
                 <input
@@ -172,7 +183,7 @@ export function FormCardView({ spec, card, respond, answered }: CardRendererProp
                   min={f.type === "number" ? f.min : undefined}
                   max={f.type === "number" ? f.max : undefined}
                   step={f.type === "number" ? f.step : undefined}
-                  value={String(values[f.name] ?? "")}
+                  value={String(shown[f.name] ?? "")}
                   onChange={(e) => set(f.name, e.target.value)}
                 />
                 {f.type === "number" && f.suffix ? <span className="sc-input-group__suffix">{f.suffix}</span> : null}
@@ -200,19 +211,23 @@ export function FormCardView({ spec, card, respond, answered }: CardRendererProp
           {missing.length ? <span className="sc-muted">{missing.length} required field(s) left.</span> : null}
         </div>
       ) : (
-        <div className="sc-muted sc-card__footnote">Submitted.</div>
+        <div className="sc-muted sc-card__footnote">{card.action?.type === "cancel" ? "Cancelled." : "Submitted."}</div>
       )}
     </form>
   );
 }
 
 export function ConfirmCardView({ spec, card, respond, answered }: CardRendererProps<ConfirmCard>) {
-  const [decision, setDecision] = useState<"confirm" | "cancel" | null>(null);
+  const [local, setLocal] = useState<"confirm" | "cancel" | null>(null);
+  // The recorded action wins: after the turn commits this card re-mounts with no
+  // local state, and guessing there once made a confirmed action read "Declined."
+  const recorded = card.action?.type === "confirm" ? "confirm" : card.action ? "cancel" : null;
+  const decision = recorded ?? local;
   const done = answered || decision !== null;
 
   const decide = (type: "confirm" | "cancel") => {
     if (done) return;
-    setDecision(type);
+    setLocal(type);
     respond?.({ cardId: card.id, callId: card.callId, kind: "confirm", type, value: type === "confirm" ? { confirmed: true } : undefined });
   };
 
@@ -240,8 +255,12 @@ export function ConfirmCardView({ spec, card, respond, answered }: CardRendererP
           </button>
         </div>
       ) : (
-        <div className={`sc-card__footnote sc-tone--${decision === "confirm" ? "positive" : "warning"}`}>
-          {decision === "confirm" ? "Confirmed." : "Declined."}
+        <div
+          className={`sc-card__footnote ${decision === "confirm" ? "sc-tone--positive" : decision === "cancel" ? "sc-tone--warning" : "sc-muted"}`}
+        >
+          {/* No recorded decision means we genuinely do not know — say so rather
+              than asserting one of the two outcomes. */}
+          {decision === "confirm" ? "Confirmed." : decision === "cancel" ? "Declined." : "Answered."}
         </div>
       )}
     </div>

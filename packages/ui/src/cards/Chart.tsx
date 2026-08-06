@@ -20,6 +20,11 @@ const PAD = { top: 16, right: 52, bottom: 30, left: 56 };
 
 type Scale = (v: number) => number;
 
+const DAY = 86_400_000;
+// Whole-day steps only, so every tick lands on a UTC midnight and reads as a
+// date instead of an arbitrary instant like 2026-07-15T09:46.
+const TIME_STEPS = [DAY, 2 * DAY, 7 * DAY, 14 * DAY, 30 * DAY, 90 * DAY, 182 * DAY, 365 * DAY];
+
 function niceTicks(min: number, max: number, count = 5): number[] {
   if (!Number.isFinite(min) || !Number.isFinite(max)) return [];
   if (min === max) return [min];
@@ -32,6 +37,32 @@ function niceTicks(min: number, max: number, count = 5): number[] {
   const out: number[] = [];
   for (let v = start; v <= max + step * 0.001; v += step) out.push(Number(v.toFixed(10)));
   return out;
+}
+
+function timeTicks(min: number, max: number, count = 5): number[] {
+  const raw = (max - min) / count;
+  // Sub-day spans have no calendar structure worth snapping to.
+  if (!Number.isFinite(raw) || raw < DAY) return niceTicks(min, max, count);
+  const step = TIME_STEPS.find((s) => s >= raw) ?? Math.ceil(raw / (365 * DAY)) * 365 * DAY;
+  const out: number[] = [];
+  for (let v = Math.ceil(min / step) * step; v <= max; v += step) out.push(v);
+  return out;
+}
+
+// Axis labels render on the server too, so they must not depend on the runtime
+// locale or timezone — toLocaleDateString() there disagrees with the browser's
+// and fails hydration.
+function formatTimeTick(t: number, span: number): string {
+  const d = new Date(t);
+  if (Number.isNaN(d.getTime())) return String(t);
+  const iso = d.toISOString();
+  return span < DAY ? iso.slice(11, 16) : iso.slice(0, 10);
+}
+
+/** Keep an axis to ~8 labels; past that they overlap into an unreadable smear. */
+function thin<T>(items: T[]): T[] {
+  const step = Math.ceil(items.length / 8) || 1;
+  return items.filter((_, i) => i % step === 0);
 }
 
 export function ChartCardView({ spec }: CardRendererProps<ChartCard>) {
@@ -51,16 +82,30 @@ export function ChartCardView({ spec }: CardRendererProps<ChartCard>) {
       const yMax = hi + pad;
       const x: Scale = (i) => PAD.left + (candles.length <= 1 ? innerW / 2 : (i / (candles.length - 1)) * innerW);
       const y: Scale = (v) => PAD.top + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
-      return { kind: "candles" as const, candles, x, y, yTicks: niceTicks(yMin, yMax), width: Math.max(2, (innerW / candles.length) * 0.6) };
+      const xTicks = thin(
+        candles.map((c, i) => ({ at: x(i), label: typeof c.t === "number" ? formatTimeTick(c.t, Infinity) : String(c.t).slice(0, 10) })),
+      );
+      return {
+        kind: "candles" as const,
+        candles,
+        x,
+        y,
+        yTicks: niceTicks(yMin, yMax),
+        xTicks,
+        width: Math.max(2, (innerW / candles.length) * 0.6),
+      };
     }
 
     const series = spec.series ?? [];
     // Category axes index by position; numeric/time axes use the value itself.
     const categorical = spec.xType === "category" || series.some((s) => s.points.some((p) => typeof p[0] === "string"));
-    const xs = series.flatMap((s) => s.points.map((p, i) => (categorical ? i : Number(p[0]))));
+    const xs = series.flatMap((s) => s.points.map((p, i) => (categorical ? i : Number(p[0])))).filter(Number.isFinite);
     const ys = series.flatMap((s) => s.points.map((p) => p[1]));
-    const xMin = Math.min(...xs, 0);
-    const xMax = Math.max(...xs, 1);
+    // The x domain is the data's own extent. Seeding it with 0 the way the y
+    // domain is would put the epoch on a time axis and squash every point into
+    // the last pixel of the plot.
+    const xMin = xs.length ? Math.min(...xs) : 0;
+    const xMax = xs.length ? Math.max(...xs) : 1;
     const yMinRaw = Math.min(...ys, 0);
     const yMaxRaw = Math.max(...ys, 1);
     const yPad = (yMaxRaw - yMinRaw) * 0.08 || 1;
@@ -70,11 +115,14 @@ export function ChartCardView({ spec }: CardRendererProps<ChartCard>) {
     const x: Scale = (v) => PAD.left + (xMax === xMin ? innerW / 2 : ((v - xMin) / (xMax - xMin)) * innerW);
     const y: Scale = (v) => PAD.top + innerH - ((v - yMin) / (yMax - yMin)) * innerH;
 
-    const labels = categorical
-      ? (series[0]?.points.map((p) => String(p[0])) ?? [])
-      : niceTicks(xMin, xMax, 5).map((t) => (spec.xType === "time" ? new Date(t).toLocaleDateString() : String(t)));
+    const xTicks = categorical
+      ? thin((series[0]?.points ?? []).map((p, i) => ({ at: x(i), label: String(p[0]) })))
+      : (spec.xType === "time" ? timeTicks(xMin, xMax) : niceTicks(xMin, xMax, 5)).map((t) => ({
+          at: x(t),
+          label: spec.xType === "time" ? formatTimeTick(t, xMax - xMin) : formatValue(t, "number"),
+        }));
 
-    return { kind: "series" as const, series, categorical, x, y, yTicks: niceTicks(yMin, yMax), labels, xMin, xMax, innerH };
+    return { kind: "series" as const, series, categorical, x, y, yTicks: niceTicks(yMin, yMax), xTicks };
   }, [spec, isCandles]);
 
   return (
@@ -158,6 +206,12 @@ export function ChartCardView({ spec }: CardRendererProps<ChartCard>) {
           })}
 
           <line x1={PAD.left} x2={W - PAD.right} y1={H - PAD.bottom} y2={H - PAD.bottom} className="sc-chart__axis" />
+
+          {model.xTicks.map((t, i) => (
+            <text key={`x${i}`} x={t.at} y={H - PAD.bottom + 14} className="sc-chart__label" textAnchor="middle">
+              {t.label}
+            </text>
+          ))}
         </svg>
       </div>
 

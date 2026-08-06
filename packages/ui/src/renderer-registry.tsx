@@ -7,7 +7,7 @@
 // bug you can see, whereas a card that vanishes is a bug you find in a support
 // ticket three weeks later.
 
-import { Component, createContext, useContext, type ComponentType, type ReactNode } from "react";
+import { Component, createContext, useContext, useEffect, useState, type ComponentType, type ReactNode } from "react";
 import type { Card, CardAction, CardSpec } from "@superchat/core";
 
 export type CardRendererProps<S extends CardSpec = CardSpec> = {
@@ -57,6 +57,32 @@ export class CardBoundary extends Component<{ children: ReactNode; label?: strin
     }
     return this.props.children;
   }
+}
+
+/**
+ * Placeholder for a card whose data has not arrived.
+ *
+ * Deliberately delayed: a skeleton that appears for 80ms and vanishes is worse
+ * than no skeleton at all, so it waits before showing itself. Hosts render this
+ * directly — a card with no spec yet has no kind to dispatch on.
+ */
+export function CardSkeleton({ lines = 2 }: { lines?: number }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setShow(true), 200);
+    return () => clearTimeout(t);
+  }, []);
+
+  if (!show) return null;
+  return (
+    <div className="sc-card sc-skeleton" aria-busy="true" aria-live="polite">
+      <span className="sc-sr-only">Loading…</span>
+      <div className="sc-skeleton__bar sc-skeleton__bar--title" />
+      {Array.from({ length: lines }, (_, i) => (
+        <div key={i} className="sc-skeleton__bar" style={i === lines - 1 ? { width: "80%" } : undefined} />
+      ))}
+    </div>
+  );
 }
 
 export function CardRenderer({ card, respond, answered }: { card: Card; respond?: CardRendererProps["respond"]; answered?: boolean }) {

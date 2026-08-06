@@ -56,6 +56,14 @@ export type ContentPart =
       output: unknown;
       failure?: ToolFailureKind;
       /**
+       * Wall-clock duration of the call.
+       *
+       * Kept on the part, not just on the event: the part is what gets folded
+       * into the committed message, so this is what makes a reloaded thread able
+       * to show how long a step took rather than only the live run.
+       */
+      ms?: number;
+      /**
        * Renderer key for generative UI. The UI package looks this up in its
        * renderer registry; unknown keys fall back to a JSON view, so a headless
        * host is never broken by a tool that wants a custom card.
@@ -67,7 +75,20 @@ export type ContentPart =
    * computed, a diff, a form). Carried through history so a reloaded thread
    * still renders, but stripped before it reaches a provider.
    */
-  | { type: "artifact"; id: string; kind: string; title?: string; data: unknown };
+  | {
+      type: "artifact";
+      id: string;
+      kind: string;
+      title?: string;
+      data: unknown;
+      /**
+       * For an interactive card: what the user answered. A sibling of `data`
+       * rather than nested inside it, so history-shedding can replace the
+       * payload without taking the answer with it — the answer is tiny and is
+       * what makes a re-rendered card readable.
+       */
+      action?: unknown;
+    };
 
 export type MessageRole = "system" | "user" | "assistant" | "tool";
 

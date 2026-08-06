@@ -16,6 +16,12 @@ export interface CodeBlockProps {
   lineNumbers?: boolean;
   /** 1-based lines to tint — useful for pointing at the line under discussion. */
   highlight?: number[];
+  /**
+   * Filename to save as, extension included. Adds a Download button beside
+   * Copy; omit it and only Copy is offered. Long output is the case that needs
+   * this — selecting a 300-line block by hand is not a real affordance.
+   */
+  downloadName?: string;
 }
 
 const CopyIcon = () => (
@@ -51,7 +57,23 @@ const CheckIcon = () => (
   </svg>
 );
 
-export function CodeBlock({ code, lang, filename, lineNumbers = true, highlight }: CodeBlockProps) {
+const DownloadIcon = () => (
+  <svg
+    viewBox="0 0 24 24"
+    width="13"
+    height="13"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.7"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M12 3.5v11m0 0 4-4m-4 4-4-4M4 19.5h16" />
+  </svg>
+);
+
+export function CodeBlock({ code, lang, filename, lineNumbers = true, highlight, downloadName }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
@@ -68,6 +90,20 @@ export function CodeBlock({ code, lang, filename, lineNumbers = true, highlight 
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => setCopied(false), 1200);
     });
+  };
+
+  const download = () => {
+    if (!downloadName) return;
+    const url = URL.createObjectURL(new Blob([code], { type: "text/plain" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = downloadName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Deferred rather than immediate: revoking in the same tick can cut the
+    // download off before some browsers finish reading the blob.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   return (
@@ -95,6 +131,12 @@ export function CodeBlock({ code, lang, filename, lineNumbers = true, highlight 
           {copied ? <CheckIcon /> : <CopyIcon />}
           <span>{copied ? "Copied" : "Copy"}</span>
         </button>
+        {downloadName ? (
+          <button type="button" className="sc-code__copy" onClick={download} aria-label={`Download ${downloadName}`}>
+            <DownloadIcon />
+            <span>Download</span>
+          </button>
+        ) : null}
       </div>
       <div className={"sc-code__body" + (lineNumbers ? "" : " sc-code__body--nogutter")}>
         {lines.map((line, i) => (

@@ -330,6 +330,14 @@ export type Card = {
   expired?: boolean;
   /** Tool call this card belongs to, for correlating an action back. */
   callId?: string;
+  /**
+   * What the user answered, once they have.
+   *
+   * Lives on the card rather than in the renderer's local state because the card
+   * is re-mounted from history when the turn commits — state does not survive
+   * that, and a renderer left guessing shows the wrong answer.
+   */
+  action?: CardAction;
 };
 
 /** What the user did with an interactive card. Becomes the tool result. */

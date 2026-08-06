@@ -114,13 +114,28 @@ export function reduceRunEvent(state: RunState, event: RunEvent): RunState {
     case "awaiting-user":
       return { ...state, status: "awaiting-user", pendingCard: event.card, cards: upsertCard(state.cards, event.card) };
     case "user-responded":
-      return { ...state, status: "running", pendingCard: undefined };
+      // Record the answer ON the card. It is the only copy that outlives the
+      // run: the renderer's local state dies when the turn commits and the card
+      // re-mounts from history.
+      return {
+        ...state,
+        status: "running",
+        pendingCard: undefined,
+        cards: state.cards.map((c) => (c.callId === event.callId ? { ...c, action: event.action } : c)),
+      };
     case "tool-result":
       return {
         ...state,
         parts: [
           ...markCallDone(state.parts, event.callId, event.failure ? "error" : "done"),
-          { type: "tool-result", callId: event.callId, name: event.name, output: event.output, ...(event.failure ? { failure: event.failure as never } : {}) },
+          {
+            type: "tool-result",
+            callId: event.callId,
+            name: event.name,
+            output: event.output,
+            ms: event.ms,
+            ...(event.failure ? { failure: event.failure as never } : {}),
+          },
         ],
       };
     case "card":
@@ -141,7 +156,16 @@ export function reduceRunEvent(state: RunState, event: RunEvent): RunState {
     case "step-finish":
       return { ...state, usage: mergeUsage(state.usage, event.usage) };
     case "run-finish":
-      return { ...state, status: "done", finishReason: event.finishReason, usage: mergeUsage(state.usage, event.usage), steps: event.steps };
+      // A failed run stays failed: runAgent yields error → run-finish, and an
+      // unconditional "done" here would mask the error from every consumer.
+      // Cancellation maps to "done" — a user abort is an outcome, not a fault.
+      return {
+        ...state,
+        status: event.finishReason === "error" ? "error" : "done",
+        finishReason: event.finishReason,
+        usage: mergeUsage(state.usage, event.usage),
+        steps: event.steps,
+      };
     case "error":
       return { ...state, status: event.recoverable ? state.status : "error", error: event.error };
     default:

@@ -7,11 +7,32 @@
 // collapse — a turn that made six lookups should not push the answer off screen.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { isCardCarrier, type Card, type ContentPart, type MediaSource, type Message } from "@superchat/core";
-import { useAgentClient, useAttachments, useBranches, useCardAction, useCards, useRun, useThread } from "@superchat/react";
+import { estimateTokens, isCardCarrier, type Card, type ContentPart, type MediaSource, type Message } from "@superchat/core";
+import {
+  useAgentClient,
+  useAttachments,
+  useBranches,
+  useCardAction,
+  useCards,
+  useRun,
+  useSkills,
+  useThread,
+  useTools,
+  type TurnMeta,
+} from "@superchat/react";
 import { CardRenderer, useCardRenderers } from "./renderer-registry.js";
+import { renderMarkdown } from "./markdown.js";
+import {
+  applyPick,
+  findTrigger,
+  rankItems,
+  SuggestMenu,
+  useActiveIndex,
+  useSuggestItems,
+  type SuggestItem,
+  type TriggerState,
+} from "./Autocomplete.js";
 import { Orb } from "./agent/Orb.js";
-import { StreamingText } from "./agent/StreamingText.js";
 import { Thinking } from "./agent/Thinking.js";
 
 function partsOf(message: Message) {
@@ -26,11 +47,19 @@ function partsOf(message: Message) {
       continue;
     }
     if (p.type === "artifact" && p.kind.startsWith("card:")) {
-      // A persisted thread may have shed this card's payload under storage
-      // quota; the stub carries `expired` so the renderer says so instead of
-      // rendering an empty shell.
+      // `data` stays the spec itself rather than a { spec, action } envelope:
+      // core's history-shedding reads `data.kind` to build the expired stub,
+      // and nesting would hide it. The user's answer rides alongside in
+      // `action` — it has to survive, because an answered card re-rendered
+      // from history must show what was actually chosen, and the renderer's
+      // own state is long gone by then.
       const expired = (p.data as { expired?: boolean } | null)?.expired === true;
-      cards.push({ id: p.id, spec: p.data as Card["spec"], ...(expired ? { expired: true } : {}) });
+      cards.push({
+        id: p.id,
+        spec: p.data as Card["spec"],
+        ...(p.action ? { action: p.action as Card["action"] } : {}),
+        ...(expired ? { expired: true } : {}),
+      });
       continue;
     }
     rest.push(p);
@@ -60,7 +89,58 @@ function ProviderToolChips({ items }: { items: { id: string; kind: string }[] })
   );
 }
 
-export function MessageView({ message, respond }: { message: Message; respond?: ReturnType<typeof useCardAction>["respond"] }) {
+/**
+ * The line under a finished answer: what it cost, and what you can do with it.
+ *
+ * Actions are always visible rather than revealed on hover — a hover-only
+ * control does not exist on a touch device.
+ */
+function MessageMeta({ meta, onRegenerate }: { meta?: TurnMeta; onRegenerate?: () => void }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const bits = [
+    meta?.ms ? formatMs(meta.ms) : null,
+    // Step count only when the turn actually looped — "1 step" is noise.
+    meta?.steps && meta.steps > 1 ? `${meta.steps} steps` : null,
+    meta?.model ?? null,
+    meta?.usage?.totalTokens ? `${meta.usage.totalTokens.toLocaleString()} tok` : null,
+  ].filter(Boolean);
+
+  return (
+    <div className="sc-msgmeta">
+      {bits.length ? <span className="sc-msgmeta__facts">{bits.join(" · ")}</span> : null}
+      <button
+        type="button"
+        className={`sc-btn sc-btn--ghost sc-btn--sm${copyState === "failed" ? " sc-tone--negative" : ""}`}
+        onClick={(e) => {
+          const body = e.currentTarget.closest(".sc-msg")?.querySelector(".sc-msg__text");
+          // Report the failure rather than swallowing it — a copy button that
+          // does nothing visible is indistinguishable from a broken one.
+          void (navigator.clipboard?.writeText(body?.textContent ?? "") ?? Promise.reject())
+            .then(() => setCopyState("copied"))
+            .catch(() => setCopyState("failed"))
+            .finally(() => setTimeout(() => setCopyState("idle"), 1500));
+        }}
+      >
+        {copyState === "copied" ? "Copied" : copyState === "failed" ? "Copy failed" : "Copy"}
+      </button>
+      {onRegenerate ? (
+        <button type="button" className="sc-btn sc-btn--ghost sc-btn--sm" onClick={onRegenerate}>
+          Retry
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function MessageView({
+  message,
+  respond,
+  onRegenerate,
+}: {
+  message: Message;
+  respond?: ReturnType<typeof useCardAction>["respond"];
+  onRegenerate?: () => void;
+}) {
   const renderers = useCardRenderers();
   const { cards, rest, providerTools } = useMemo(() => partsOf(message), [message]);
 
@@ -68,6 +148,7 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
   const reasoning = rest.filter((p) => p.type === "reasoning").map((p) => (p as { text: string }).text).join("");
   const calls = rest.filter((p): p is Extract<ContentPart, { type: "tool-call" }> => p.type === "tool-call");
   const results = rest.filter((p): p is Extract<ContentPart, { type: "tool-result" }> => p.type === "tool-result");
+  const html = useMemo(() => renderMarkdown(text), [text]);
 
   // Split cards: interactive ones stay at top level, read-only ones may sit with
   // the tool activity they came from.
@@ -80,8 +161,14 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
   );
 
   if (message.role === "user") {
+    // Attachments render inside the bubble: a file the user sent that vanishes
+    // from the transcript makes the following answer unexplainable.
+    const media = rest.filter((p) => p.type === "image" || p.type === "file");
     return (
       <div className="sc-msg sc-msg--user">
+        {/* Attachments render above the bubble: a file the user sent that
+            vanishes from the transcript makes the following answer
+            unexplainable. */}
         {media.length ? <MediaParts parts={media} /> : null}
         <UserBubble message={message} text={text} />
         <BranchNav messageId={message.id} />
@@ -96,7 +183,8 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
   return (
     <div className="sc-msg sc-msg--assistant">
       {/* A finished turn: the reasoning is complete, so it folds into its
-          "Thought for Ns" summary rather than taking up the thread. */}
+          summary. History carries no timing — the summary reads a bare
+          "Thought" rather than persisting a decorative number. */}
       {reasoning ? <Thinking text={reasoning} /> : null}
       {media.length ? <MediaParts parts={media} /> : null}
       {providerTools.length ? <ProviderToolChips items={providerTools} /> : null}
@@ -107,8 +195,11 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
       {interactive.map((c) => (
         <CardRenderer key={c.id} card={c} respond={respond} answered />
       ))}
-      {text ? <div className="sc-prose sc-msg__text">{text}</div> : null}
+      {text ? <div className="sc-prose sc-msg__text" dangerouslySetInnerHTML={{ __html: html }} /> : null}
       {!text && !cards.length && !calls.length ? <div className="sc-muted">(no response)</div> : null}
+      {text || cards.length ? (
+        <MessageMeta meta={(message.metadata as { turn?: TurnMeta } | undefined)?.turn} onRegenerate={onRegenerate} />
+      ) : null}
       <BranchNav messageId={message.id} />
     </div>
   );
@@ -192,8 +283,29 @@ function UserBubble({ message, text }: { message: Message; text: string }) {
   );
 }
 
+/** `2026-08-04` → `Today` / `Yesterday` / a written date. */
+function dayLabel(at: number): string {
+  const d = new Date(at);
+  const today = new Date();
+  const midnight = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diffDays = Math.round((midnight(today) - midnight(d)) / 86_400_000);
+  if (diffDays === 0) return "Today";
+  if (diffDays === 1) return "Yesterday";
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
 const INTERACTIVE_KINDS = new Set(["choice", "form", "confirm"]);
 const isInteractiveKind = (kind?: string) => (kind ? INTERACTIVE_KINDS.has(kind) : false);
+
+const formatBytes = (n: number) =>
+  n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`;
+
+/** `840ms` under a second, `1.4s` above it — two digits of precision, never more. */
+function formatMs(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
+}
+
+const GLYPH = { pending: "○", done: "●", failed: "✕" } as const;
 
 const mediaSrc = (source: MediaSource, mediaType?: string): string | null => {
   if (source.kind === "url") return source.url;
@@ -250,36 +362,87 @@ function ToolActivity({
   const items = calls.length ? calls : results.map((r) => ({ callId: r.callId, name: r.name, input: undefined, status: "done" as const }));
   const failures = results.filter((r) => r.failure).length;
 
+  const running = items.filter((c) => !byId.has(c.callId));
+  const isRunning = running.length > 0;
+  const current = running[0];
+  // Sum, not wall-clock: tools can run in parallel, so this is total work done
+  // rather than elapsed time, and the label says so.
+  const totalMs = results.reduce((sum, r) => sum + (r.ms ?? 0), 0);
+
+  const summary = isRunning
+    ? `Running tools ${items.length - running.length}/${items.length}${current ? ` · ${current.name}` : ""}…`
+    : `${items.length} tool ${items.length === 1 ? "call" : "calls"}${totalMs ? ` · ${formatMs(totalMs)}` : ""}`;
+
+  const row = (c: { callId: string; name: string; input?: unknown }) => {
+    const result = byId.get(c.callId);
+    const state = !result ? "running" : result.failure ? "failed" : "done";
+    return (
+      <li key={c.callId} className="sc-tools__item">
+        <div className="sc-tools__row">
+          <span className="sc-tools__status" aria-hidden>
+            {state === "running" ? <span className="sc-spinner" /> : GLYPH[state]}
+          </span>
+          <code className="sc-mono">{c.name}</code>
+          {result?.failure ? <span className="sc-pill sc-pill--negative">{result.failure}</span> : null}
+          {result?.ms != null ? <span className="sc-tools__ms sc-muted">{formatMs(result.ms)}</span> : null}
+        </div>
+        {open ? (
+          <>
+            {c.input !== undefined ? <pre className="sc-pre sc-pre--sm">{JSON.stringify(c.input, null, 2)}</pre> : null}
+            {result ? (
+              <pre className="sc-pre sc-pre--sm">
+                {JSON.stringify(isCardCarrier(result.output) ? { ...result.output, $card: "[card]" } : result.output, null, 2).slice(0, 1200)}
+              </pre>
+            ) : null}
+          </>
+        ) : null}
+      </li>
+    );
+  };
+
   return (
     <div className="sc-tools">
       <button type="button" className="sc-tools__head" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         <span className="sc-tools__icon" aria-hidden>
           {open ? "▾" : "▸"}
         </span>
-        {items.length} tool {items.length === 1 ? "call" : "calls"}
+        <span className="sc-tools__summary">{summary}</span>
         {failures ? <span className="sc-pill sc-pill--negative">{failures} failed</span> : null}
       </button>
+      {/* While running, the in-flight call shows without expanding the group —
+          seeing which tool is live is the point; the other rows are history. */}
       {open ? (
-        <ul className="sc-tools__list">
-          {items.map((c) => {
-            const result = byId.get(c.callId);
-            return (
-              <li key={c.callId} className="sc-tools__item">
-                <code className="sc-mono">{c.name}</code>
-                {result?.failure ? <span className="sc-pill sc-pill--negative">{result.failure}</span> : null}
-                {c.input !== undefined ? <pre className="sc-pre sc-pre--sm">{JSON.stringify(c.input, null, 2)}</pre> : null}
-                {result ? (
-                  <pre className="sc-pre sc-pre--sm">
-                    {JSON.stringify(isCardCarrier(result.output) ? { ...result.output, $card: "[card]" } : result.output, null, 2).slice(0, 1200)}
-                  </pre>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
+        <ul className="sc-tools__list">{items.map(row)}</ul>
+      ) : isRunning && current ? (
+        <ul className="sc-tools__list">{row(current)}</ul>
       ) : null}
     </div>
   );
+}
+
+/**
+ * Seconds spent reasoning before the answer began.
+ *
+ * Measured here rather than read from the stream because no event carries a
+ * timestamp. That makes it live-only by nature: a reloaded thread has no
+ * measurement to recover, which is why history shows a bare "Thought".
+ */
+function useThinkingDuration(runId: string, hasReasoning: boolean, hasText: boolean): number | undefined {
+  const startRef = useRef<{ runId: string; at: number } | null>(null);
+  const [seconds, setSeconds] = useState<number | undefined>(undefined);
+
+  useEffect(() => {
+    if (startRef.current?.runId !== runId) {
+      startRef.current = null;
+      setSeconds(undefined);
+    }
+    if (hasReasoning && !startRef.current) startRef.current = { runId, at: Date.now() };
+    if (hasText && startRef.current && seconds === undefined) {
+      setSeconds(Math.max(1, Math.round((Date.now() - startRef.current.at) / 1000)));
+    }
+  }, [runId, hasReasoning, hasText, seconds]);
+
+  return seconds;
 }
 
 /** The live turn: streamed text, cards as they arrive, and any blocking card. */
@@ -288,9 +451,14 @@ export function LiveTurn() {
   const cards = useCards();
   const { pending, respond } = useCardAction();
 
+  // Hooks must run on every render path — this sits above the early return, or
+  // the hook count changes the moment a run starts and React tears the page down.
+  const text = run.parts.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join("");
+  const html = useMemo(() => renderMarkdown(text), [text]);
+  const thoughtFor = useThinkingDuration(run.runId, run.parts.some((p) => p.type === "reasoning"), Boolean(text));
+
   if (run.status === "idle" || run.status === "done") return null;
 
-  const text = run.parts.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join("");
   const reasoning = run.parts.filter((p) => p.type === "reasoning").map((p) => (p as { text: string }).text).join("");
   const calls = run.parts.filter((p): p is Extract<ContentPart, { type: "tool-call" }> => p.type === "tool-call");
   const results = run.parts.filter((p): p is Extract<ContentPart, { type: "tool-result" }> => p.type === "tool-result");
@@ -306,9 +474,12 @@ export function LiveTurn() {
           <span className="sc-pill">{run.job.status}</span>
         </div>
       ) : null}
-      {/* Live: the reasoning stream stays open and scrolls itself until the
-          turn closes, at which point it collapses to its summary. */}
-      {reasoning ? <Thinking text={reasoning} streaming={run.status === "running"} /> : null}
+      {/* Live: the stream stays open and scrolls itself, then collapses to its
+          summary once the answer starts — the first token of text is what ends
+          the thinking, not the end of the run. */}
+      {reasoning ? (
+        <Thinking text={reasoning} streaming={!text} elapsedMs={thoughtFor != null ? thoughtFor * 1000 : undefined} />
+      ) : null}
       {providerTools.length ? <ProviderToolChips items={providerTools} /> : null}
       {calls.length ? <ToolActivity calls={calls} results={results} /> : null}
       {cards
@@ -319,17 +490,59 @@ export function LiveTurn() {
       {/* The blocking card renders last and un-collapsed — it is the thing the
           user must act on, so nothing may hide it. */}
       {pending ? <CardRenderer key={pending.id} card={pending} respond={respond} /> : null}
-      {text ? <StreamingText text={text} streaming={run.status === "running"} /> : null}
-      {/* Nothing to show yet — the orb carries the wait on its own. */}
-      {run.status === "running" && !text && !calls.length && !reasoning ? (
-        <Orb variant="S1" pill label="Thinking…" />
+      {text ? (
+        <div
+          className={`sc-prose sc-msg__text${run.status === "running" ? " sc-msg__text--streaming" : ""}`}
+          dangerouslySetInnerHTML={{ __html: html }}
+        />
+      ) : null}
+      {/* Nothing to show yet. The orb carries the wait; the label stays derived
+          from run state rather than a rotation of invented phrases. */}
+      {run.status === "running" && !text && !calls.length ? (
+        <div className="sc-status" aria-live="polite">
+          <Orb variant="S1" pill label={statusLine(run)} />
+        </div>
       ) : null}
     </div>
   );
 }
 
+/**
+ * What the agent is doing right now, in words.
+ *
+ * Derived from run state rather than a timed rotation of invented phrases: a
+ * status line that cycles through plausible-sounding stages while the agent does
+ * something else is a lie, and users notice when it never matches the tool list.
+ */
+function statusLine(run: ReturnType<typeof useRun>): string {
+  if (run.job) return `Working in the background — ${run.job.status}`;
+  if (run.pendingCard) return "Waiting for you";
+  const lastCall = [...run.parts].reverse().find((p) => p.type === "tool-call") as
+    | Extract<ContentPart, { type: "tool-call" }>
+    | undefined;
+  if (lastCall && lastCall.status === "running") return `Running ${lastCall.name}…`;
+  if (run.parts.some((p) => p.type === "reasoning")) return "Thinking…";
+  if (run.steps > 1) return `Working — step ${run.steps}`;
+  return "Thinking…";
+}
+
+/** Inline error block for a failed run, with a retry that re-runs the last turn. */
+function ErrorBlock({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  const detail = error != null ? (error instanceof Error ? error.message : String(error)) : "";
+  return (
+    <div className="sc-card sc-card--error" role="alert">
+      {detail || "Something went wrong."}
+      <div className="sc-card__actions">
+        <button type="button" className="sc-btn sc-btn--sm" onClick={onRetry}>
+          Retry
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function Thread({ empty }: { empty?: ReactNode }) {
-  const { messages } = useThread();
+  const { messages, status, error, regenerate, isRunning } = useThread();
   const { respond } = useCardAction();
   const run = useRun();
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -341,122 +554,390 @@ export function Thread({ empty }: { empty?: ReactNode }) {
     if (pinned) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length, run.parts.length, pinned]);
 
+  // Only the last assistant message is retryable: regenerate() rewinds to the
+  // last user turn, so offering it mid-thread would silently discard everything
+  // after the message the user clicked.
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")?.id;
+
+  let lastDay = "";
   return (
-    <div
-      className="sc-thread"
-      onScroll={(e) => {
-        const el = e.currentTarget;
-        setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
-      }}
-    >
-      {messages.length === 0 && run.status === "idle" ? <div className="sc-empty">{empty}</div> : null}
-      {messages.map((m) => (
-        <MessageView key={m.id} message={m} respond={respond} />
-      ))}
-      <LiveTurn />
-      <div ref={bottomRef} />
+    <div className="sc-threadwrap">
+      <div
+        className="sc-thread"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < 80);
+        }}
+      >
+        {messages.length === 0 && run.status === "idle" ? <div className="sc-empty">{empty}</div> : null}
+        {messages.map((m) => {
+          const day = m.createdAt ? dayLabel(m.createdAt) : "";
+          const divider = day && day !== lastDay ? day : "";
+          if (day) lastDay = day;
+          return (
+            <div key={m.id}>
+              {divider ? (
+                <div className="sc-daydivider">
+                  <span>{divider}</span>
+                </div>
+              ) : null}
+              <MessageView
+                message={m}
+                respond={respond}
+                onRegenerate={m.id === lastAssistant && !isRunning ? () => void regenerate() : undefined}
+              />
+            </div>
+          );
+        })}
+        <LiveTurn />
+        {status === "error" ? <ErrorBlock error={error} onRetry={() => void regenerate()} /> : null}
+        <div ref={bottomRef} />
+      </div>
+      {/* Only offered when it does something: pinned means already at the end. */}
+      {!pinned ? (
+        <button
+          type="button"
+          className="sc-jump"
+          onClick={() => {
+            setPinned(true);
+            bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+          }}
+        >
+          <span aria-hidden>↓</span> Latest
+        </button>
+      ) : null}
     </div>
   );
 }
 
 export type ComposerProps = {
   placeholder?: string;
+  /** Refuse to send past this. Omit for no limit — the kit does not guess. */
+  maxInputTokens?: number;
+  /** Model picker. Omit to hide it — the kit never invents a model list. */
+  models?: string[];
+  model?: string;
+  onModelChange?: (model: string) => void;
+  /** On/off chips for host-defined capabilities (web search, a preset, …). */
+  toolToggles?: { id: string; label: string; on: boolean; onChange: (on: boolean) => void }[];
   /**
    * Turn a picked browser File into staged attachment part(s) — typically
    * upload via `provider.uploadFile` and then `client.attach(file(ref, …))`.
-   * When absent, the attach button is not rendered.
+   *
+   * Without it the composer inlines files as base64 itself, which is the
+   * zero-config path. With it, staging belongs to the host and the chips are
+   * read back from `useAttachments()` — the two never both hold a file.
    */
   onAttachFile?: (file: File) => void | Promise<void>;
 };
 
-export function Composer({ placeholder = "Ask anything…", onAttachFile }: ComposerProps) {
-  const { send, stop, isRunning } = useThread();
-  const { attachments, remove } = useAttachments();
+export function Composer({
+  placeholder = "Ask anything…",
+  maxInputTokens,
+  models,
+  model,
+  onModelChange,
+  toolToggles,
+  onAttachFile,
+}: ComposerProps) {
+  const { send, stop, isRunning, stopping, messages } = useThread();
+  const { skills } = useSkills();
+  const { all: allTools } = useTools();
+  const staged = useAttachments();
   const [value, setValue] = useState("");
-  const [attaching, setAttaching] = useState(false);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const tokens = useMemo(() => (value ? estimateTokens(value) : 0), [value]);
+  const overLimit = maxInputTokens != null && tokens > maxInputTokens;
+  const [local, setLocal] = useState<{ id: string; name: string; size: number; part: ContentPart }[]>([]);
+
+  // One list to render and to gate "can send", whichever path staged the file.
+  const attachments = onAttachFile
+    ? staged.attachments.map((p, i) => ({
+        id: `staged:${i}`,
+        name: (p as { filename?: string }).filename ?? p.type,
+        size: 0,
+        part: p,
+      }))
+    : local;
+  const setAttachments = setLocal;
+
+  // `/` skills, `@` tools. Both read the live registries, so a host that
+  // registers something new gets it in the menu with no extra wiring.
+  const [trigger, setTrigger] = useState<TriggerState>(null);
+  const catalogue = useSuggestItems(skills, allTools);
+  const suggestions = trigger ? rankItems(catalogue[trigger.trigger as "/" | "@"] ?? [], trigger.query) : [];
+  const [activeIdx, setActiveIdx] = useActiveIndex(suggestions.length);
+
+  const syncTrigger = (el: HTMLTextAreaElement) => setTrigger(findTrigger(el.value, el.selectionStart ?? 0, ["/", "@"]));
+
+  const pick = (item: SuggestItem) => {
+    const el = inputRef.current;
+    if (!el || !trigger) return;
+    const next = applyPick(el.value, trigger, el.selectionStart ?? el.value.length, item.id);
+    setValue(next.text);
+    setTrigger(null);
+    // Restore the caret after React re-renders with the new value.
+    requestAnimationFrame(() => {
+      el.selectionStart = el.selectionEnd = next.caret;
+      el.focus();
+    });
+  };
+
+  // Files become base64 parts here rather than being uploaded: the kit has no
+  // storage of its own, and `MediaSource` already carries inline data. A host
+  // with a file API can swap these for `providerFile` sources before sending.
+  const addFiles = async (files: FileList | File[]) => {
+    const accepted = [...files].filter((f) => f.type.startsWith("image/") || f.type === "application/pdf" || f.type.startsWith("text/"));
+    // With a host seam, staging is the host's job — it may need to upload and
+    // hand back a providerFile reference, which base64 here cannot produce.
+    if (onAttachFile) {
+      for (const f of accepted) await onAttachFile(f);
+      return;
+    }
+    const read = await Promise.all(
+      accepted.map(
+        (f) =>
+          new Promise<{ id: string; name: string; size: number; part: ContentPart }>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = () => reject(reader.error);
+            reader.onload = () => {
+              const data = String(reader.result).split(",")[1] ?? "";
+              const source = { kind: "base64" as const, data };
+              resolve({
+                id: `${f.name}:${f.size}:${f.lastModified}`,
+                name: f.name,
+                size: f.size,
+                part: f.type.startsWith("image/")
+                  ? { type: "image", source, mediaType: f.type }
+                  : { type: "file", source, mediaType: f.type, filename: f.name },
+              });
+            };
+            reader.readAsDataURL(f);
+          }),
+      ),
+    );
+    // Dedupe by identity so dropping the same file twice does not send it twice.
+    setAttachments((prev) => [...prev, ...read.filter((r) => !prev.some((p) => p.id === r.id))]);
+  };
 
   const submit = () => {
     const text = value.trim();
     // Attachments alone are a valid send — "summarize this file" is the text-less case.
-    if ((!text && !attachments.length) || isRunning) return;
+    if ((!text && !attachments.length) || isRunning || overLimit) return;
+    // Host-staged parts are already on the client and get appended by send();
+    // inlining them here too would send every file twice.
+    const parts: ContentPart[] = [
+      ...(onAttachFile ? [] : local.map((a) => a.part)),
+      ...(text ? [{ type: "text" as const, text }] : []),
+    ];
     setValue("");
-    void send(text);
+    setAttachments([]);
+    void send(parts);
+    // Auto-grow only expands the box; clearing the value must collapse it
+    // back to the CSS base height instead of leaving a tall empty textarea.
+    const el = inputRef.current;
+    if (el) el.style.height = "";
   };
 
-  const pick = async (file: File | undefined) => {
-    if (!file || !onAttachFile) return;
-    setAttaching(true);
-    try {
-      await onAttachFile(file);
-    } finally {
-      setAttaching(false);
-    }
-  };
+  const stacked = Boolean(models?.length || toolToggles?.length);
+
+  // Built once so the single-row and stacked layouts cannot drift apart.
+  const counter =
+    // Only once the input is long enough for the number to matter — a token
+    // count next to three words is clutter, not information.
+    tokens > 400 ? (
+      <span className={`sc-composer__tokens${overLimit ? " sc-tone--negative" : ""}`}>{tokens.toLocaleString()} tok</span>
+    ) : null;
+
+  // Drag-and-drop is not discoverable on its own, and does not exist at all on
+  // a touch device — so the picker is always offered too.
+  const attachButton = (
+    <label className="sc-btn sc-btn--ghost sc-btn--sm" title="Attach a file" aria-disabled={isRunning}>
+      📎
+      <input
+        type="file"
+        multiple
+        style={{ display: "none" }}
+        disabled={isRunning}
+        onChange={(e) => {
+          const files = e.target.files;
+          e.target.value = "";
+          if (files?.length) void addFiles(files);
+        }}
+      />
+    </label>
+  );
+
+  const actionButton = isRunning ? (
+    // Disabled once requested: pressing Stop twice does nothing extra, and a
+    // still-live button after a stop reads as the button being broken.
+    <button type="button" className="sc-btn sc-btn--ghost" onClick={stop} disabled={stopping}>
+      {stopping ? "Stopping…" : "Stop"}
+    </button>
+  ) : (
+    <button type="submit" className="sc-btn sc-btn--primary" disabled={(!value.trim() && !attachments.length) || overLimit}>
+      Send
+    </button>
+  );
 
   return (
     <form
-      className="sc-composer"
+      className={`sc-composer${stacked ? " sc-composer--stacked" : ""}`}
       onSubmit={(e) => {
         e.preventDefault();
         submit();
       }}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        if (!e.dataTransfer.files.length) return;
+        e.preventDefault();
+        void addFiles(e.dataTransfer.files);
+      }}
     >
+      {trigger && suggestions.length ? (
+        <SuggestMenu items={suggestions} active={activeIdx} onPick={pick} />
+      ) : null}
       {attachments.length ? (
-        <div className="sc-composer__attachments" style={{ display: "flex", flexWrap: "wrap", gap: 6, width: "100%" }}>
-          {attachments.map((p, i) => (
-            <span key={i} className="sc-pill">
-              {p.type === "image" ? "🖼" : p.type === "audio" ? "🔊" : "📄"}{" "}
-              {(p as { filename?: string }).filename ?? p.type}
+        <ul className="sc-attachments">
+          {attachments.map((a, i) => (
+            <li key={a.id} className="sc-attachment">
+              <span className="sc-attachment__name">{a.name}</span>
+              {/* Host-staged parts carry no byte count — omit rather than print "0 B". */}
+              {a.size ? <span className="sc-attachment__size sc-muted">{formatBytes(a.size)}</span> : null}
               <button
                 type="button"
-                className="sc-btn sc-btn--ghost sc-btn--sm"
-                aria-label="Remove attachment"
-                onClick={() => remove(i)}
+                className="sc-attachment__remove"
+                aria-label={`Remove ${a.name}`}
+                onClick={() =>
+                  onAttachFile ? staged.remove(i) : setAttachments((prev) => prev.filter((p) => p.id !== a.id))
+                }
               >
-                ×
+                ✕
               </button>
-            </span>
+            </li>
           ))}
-        </div>
-      ) : null}
-      {onAttachFile ? (
-        <label className="sc-btn sc-btn--ghost" title="Attach a file" aria-disabled={attaching || isRunning}>
-          {attaching ? "…" : "📎"}
-          <input
-            type="file"
-            style={{ display: "none" }}
-            disabled={attaching || isRunning}
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              e.target.value = "";
-              void pick(file);
-            }}
-          />
-        </label>
+        </ul>
       ) : null}
       <textarea
+        ref={inputRef}
         className="sc-composer__input"
         rows={1}
         value={value}
         placeholder={placeholder}
-        onChange={(e) => setValue(e.target.value)}
+        onPaste={(e) => {
+          const files = [...e.clipboardData.files];
+          if (!files.length) return;
+          e.preventDefault();
+          void addFiles(files);
+        }}
+        onSelect={(e) => syncTrigger(e.currentTarget)}
+        onBlur={() => setTrigger(null)}
+        onChange={(e) => {
+          setValue(e.target.value);
+          syncTrigger(e.target);
+          // Auto-grow: collapse first so a shrinking edit doesn't stick at its
+          // previous (taller) scrollHeight, then clamp to the CSS max-height.
+          const el = e.target;
+          el.style.height = "auto";
+          el.style.height = `${Math.min(el.scrollHeight, 180)}px`;
+        }}
         onKeyDown={(e) => {
+          // The suggestion menu owns the arrows, Enter/Tab and Esc while it is
+          // open — otherwise Enter would send the half-typed `/legal` instead of
+          // completing it.
+          const menuOpen = Boolean(trigger) && suggestions.length > 0;
+          if (menuOpen && !e.nativeEvent.isComposing) {
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              setActiveIdx((activeIdx + 1) % suggestions.length);
+              return;
+            }
+            if (e.key === "ArrowUp") {
+              e.preventDefault();
+              setActiveIdx((activeIdx - 1 + suggestions.length) % suggestions.length);
+              return;
+            }
+            if (e.key === "Enter" || e.key === "Tab") {
+              e.preventDefault();
+              const chosen = suggestions[activeIdx];
+              if (chosen) pick(chosen);
+              return;
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              setTrigger(null);
+              return;
+            }
+          }
           // Enter sends, Shift+Enter breaks the line — the convention every
-          // chat UI has trained users on.
-          if (e.key === "Enter" && !e.shiftKey) {
+          // chat UI has trained users on. isComposing (plus the keyCode 229
+          // fallback Safari uses once composition ends) guards against an
+          // IME candidate-confirm Enter — e.g. Bopomofo/Japanese — sending.
+          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
             e.preventDefault();
             submit();
+            return;
+          }
+          // Esc stops the run. Guarded on composition too: Esc cancels an IME
+          // candidate window, and that keystroke must not also kill the turn.
+          if (e.key === "Escape" && isRunning && !e.nativeEvent.isComposing && e.keyCode !== 229) {
+            e.preventDefault();
+            stop();
+            return;
+          }
+          // ArrowUp on an empty box recalls the last thing you sent, so a typo
+          // does not have to be retyped. Only when empty — otherwise it is a
+          // cursor key and stealing it would break editing.
+          if (e.key === "ArrowUp" && !value && !e.nativeEvent.isComposing) {
+            const lastUser = [...messages].reverse().find((m) => m.role === "user");
+            const prior = lastUser?.parts.find((p) => p.type === "text") as { text?: string } | undefined;
+            if (prior?.text) {
+              e.preventDefault();
+              setValue(prior.text);
+            }
           }
         }}
       />
-      {isRunning ? (
-        <button type="button" className="sc-btn sc-btn--ghost" onClick={stop}>
-          Stop
-        </button>
+      {/* Accessories move the controls onto their own row. Without them the
+          composer stays a single line, which is the whole point of the default. */}
+      {stacked ? (
+        <div className="sc-composer__bar">
+          {models?.length ? (
+            <select
+              className="sc-composer__model"
+              value={model ?? models[0]}
+              onChange={(e) => onModelChange?.(e.target.value)}
+              aria-label="Model"
+            >
+              {models.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          {toolToggles?.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className={`sc-toggle${t.on ? " sc-toggle--on" : ""}`}
+              aria-pressed={t.on}
+              onClick={() => t.onChange(!t.on)}
+            >
+              {t.label}
+            </button>
+          ))}
+          <span className="sc-composer__spacer" />
+          {attachButton}
+          {counter}
+          {actionButton}
+        </div>
       ) : (
-        <button type="submit" className="sc-btn sc-btn--primary" disabled={!value.trim() && !attachments.length}>
-          Send
-        </button>
+        <>
+          {attachButton}
+          {counter}
+          {actionButton}
+        </>
       )}
     </form>
   );
