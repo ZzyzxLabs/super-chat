@@ -10,6 +10,9 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { isCardCarrier, type Card, type ContentPart, type MediaSource, type Message } from "@superchat/core";
 import { useAgentClient, useAttachments, useBranches, useCardAction, useCards, useRun, useThread } from "@superchat/react";
 import { CardRenderer, useCardRenderers } from "./renderer-registry.js";
+import { Orb } from "./agent/Orb.js";
+import { StreamingText } from "./agent/StreamingText.js";
+import { Thinking } from "./agent/Thinking.js";
 
 function partsOf(message: Message) {
   const cards: Card[] = [];
@@ -92,7 +95,9 @@ export function MessageView({ message, respond }: { message: Message; respond?: 
 
   return (
     <div className="sc-msg sc-msg--assistant">
-      {reasoning ? <ReasoningBlock text={reasoning} /> : null}
+      {/* A finished turn: the reasoning is complete, so it folds into its
+          "Thought for Ns" summary rather than taking up the thread. */}
+      {reasoning ? <Thinking text={reasoning} /> : null}
       {media.length ? <MediaParts parts={media} /> : null}
       {providerTools.length ? <ProviderToolChips items={providerTools} /> : null}
       {calls.length || results.length ? <ToolActivity calls={calls} results={results} /> : null}
@@ -233,18 +238,6 @@ function MediaParts({ parts }: { parts: Extract<ContentPart, { type: "image" | "
   );
 }
 
-function ReasoningBlock({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="sc-reasoning">
-      <button type="button" className="sc-btn sc-btn--ghost sc-btn--sm" onClick={() => setOpen((o) => !o)}>
-        {open ? "Hide reasoning" : "Show reasoning"}
-      </button>
-      {open ? <pre className="sc-pre sc-reasoning__body">{text}</pre> : null}
-    </div>
-  );
-}
-
 function ToolActivity({
   calls,
   results,
@@ -313,7 +306,9 @@ export function LiveTurn() {
           <span className="sc-pill">{run.job.status}</span>
         </div>
       ) : null}
-      {reasoning ? <ReasoningBlock text={reasoning} /> : null}
+      {/* Live: the reasoning stream stays open and scrolls itself until the
+          turn closes, at which point it collapses to its summary. */}
+      {reasoning ? <Thinking text={reasoning} streaming={run.status === "running"} /> : null}
       {providerTools.length ? <ProviderToolChips items={providerTools} /> : null}
       {calls.length ? <ToolActivity calls={calls} results={results} /> : null}
       {cards
@@ -324,11 +319,10 @@ export function LiveTurn() {
       {/* The blocking card renders last and un-collapsed — it is the thing the
           user must act on, so nothing may hide it. */}
       {pending ? <CardRenderer key={pending.id} card={pending} respond={respond} /> : null}
-      {text ? <div className="sc-prose sc-msg__text">{text}</div> : null}
-      {run.status === "running" && !text && !calls.length ? (
-        <div className="sc-muted">
-          <span className="sc-spinner" aria-hidden /> Thinking…
-        </div>
+      {text ? <StreamingText text={text} streaming={run.status === "running"} /> : null}
+      {/* Nothing to show yet — the orb carries the wait on its own. */}
+      {run.status === "running" && !text && !calls.length && !reasoning ? (
+        <Orb variant="S1" pill label="Thinking…" />
       ) : null}
     </div>
   );

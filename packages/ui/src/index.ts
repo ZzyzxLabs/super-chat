@@ -34,3 +34,38 @@ export { BUILTIN_RENDERERS } from "./cards/index.js";
 export { Thread, Composer, MessageView, LiveTurn } from "./Thread.js";
 export { ContextInspector } from "./ContextInspector.js";
 export { formatValue, formatDelta, toneClass, deltaTone } from "./format.js";
+
+export {
+  Orb,
+  ORB_TASKS,
+  ORB_VARIANTS,
+  LATTICE_VARIANTS,
+  LENS_VARIANTS,
+  RING_VARIANTS,
+  HELIX_VARIANTS,
+  MORPH_VARIANTS,
+  Thinking,
+  ThinkingState,
+  StreamingText,
+  Caret,
+  CodeBlock,
+  TodoList,
+  AgentInput,
+  type OrbProps,
+  type OrbVariant,
+  type LatticeVariant,
+  type LensVariant,
+  type RingVariant,
+  type HelixVariant,
+  type MorphVariant,
+  type ThinkingProps,
+  type StreamingTextProps,
+  type CodeBlockProps,
+  type TodoListProps,
+  type TodoItem,
+  type TodoStatus,
+  type AgentInputProps,
+  type AgentModel,
+  type AgentSkill,
+  type AgentAttachment,
+} from "./agent/index.js";

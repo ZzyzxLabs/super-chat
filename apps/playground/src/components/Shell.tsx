@@ -10,6 +10,7 @@ import type { ReactNode } from "react";
 const PANELS = [
   { href: "/", label: "Overview", hint: "What's in the box" },
   { href: "/cards", label: "Agent cards", hint: "20 kinds + their specs" },
+  { href: "/agent-ui", label: "Agent surfaces", hint: "Thinking, orbs, composer" },
   { href: "/skills", label: "Skills", hint: "Modes, matching, live scoring" },
   { href: "/tools", label: "Tools & presets", hint: "Schemas, capability gating" },
   { href: "/requests", label: "Wire requests", hint: "Responses vs Chat Completions" },

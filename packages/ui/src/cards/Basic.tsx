@@ -16,6 +16,7 @@ import type {
 } from "@superchat/core";
 import type { CardRendererProps } from "../renderer-registry.js";
 import { deltaTone, formatDelta, formatValue, toneClass } from "../format.js";
+import { CodeBlock } from "../agent/CodeBlock.js";
 
 export function TableCardView({ spec }: CardRendererProps<TableCard>) {
   const [sortBy, setSortBy] = useState(spec.sortBy);
@@ -239,29 +240,16 @@ export function MarkdownCardView({ spec }: CardRendererProps<MarkdownCard>) {
 }
 
 export function CodeCardView({ spec }: CardRendererProps<CodeCard>) {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(spec.code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked — the code is still selectable */
-    }
-  };
-
+  // The card is the code block — no surrounding sc-card shell, because
+  // CodeBlock already carries its own header, border and copy affordance.
   return (
-    <div className="sc-card">
-      <div className="sc-card__head">
-        <span className="sc-card__title">{spec.filename ?? spec.title ?? spec.language ?? "code"}</span>
-        <button type="button" className="sc-btn sc-btn--ghost" onClick={copy}>
-          {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
-      <pre className="sc-pre">
-        <code>{spec.code}</code>
-      </pre>
-    </div>
+    <CodeBlock
+      code={spec.code}
+      lang={spec.language}
+      filename={spec.filename ?? spec.title}
+      // A single line needs no gutter; numbering it is just noise.
+      lineNumbers={spec.code.trimEnd().includes("\n")}
+    />
   );
 }
 

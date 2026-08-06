@@ -523,3 +523,1003 @@
 .sc-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 5px; font-size: 12px; }
 .sc-note { padding: 8px 11px; border-radius: var(--sc-radius-sm); font-size: 12px; margin-bottom: 6px; }
 .sc-note--warning { background: color-mix(in srgb, var(--sc-warning) 14%, transparent); color: var(--sc-warning); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   agent surfaces
+   ──────────────────────────────────────────────────────────────────────────
+   Thinking states, orbs, code blocks, to-dos and the rich composer.
+
+   Everything below reads from the same tokens as the rules above, so the
+   light/dark handling is inherited rather than repeated: the reference designs
+   these follow hardcode a grey ramp per theme, and that ramp is exactly what
+   --sc-text-muted / --sc-surface already are.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── shimmer ──────────────────────────────────────────────────────────────
+   A brightness valley sweeping through the text. Painted as a wide gradient
+   clipped to the glyphs, so it costs one animated background-position and
+   never touches layout. */
+
+.sc-shimmer {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--sc-text-muted);
+}
+/* The shimmer only takes over the text colour where clipping a background to
+   the glyphs actually works. Without the guard, a browser that ignores
+   background-clip:text renders transparent text on a transparent background —
+   the label disappears rather than degrading to a plain one. */
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .sc-shimmer {
+    color: transparent;
+    -webkit-text-fill-color: transparent;
+    background: linear-gradient(
+      90deg,
+      var(--sc-text-muted) 0%,
+      var(--sc-text-muted) 30%,
+      color-mix(in srgb, var(--sc-text-muted) 45%, transparent) 45%,
+      color-mix(in srgb, var(--sc-text-muted) 45%, transparent) 55%,
+      var(--sc-text-muted) 70%,
+      var(--sc-text-muted) 100%
+    );
+    background-size: 300% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    animation: sc-shine 2.25s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+  }
+}
+
+@keyframes sc-shine {
+  0%, 18% { background-position: 100% 0; }
+  82%, 100% { background-position: 0% 0; }
+}
+
+/* ── thinking + reasoning ─────────────────────────────────────────────── */
+
+.sc-think {
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  margin-bottom: 10px;
+  animation: sc-fade-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes sc-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.sc-think__head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  min-height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: default;
+}
+.sc-think__head--clickable { cursor: pointer; }
+
+.sc-think__label {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+  /* softer than the verb, so "for Ns" sits behind it in the hierarchy */
+  color: color-mix(in srgb, var(--sc-text-muted) 78%, transparent);
+  letter-spacing: -0.005em;
+}
+.sc-think__verb { color: var(--sc-text-muted); }
+
+.sc-think__chevron {
+  color: var(--sc-text-muted);
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+  /* the path is an up caret; the collapsed summary points down */
+  transform: rotate(180deg);
+}
+.sc-think__head[aria-expanded="true"] .sc-think__chevron { transform: rotate(0deg); }
+
+.sc-think__collapsible {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 220ms ease;
+}
+.sc-think__collapsible--closed { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
+.sc-think__inner { min-height: 0; overflow: hidden; }
+
+/* The viewport grows with the content, then caps. While thinking the stream is
+   pushed up behind a soft fade; once the user unfolds it, it scrolls natively
+   and the fades follow the scroll position. */
+.sc-think__viewport {
+  margin-top: 6px;
+  overflow: hidden;
+  transition: height 360ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.sc-think__viewport--scroll { overflow-y: auto; scrollbar-width: none; }
+.sc-think__viewport--scroll::-webkit-scrollbar { display: none; }
+
+.sc-think__stream {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: transform 560ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.sc-think__line {
+  margin: 0;
+  height: 40px;
+  line-height: 20px;
+  font-size: 13px;
+  font-weight: 425;
+  color: var(--sc-text-muted);
+  letter-spacing: -0.005em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  animation: sc-fade-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ── streaming caret ──────────────────────────────────────────────────── */
+
+.sc-caret {
+  display: inline-block;
+  width: 8px;
+  height: 1.05em;
+  margin-left: 2px;
+  background: var(--sc-text);
+  vertical-align: text-bottom;
+  animation: sc-caret-blink 1s step-end infinite;
+}
+/* solid while tokens land; a caret that blinks mid-stream reads as a stall */
+.sc-caret--steady { animation: none; opacity: 1; }
+@keyframes sc-caret-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+
+/* ── orb ──────────────────────────────────────────────────────────────────
+   Geometry comes in as custom properties from Orb.tsx; these keyframes only
+   interpolate between the positions it computed. */
+
+.sc-orb {
+  --sc-orb-ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+  --sc-orb-ease-in-out: cubic-bezier(0.66, 0, 0.34, 1);
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  color: var(--sc-text);
+}
+.sc-orb[data-pill] {
+  gap: 7px;
+  height: 30px;
+  padding: 0 11px 0 5px;
+  border-radius: 999px;
+  background: var(--sc-bg);
+  border: 1px solid var(--sc-border);
+}
+.sc-orb__label {
+  font-size: 11.5px;
+  font-weight: 425;
+  line-height: 1;
+  color: var(--sc-text-muted);
+  white-space: nowrap;
+}
+.sc-orb__glyph {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  overflow: hidden;
+  contain: strict;
+}
+
+/* lattice (S) */
+.sc-orb__lattice {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 28px;
+  height: 28px;
+  transform-origin: 0 0;
+  transform: scale(var(--sc-orb-k, 1)) translate(6.5px, 6.5px);
+  --sc-orb-rest: 0.17;
+  --sc-orb-dim: 0.08;
+}
+.sc-orb__cell {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: var(--sc-orb-rest);
+}
+.sc-orb__lattice[data-variant="S1"] .sc-orb__cell,
+.sc-orb__lattice[data-variant="S2"] .sc-orb__cell { animation: sc-orb-wave 1.7s var(--sc-orb-ease-in-out) infinite both; }
+.sc-orb__lattice[data-variant="S4"] .sc-orb__cell { animation: sc-orb-wave 1.6s var(--sc-orb-ease-in-out) infinite both; }
+.sc-orb__lattice[data-variant="S3"] .sc-orb__cell,
+.sc-orb__lattice[data-variant="S5"] .sc-orb__cell { animation: sc-orb-comet 1.7s var(--sc-orb-ease-smooth) infinite both; }
+.sc-orb__lattice[data-variant="S3"] .sc-orb__cell[data-still],
+.sc-orb__lattice[data-variant="S5"] .sc-orb__cell[data-still] { animation: none; opacity: var(--sc-orb-dim); }
+
+@keyframes sc-orb-wave {
+  0% { opacity: var(--sc-orb-rest); transform: scale(1); animation-timing-function: cubic-bezier(0.66, 0, 0.34, 1); }
+  28% { opacity: 1; transform: scale(1.18); animation-timing-function: cubic-bezier(0.66, 0, 0.34, 1); }
+  56%, 100% { opacity: var(--sc-orb-rest); transform: scale(1); }
+}
+@keyframes sc-orb-comet {
+  0% { opacity: 1; transform: scale(1.2); animation-timing-function: linear; }
+  45%, 100% { opacity: var(--sc-orb-rest); transform: scale(1); }
+}
+
+/* lens (B) */
+.sc-orb__lens {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 28px;
+  height: 28px;
+  transform-origin: 0 0;
+  transform: scale(var(--sc-orb-k, 1));
+}
+.sc-orb__shape {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--sc-orb-d, 7px);
+  height: var(--sc-orb-d, 7px);
+  margin: calc(var(--sc-orb-d, 7px) / -2) 0 0 calc(var(--sc-orb-d, 7px) / -2);
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.sc-orb__lens[data-variant="B1"] .sc-orb__shape { --sc-orb-d: 6px; animation: sc-orb-focus 4s var(--sc-orb-ease-smooth) infinite both; }
+.sc-orb__lens[data-variant="B1"] .sc-orb__shape--a { --sc-orb-ox: -4.5px; --sc-orb-oy: -4.5px; animation-delay: 0s; }
+.sc-orb__lens[data-variant="B1"] .sc-orb__shape--b { --sc-orb-ox: 4.5px; --sc-orb-oy: -4.5px; animation-delay: -3s; }
+.sc-orb__lens[data-variant="B1"] .sc-orb__shape--c { --sc-orb-ox: 4.5px; --sc-orb-oy: 4.5px; animation-delay: -2s; }
+.sc-orb__lens[data-variant="B1"] .sc-orb__shape--d { --sc-orb-ox: -4.5px; --sc-orb-oy: 4.5px; animation-delay: -1s; }
+
+@keyframes sc-orb-focus {
+  0%, 100% { opacity: 0.05; filter: blur(2px); transform: translate(var(--sc-orb-ox), var(--sc-orb-oy)) scale(1.12); animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+  12% { opacity: 1; filter: blur(0); transform: translate(var(--sc-orb-ox), var(--sc-orb-oy)) scale(1); animation-timing-function: linear; }
+  22% { opacity: 1; filter: blur(0); transform: translate(var(--sc-orb-ox), var(--sc-orb-oy)) scale(1); animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+  38% { opacity: 0.3; filter: blur(1.2px); transform: translate(var(--sc-orb-ox), var(--sc-orb-oy)) scale(1.06); animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1); }
+  58% { opacity: 0.1; filter: blur(1.8px); transform: translate(var(--sc-orb-ox), var(--sc-orb-oy)) scale(1.1); animation-timing-function: linear; }
+  82% { opacity: 0.05; filter: blur(2px); transform: translate(var(--sc-orb-ox), var(--sc-orb-oy)) scale(1.12); }
+}
+
+.sc-orb__lens[data-variant="B2"] .sc-orb__shape { animation: sc-orb-revolve 3.3s linear infinite both; }
+.sc-orb__lens[data-variant="B2"] .sc-orb__shape--b { animation-delay: -1.1s; }
+.sc-orb__lens[data-variant="B2"] .sc-orb__shape--c { animation-delay: -2.2s; }
+
+@keyframes sc-orb-revolve {
+  0% { opacity: 1; filter: blur(0); transform: rotate(0deg) translateY(6.5px) scale(1); }
+  25% { opacity: 0.55; filter: blur(1.3px); transform: rotate(90deg) translateY(6.5px) scale(0.82); }
+  50% { opacity: 0.28; filter: blur(2.4px); transform: rotate(180deg) translateY(6.5px) scale(0.66); }
+  75% { opacity: 0.55; filter: blur(1.3px); transform: rotate(270deg) translateY(6.5px) scale(0.82); }
+  100% { opacity: 1; filter: blur(0); transform: rotate(360deg) translateY(6.5px) scale(1); }
+}
+
+.sc-orb__lens[data-variant="B3"] .sc-orb__shape { animation: sc-orb-bloom 4.2s linear infinite both; }
+.sc-orb__lens[data-variant="B3"] .sc-orb__shape--b { animation-delay: -1.4s; }
+.sc-orb__lens[data-variant="B3"] .sc-orb__shape--c { animation-delay: -2.8s; }
+
+@keyframes sc-orb-bloom {
+  0% { opacity: 0; filter: blur(0); transform: scale(0.35); animation-timing-function: cubic-bezier(0, 0, 0.2, 1); }
+  8% { opacity: 1; filter: blur(0); transform: scale(0.55); animation-timing-function: linear; }
+  24% { opacity: 1; filter: blur(0); transform: scale(0.72); animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); }
+  42% { opacity: 0.1; filter: blur(1.8px); transform: scale(1.5); }
+  62%, 100% { opacity: 0; filter: blur(2.8px); transform: scale(2.4); }
+}
+
+.sc-orb__lens[data-variant="B4"] .sc-orb__shape--a { animation: sc-orb-converge 3.6s linear infinite both; }
+.sc-orb__lens[data-variant="B4"] .sc-orb__shape--b { animation: sc-orb-breathe 3.6s ease-in-out infinite both; }
+.sc-orb__lens[data-variant="B4"] .sc-orb__shape--c { display: none; }
+
+@keyframes sc-orb-converge {
+  0% { transform: translate(0px, -5px) scale(1); filter: blur(0); animation-timing-function: linear; }
+  10% { transform: translate(0px, -5px) scale(1); filter: blur(0); animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45); }
+  22% { transform: translate(2.15px, -1.25px) scale(0.72); filter: blur(0.8px); animation-timing-function: cubic-bezier(0.33, 1, 0.68, 1); }
+  33% { transform: translate(4.3px, 2.5px) scale(1); filter: blur(0); animation-timing-function: linear; }
+  43% { transform: translate(4.3px, 2.5px) scale(1); filter: blur(0); animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45); }
+  55% { transform: translate(0px, 2.5px) scale(0.72); filter: blur(0.8px); animation-timing-function: cubic-bezier(0.33, 1, 0.68, 1); }
+  66% { transform: translate(-4.3px, 2.5px) scale(1); filter: blur(0); animation-timing-function: linear; }
+  77% { transform: translate(-4.3px, 2.5px) scale(1); filter: blur(0); animation-timing-function: cubic-bezier(0.55, 0, 1, 0.45); }
+  88% { transform: translate(-2.15px, -1.25px) scale(0.72); filter: blur(0.8px); animation-timing-function: cubic-bezier(0.33, 1, 0.68, 1); }
+  100% { transform: translate(0px, -5px) scale(1); filter: blur(0); }
+}
+
+.sc-orb__lens[data-variant="B5"] .sc-orb__shape { animation: sc-orb-handoff 2.8s linear infinite both; }
+.sc-orb__lens[data-variant="B5"] .sc-orb__shape--c { animation-delay: -1.4s; }
+.sc-orb__lens[data-variant="B5"] .sc-orb__shape--b { animation-name: sc-orb-breathe; animation-duration: 3.6s; }
+
+@keyframes sc-orb-handoff {
+  0% { opacity: 0; filter: blur(2.4px); transform: translateX(-11px) scale(0.55); animation-timing-function: cubic-bezier(0.33, 1, 0.68, 1); }
+  22% { opacity: 1; filter: blur(0); transform: translateX(-1px) scale(1); animation-timing-function: linear; }
+  37% { opacity: 1; filter: blur(0); transform: translateX(0) scale(1); animation-timing-function: linear; }
+  52% { opacity: 1; filter: blur(0); transform: translateX(1px) scale(1); animation-timing-function: cubic-bezier(0.33, 1, 0.68, 1); }
+  70%, 100% { opacity: 0; filter: blur(2.4px); transform: translateX(11px) scale(0.55); }
+}
+
+@keyframes sc-orb-breathe {
+  0%, 100% { opacity: 0.16; filter: blur(2.4px); transform: scale(1.2); }
+  50% { opacity: 0.32; filter: blur(1.6px); transform: scale(0.98); }
+}
+
+/* ring (C) */
+.sc-orb__ring { position: absolute; inset: 0; transform: scale(var(--sc-orb-k, 1)); --sc-orb-ring-rest: 0.26; }
+.sc-orb__ringdot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%;
+  background: currentColor;
+  transform: translate(var(--sc-orb-rx), var(--sc-orb-ry));
+}
+.sc-orb__ring[data-variant="C1"] .sc-orb__ringdot { opacity: var(--sc-orb-ring-rest); animation: sc-orb-ring-chase 1.6s linear infinite both; }
+@keyframes sc-orb-ring-chase {
+  0%, 11% { opacity: 1; }
+  12.5%, 100% { opacity: var(--sc-orb-ring-rest); }
+}
+.sc-orb__ring[data-variant="C2"] .sc-orb__ringdot { animation: sc-orb-ring-pulse 2s ease-in-out infinite both; }
+@keyframes sc-orb-ring-pulse {
+  0%, 100% { opacity: 0.18; transform: translate(var(--sc-orb-rx), var(--sc-orb-ry)) scale(0.7); }
+  50% { opacity: 1; transform: translate(var(--sc-orb-rx), var(--sc-orb-ry)) scale(1.15); }
+}
+.sc-orb__ring[data-variant="C3"] .sc-orb__ringdot,
+.sc-orb__ring[data-variant="C5"] .sc-orb__ringdot { animation: sc-orb-ring-comet 1.8s ease-in-out infinite both; }
+@keyframes sc-orb-ring-comet {
+  0%, 100% { opacity: 0.08; }
+  12% { opacity: 1; animation-timing-function: cubic-bezier(0.33, 1, 0.68, 1); }
+  35% { opacity: 0.5; }
+  60% { opacity: 0.12; }
+}
+.sc-orb__ring[data-variant="C4"] .sc-orb__ringdot { animation: sc-orb-ring-stagger 1.6s ease-in-out infinite both; }
+@keyframes sc-orb-ring-stagger {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.15; }
+}
+
+/* helix (G) — a projected wireframe globe */
+.sc-orb__helix { position: absolute; inset: 0; transform: scale(var(--sc-orb-k, 1)); }
+.sc-orb__helixdot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 2px;
+  height: 2px;
+  margin: -1px 0 0 -1px;
+  border-radius: 50%;
+  background: currentColor;
+  /* the first baked pose, so a dot that is not animating still sits on the
+     sphere instead of collapsing onto the centre */
+  transform: translate(var(--sc-g0x), var(--sc-g0y));
+  opacity: var(--sc-g0o);
+  will-change: transform, opacity;
+}
+.sc-orb__helix[data-variant="G1"] .sc-orb__helixdot { animation: sc-orb-globe-spin 4.5s linear infinite both; }
+.sc-orb__helix[data-variant="G2"] .sc-orb__helixdot { animation: sc-orb-globe-spin 3.6s linear infinite both; }
+.sc-orb__helix[data-variant="G3"] .sc-orb__helixdot,
+.sc-orb__helix[data-variant="G4"] .sc-orb__helixdot { animation: sc-orb-globe-ringturn 2.8s linear infinite both; }
+.sc-orb__helix[data-variant="G5"] .sc-orb__helixdot { animation: sc-orb-globe-breathe 3.6s linear infinite both; }
+
+@keyframes sc-orb-globe-spin {
+  0%, 100% { transform: translate(var(--sc-g0x), var(--sc-g0y)); opacity: var(--sc-g0o); }
+  12.5% { transform: translate(var(--sc-g1x), var(--sc-g1y)); opacity: var(--sc-g1o); }
+  25% { transform: translate(var(--sc-g2x), var(--sc-g2y)); opacity: var(--sc-g2o); }
+  37.5% { transform: translate(var(--sc-g3x), var(--sc-g3y)); opacity: var(--sc-g3o); }
+  50% { transform: translate(var(--sc-g4x), var(--sc-g4y)); opacity: var(--sc-g4o); }
+  62.5% { transform: translate(var(--sc-g5x), var(--sc-g5y)); opacity: var(--sc-g5o); }
+  75% { transform: translate(var(--sc-g6x), var(--sc-g6y)); opacity: var(--sc-g6o); }
+  87.5% { transform: translate(var(--sc-g7x), var(--sc-g7y)); opacity: var(--sc-g7o); }
+}
+
+@keyframes sc-orb-globe-ringturn {
+  0% { transform: translate(var(--sc-g0x), var(--sc-g0y)); opacity: var(--sc-g0o); }
+  2.5% { transform: translate(var(--sc-g1x), var(--sc-g1y)); opacity: var(--sc-g1o); }
+  5% { transform: translate(var(--sc-g2x), var(--sc-g2y)); opacity: var(--sc-g2o); }
+  7.5%, 10% { transform: translate(var(--sc-g3x), var(--sc-g3y)); opacity: var(--sc-g3o); }
+  12.5% { transform: translate(var(--sc-g4x), var(--sc-g4y)); opacity: var(--sc-g4o); }
+  15% { transform: translate(var(--sc-g5x), var(--sc-g5y)); opacity: var(--sc-g5o); }
+  17.5%, 20% { transform: translate(var(--sc-g6x), var(--sc-g6y)); opacity: var(--sc-g6o); }
+  22.5% { transform: translate(var(--sc-g7x), var(--sc-g7y)); opacity: var(--sc-g7o); }
+  25% { transform: translate(var(--sc-g8x), var(--sc-g8y)); opacity: var(--sc-g8o); }
+  27.5%, 30% { transform: translate(var(--sc-g9x), var(--sc-g9y)); opacity: var(--sc-g9o); }
+  32.5% { transform: translate(var(--sc-g10x), var(--sc-g10y)); opacity: var(--sc-g10o); }
+  35% { transform: translate(var(--sc-g11x), var(--sc-g11y)); opacity: var(--sc-g11o); }
+  37.5%, 40% { transform: translate(var(--sc-g12x), var(--sc-g12y)); opacity: var(--sc-g12o); }
+  42.5% { transform: translate(var(--sc-g13x), var(--sc-g13y)); opacity: var(--sc-g13o); }
+  45% { transform: translate(var(--sc-g14x), var(--sc-g14y)); opacity: var(--sc-g14o); }
+  47.5%, 50% { transform: translate(var(--sc-g15x), var(--sc-g15y)); opacity: var(--sc-g15o); }
+  52.5% { transform: translate(var(--sc-g16x), var(--sc-g16y)); opacity: var(--sc-g16o); }
+  55% { transform: translate(var(--sc-g17x), var(--sc-g17y)); opacity: var(--sc-g17o); }
+  57.5%, 60% { transform: translate(var(--sc-g18x), var(--sc-g18y)); opacity: var(--sc-g18o); }
+  62.5% { transform: translate(var(--sc-g19x), var(--sc-g19y)); opacity: var(--sc-g19o); }
+  65% { transform: translate(var(--sc-g20x), var(--sc-g20y)); opacity: var(--sc-g20o); }
+  67.5%, 70% { transform: translate(var(--sc-g21x), var(--sc-g21y)); opacity: var(--sc-g21o); }
+  72.5% { transform: translate(var(--sc-g22x), var(--sc-g22y)); opacity: var(--sc-g22o); }
+  75% { transform: translate(var(--sc-g23x), var(--sc-g23y)); opacity: var(--sc-g23o); }
+  77.5%, 80% { transform: translate(var(--sc-g24x), var(--sc-g24y)); opacity: var(--sc-g24o); }
+  82.5% { transform: translate(var(--sc-g25x), var(--sc-g25y)); opacity: var(--sc-g25o); }
+  85% { transform: translate(var(--sc-g26x), var(--sc-g26y)); opacity: var(--sc-g26o); }
+  87.5%, 90% { transform: translate(var(--sc-g27x), var(--sc-g27y)); opacity: var(--sc-g27o); }
+  92.5% { transform: translate(var(--sc-g28x), var(--sc-g28y)); opacity: var(--sc-g28o); }
+  95% { transform: translate(var(--sc-g29x), var(--sc-g29y)); opacity: var(--sc-g29o); }
+  97.5%, 100% { transform: translate(var(--sc-g30x), var(--sc-g30y)); opacity: var(--sc-g30o); }
+}
+
+@keyframes sc-orb-globe-breathe {
+  0% { transform: translate(var(--sc-g0x), var(--sc-g0y)); opacity: var(--sc-g0o); }
+  19% { transform: translate(var(--sc-g1x), var(--sc-g1y)); opacity: var(--sc-g1o); }
+  25% { transform: translate(var(--sc-g2x), var(--sc-g2y)); opacity: var(--sc-g2o); }
+  44% { transform: translate(var(--sc-g3x), var(--sc-g3y)); opacity: var(--sc-g3o); }
+  50% { transform: translate(var(--sc-g4x), var(--sc-g4y)); opacity: var(--sc-g4o); }
+  69% { transform: translate(var(--sc-g5x), var(--sc-g5y)); opacity: var(--sc-g5o); }
+  75% { transform: translate(var(--sc-g6x), var(--sc-g6y)); opacity: var(--sc-g6o); }
+  94% { transform: translate(var(--sc-g7x), var(--sc-g7y)); opacity: var(--sc-g7o); }
+  100% { transform: translate(var(--sc-g8x), var(--sc-g8y)); opacity: var(--sc-g8o); }
+}
+
+/* morph (M) */
+.sc-orb__morph { position: absolute; inset: 0; transform: scale(var(--sc-orb-k, 1)); }
+.sc-orb__morphdot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 3px;
+  margin: -1.5px 0 0 -1.5px;
+  border-radius: 50%;
+  background: currentColor;
+  transform: translate(var(--sc-m1)); /* resting shape, see .sc-orb__helixdot */
+  animation: sc-orb-morph 4.8s cubic-bezier(0.4, 0, 0.2, 1) infinite both;
+}
+@keyframes sc-orb-morph {
+  0%, 5% { transform: translate(var(--sc-m1)); }
+  25%, 30% { transform: translate(var(--sc-m2)); }
+  50%, 55% { transform: translate(var(--sc-m3)); }
+  75%, 80% { transform: translate(var(--sc-m4)); }
+  100% { transform: translate(var(--sc-m1)); }
+}
+.sc-orb__morph[data-variant="M2"],
+.sc-orb__morph[data-variant="M4"] { animation: sc-orb-morph-twist 9.6s linear infinite; }
+.sc-orb__morph[data-variant="M5"] .sc-orb__morphdot { animation: sc-orb-morph-scatter 2.8s cubic-bezier(0.4, 0, 0.2, 1) infinite both; }
+@keyframes sc-orb-morph-scatter {
+  0%, 12% { transform: translate(var(--sc-m1)); opacity: 1; }
+  38%, 62% { transform: translate(var(--sc-m2)); opacity: calc(1 - 0.6 * var(--sc-m-depth, 0)); }
+  88%, 100% { transform: translate(var(--sc-m1)); opacity: 1; }
+}
+@keyframes sc-orb-morph-twist {
+  from { transform: scale(var(--sc-orb-k, 1)) rotate(0deg); }
+  to { transform: scale(var(--sc-orb-k, 1)) rotate(360deg); }
+}
+
+/* ── code block ───────────────────────────────────────────────────────────
+   The gutter is a real grid column, not a ::before counter, so a hand
+   selection copies the code without dragging the line numbers along. */
+
+.sc-code {
+  margin: 10px 0;
+  border-radius: var(--sc-radius);
+  background: var(--sc-bg);
+  border: 1px solid var(--sc-border);
+  overflow: hidden;
+}
+.sc-code__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 12px;
+  border-bottom: 1px solid var(--sc-border);
+}
+.sc-code__file { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.sc-code__icon { display: block; color: var(--sc-text-muted); flex: none; }
+.sc-code__lang {
+  font-family: var(--sc-mono);
+  font-size: 12.5px;
+  line-height: 1;
+  color: var(--sc-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sc-code__copy {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  font: inherit;
+  font-size: 12px;
+  color: var(--sc-text-muted);
+  border: 0;
+  background: none;
+  padding: 3px 6px;
+  border-radius: var(--sc-radius-sm);
+  cursor: pointer;
+}
+.sc-code__copy:hover { color: var(--sc-text); background: var(--sc-surface-2); }
+
+.sc-code__body {
+  position: relative;
+  padding: 10px 0;
+  font-family: var(--sc-mono);
+  font-size: 12.5px;
+  line-height: 20px;
+  overflow-x: auto;
+}
+/* the gutter rule, drawn once rather than per row */
+.sc-code__body::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 32px;
+  width: 1px;
+  background: var(--sc-border);
+}
+.sc-code__body--nogutter::before { display: none; }
+.sc-code__row { display: grid; grid-template-columns: 32px 1fr; min-width: min-content; }
+.sc-code__body--nogutter .sc-code__row { grid-template-columns: 1fr; }
+.sc-code__row--mark { background: color-mix(in srgb, var(--sc-accent) 10%, transparent); }
+.sc-code__ln {
+  user-select: none;
+  text-align: right;
+  padding: 0 7px;
+  color: var(--sc-text-muted);
+  font-size: 11px;
+}
+.sc-code__line { white-space: pre; padding: 0 12px 0 8px; color: var(--sc-text); }
+
+/* ── to-do list ───────────────────────────────────────────────────────── */
+
+.sc-todo {
+  margin: 10px 0;
+  font-size: 13px;
+  color: var(--sc-text);
+  background: var(--sc-surface);
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-radius);
+  padding: 8px 12px 12px;
+}
+.sc-todo__head {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--sc-text);
+  font: inherit;
+  font-size: 13px;
+  min-height: 22px;
+}
+.sc-todo__headicon { position: relative; width: 16px; height: 16px; flex: none; color: var(--sc-text-muted); }
+.sc-todo__headlist, .sc-todo__chevron, .sc-todo__headcheck { position: absolute; inset: 0; margin: auto; transition: opacity 140ms ease; }
+.sc-todo__headlist, .sc-todo__chevron { width: 13px; height: 13px; }
+/* the solid check reads smaller than an outlined glyph, so render it full size */
+.sc-todo__headcheck { width: 16px; height: 16px; color: var(--sc-positive); }
+.sc-todo__chevron { opacity: 0; transition: opacity 140ms ease, transform 220ms ease; }
+.sc-todo__head[aria-expanded="false"] .sc-todo__chevron { transform: rotate(-90deg); }
+/* hovering the header swaps whichever status glyph is showing for the chevron */
+.sc-todo__head:hover .sc-todo__headlist,
+.sc-todo__head:hover .sc-todo__pie,
+.sc-todo__head:hover .sc-todo__headcheck { opacity: 0; }
+.sc-todo__head:hover .sc-todo__chevron { opacity: 1; }
+.sc-todo__title { font-weight: 500; }
+.sc-todo__count { margin-left: auto; color: var(--sc-text-muted); font-variant-numeric: tabular-nums; }
+
+.sc-roll { display: inline-flex; align-items: baseline; }
+.sc-roll__digit { display: inline-block; overflow: hidden; height: 1em; line-height: 1em; }
+.sc-roll__inner { display: flex; flex-direction: column; transition: transform 350ms cubic-bezier(0.4, 0, 0.2, 1); }
+.sc-roll__inner span { height: 1em; line-height: 1em; }
+.sc-roll__inner--up { transform: translateY(-1em); }
+
+.sc-todo__collapsible {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows 280ms ease, opacity 200ms ease;
+}
+.sc-todo__collapsible--closed { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
+.sc-todo__inner { min-height: 0; overflow: hidden; }
+.sc-todo__list { list-style: none; display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 10px 0 0; }
+.sc-todo__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  line-height: 18px;
+  color: var(--sc-text-muted);
+  animation: sc-todo-in 360ms ease backwards;
+  animation-delay: calc(var(--sc-i, 0) * 50ms);
+}
+@keyframes sc-todo-in {
+  from { opacity: 0; transform: translateY(-7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.sc-todo__iconwrap { position: relative; width: 16px; height: 16px; flex: none; margin-top: 1px; }
+.sc-todo__icon {
+  position: absolute;
+  inset: 0;
+  width: 16px;
+  height: 16px;
+  color: var(--sc-text-muted);
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+.sc-todo__icon--on { opacity: 1; }
+.sc-todo__icon--strong { color: var(--sc-text); }
+.sc-todo__icon--blocked { color: var(--sc-negative); }
+
+.sc-todo__label { position: relative; font-weight: 400; color: var(--sc-text-muted); }
+/* The shimmer is an overlay that ADDS brightness at the gradient's peaks; the
+   label underneath keeps a readable colour in every state. The obvious way to
+   write this — make the label transparent and let a gradient-clipped copy be
+   the only visible text — has a bad failure mode: anything that stops the
+   overlay from painting (a stalled transition, no background-clip support)
+   leaves the item blank. Here the worst case is a label that shimmers when it
+   should not. */
+.sc-todo__label::before {
+  content: attr(data-label);
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    var(--sc-text) 0%,
+    var(--sc-text) 30%,
+    transparent 45%,
+    transparent 55%,
+    var(--sc-text) 70%,
+    var(--sc-text) 100%
+  );
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  opacity: 0;
+  transition: opacity 360ms ease;
+  pointer-events: none;
+}
+.sc-todo__item--active .sc-todo__label::before {
+  opacity: 1;
+  animation: sc-shine 2.25s cubic-bezier(0.25, 0.1, 0.25, 1) infinite;
+}
+.sc-todo__item--done .sc-todo__label { color: var(--sc-text-muted); text-decoration: line-through; }
+.sc-todo__item--blocked .sc-todo__label { color: var(--sc-negative); }
+
+/* determinate progress pie in the header: filled share = done / total */
+@property --sc-todo-pie {
+  syntax: "<percentage>";
+  inherits: true;
+  initial-value: 0%;
+}
+.sc-todo__pie {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  color: var(--sc-text);
+  transition: opacity 140ms ease, --sc-todo-pie 400ms ease;
+}
+/* dotted outline, matching the pending items' circles */
+.sc-todo__piering { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; color: var(--sc-text-muted); }
+.sc-todo__pie::after {
+  content: "";
+  position: absolute;
+  inset: 2.6px;
+  border-radius: 50%;
+  background: conic-gradient(currentColor var(--sc-todo-pie, 0%), transparent 0);
+}
+
+/* ── data table (bordered grid variant) ───────────────────────────────── */
+
+.sc-table--grid { border-collapse: separate; border-spacing: 0; border: 1px solid var(--sc-border); border-radius: var(--sc-radius); overflow: hidden; background: var(--sc-bg); }
+.sc-table--grid th, .sc-table--grid td { border-bottom: 1px solid var(--sc-border); border-right: 1px solid var(--sc-border); padding: 9px 12px; }
+.sc-table--grid th:last-child, .sc-table--grid td:last-child { border-right: none; }
+.sc-table--grid tbody tr:last-child td { border-bottom: none; }
+.sc-table--grid thead th { background: var(--sc-surface); }
+
+/* ── agent input ──────────────────────────────────────────────────────── */
+
+.sc-ai { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; }
+.sc-ai[data-disabled] { opacity: 0.6; pointer-events: none; }
+
+.sc-ai__attachments { display: flex; flex-wrap: wrap; gap: 6px; }
+.sc-ai__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 6px 4px 9px;
+  border-radius: 999px;
+  background: var(--sc-surface-2);
+  border: 1px solid var(--sc-border);
+  font-size: 12px;
+  animation: sc-fade-in 200ms ease both;
+}
+.sc-ai__chip-icon { display: inline-flex; color: var(--sc-text-muted); flex: none; }
+.sc-ai__chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-ai__chip-x {
+  display: inline-flex;
+  padding: 2px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--sc-text-muted);
+  cursor: pointer;
+  flex: none;
+}
+.sc-ai__chip-x:hover { color: var(--sc-text); background: var(--sc-border); }
+
+.sc-ai__frame {
+  position: relative;
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-radius);
+  background: var(--sc-surface);
+  transition: border-color 140ms ease;
+}
+.sc-ai__frame:focus-within { border-color: color-mix(in srgb, var(--sc-accent) 55%, var(--sc-border)); }
+
+.sc-ai__editor {
+  min-height: 44px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 12px 14px 4px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--sc-text);
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.sc-ai__editor[data-empty]::before {
+  content: attr(data-placeholder);
+  color: var(--sc-text-muted);
+  pointer-events: none;
+}
+
+/* skill pills live inline with the text and delete as one unit */
+.sc-ai__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0 2px 0 1px;
+  padding: 1px 3px 1px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--sc-accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sc-accent) 38%, transparent);
+  color: var(--sc-accent);
+  font-size: 12.5px;
+  vertical-align: baseline;
+  user-select: none;
+}
+.sc-ai__pill[data-start] { margin-left: 0; }
+.sc-ai__pill-label { line-height: 1.4; }
+.sc-ai__pill-x {
+  display: inline-flex;
+  padding: 1px;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: inherit;
+  opacity: 0.65;
+  cursor: pointer;
+}
+.sc-ai__pill-x:hover { opacity: 1; }
+
+.sc-ai__palette {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px;
+  border-radius: var(--sc-radius);
+  border: 1px solid var(--sc-border);
+  background: var(--sc-bg);
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 14%, transparent);
+}
+.sc-ai__paletteitem {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--sc-radius-sm);
+  background: none;
+  color: var(--sc-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sc-ai__paletteitem--on { background: var(--sc-surface-2); }
+.sc-ai__palettename { font-size: 13px; font-weight: 500; }
+.sc-ai__palettedesc { font-size: 11px; color: var(--sc-text-muted); }
+
+.sc-ai__bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px 10px; }
+.sc-ai__left, .sc-ai__right { display: flex; align-items: center; gap: 6px; }
+.sc-ai__right { margin-left: auto; }
+
+.sc-ai__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--sc-border);
+  border-radius: 50%;
+  background: var(--sc-bg);
+  color: var(--sc-text-muted);
+  cursor: pointer;
+}
+.sc-ai__icon:hover:not(:disabled) { color: var(--sc-text); background: var(--sc-surface-2); }
+.sc-ai__icon:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.sc-ai__menuwrap { position: relative; }
+.sc-ai__menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  min-width: 190px;
+  padding: 4px;
+  border-radius: var(--sc-radius);
+  border: 1px solid var(--sc-border);
+  background: var(--sc-bg);
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 14%, transparent);
+  animation: sc-fade-in 120ms ease both;
+}
+.sc-ai__menu--wide { min-width: 280px; }
+.sc-ai__menuitem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--sc-radius-sm);
+  background: none;
+  color: var(--sc-text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.sc-ai__menuitem:hover { background: var(--sc-surface-2); }
+.sc-ai__menuchevron { margin-left: auto; color: var(--sc-text-muted); display: inline-flex; }
+.sc-ai__submenuwrap { position: relative; }
+.sc-ai__submenu {
+  position: absolute;
+  left: calc(100% + 4px);
+  bottom: 0;
+  min-width: 170px;
+  padding: 4px;
+  border-radius: var(--sc-radius);
+  border: 1px solid var(--sc-border);
+  background: var(--sc-bg);
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 14%, transparent);
+}
+
+.sc-ai__model {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid var(--sc-border);
+  border-radius: 999px;
+  background: var(--sc-bg);
+  color: var(--sc-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sc-ai__model:hover:not(:disabled) { color: var(--sc-text); background: var(--sc-surface-2); }
+.sc-ai__modelitem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: var(--sc-radius-sm);
+  background: none;
+  color: var(--sc-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.sc-ai__modelitem:hover { background: var(--sc-surface-2); }
+.sc-ai__modelhead { display: flex; align-items: center; gap: 6px; }
+.sc-ai__modelname { font-size: 13px; font-weight: 500; }
+.sc-ai__modelcheck { margin-left: auto; color: var(--sc-accent); display: inline-flex; }
+.sc-ai__modeldesc { font-size: 11.5px; color: var(--sc-text-muted); line-height: 1.4; }
+.sc-ai__modelctx { font-size: 11px; color: var(--sc-text-muted); font-variant-numeric: tabular-nums; }
+
+.sc-ai__enhance {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--sc-border);
+  border-radius: 999px;
+  background: var(--sc-bg);
+  color: var(--sc-text-muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  animation: sc-fade-in 160ms ease both;
+}
+.sc-ai__enhance:hover { color: var(--sc-text); background: var(--sc-surface-2); }
+.sc-ai__enhance--on { color: var(--sc-accent); border-color: color-mix(in srgb, var(--sc-accent) 45%, var(--sc-border)); }
+
+.sc-ai__send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--sc-accent);
+  color: var(--sc-accent-contrast);
+  cursor: pointer;
+  transition: opacity 120ms ease, filter 120ms ease;
+}
+.sc-ai__send:hover:not(:disabled) { filter: brightness(1.08); }
+.sc-ai__send:disabled { opacity: 0.35; cursor: not-allowed; }
+.sc-ai__send--stop { background: var(--sc-text); color: var(--sc-bg); }
+
+/* ── reduced motion ───────────────────────────────────────────────────────
+   Every animation above is decorative: it conveys "in progress", which the
+   surrounding text already says. So they stop outright rather than slow down,
+   and each family pins a legible resting frame. */
+
+@media (prefers-reduced-motion: reduce) {
+  .sc-shimmer,
+  .sc-todo__item,
+  .sc-todo__item--active .sc-todo__label::before,
+  .sc-think,
+  .sc-think__line,
+  .sc-caret,
+  .sc-ai__menu,
+  .sc-ai__enhance,
+  .sc-ai__chip { animation: none; }
+
+  .sc-shimmer {
+    color: var(--sc-text-muted);
+    -webkit-text-fill-color: var(--sc-text-muted);
+    background: none;
+  }
+
+  .sc-think__viewport,
+  .sc-think__stream,
+  .sc-think__collapsible,
+  .sc-todo__collapsible,
+  .sc-todo__icon,
+  .sc-todo__label,
+  .sc-roll__inner { transition: none; }
+
+  .sc-orb__cell,
+  .sc-orb__shape,
+  .sc-orb__ringdot,
+  .sc-orb__helixdot,
+  .sc-orb__morphdot,
+  .sc-orb__ring,
+  .sc-orb__helix,
+  .sc-orb__morph { animation: none !important; }
+  .sc-orb__cell[data-mid] { opacity: 1 !important; }
+  .sc-orb__shape { opacity: 0.3 !important; filter: blur(1.4px) !important; transform: none !important; }
+  .sc-orb__shape--a { opacity: 1 !important; filter: blur(0) !important; }
+  .sc-orb__ringdot, .sc-orb__helixdot, .sc-orb__morphdot { opacity: 0.7 !important; }
+}
