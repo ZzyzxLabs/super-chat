@@ -146,10 +146,16 @@ export async function* streamChat(body: ReadableStream<Uint8Array>): AsyncGenera
       const index = call.index ?? 0;
       let entry = pending.get(index);
       if (!entry) {
-        entry = { callId: call.id ?? `call_${index}`, name: call.function?.name ?? "", args: "", announced: false };
+        // `name` starts EMPTY and is only ever accumulated below. Seeding it
+        // from this same fragment would then append it a second time, so a
+        // server that sends the whole name up front — which is what the
+        // OpenAI-compatible ones do — produced "visualizevisualize" and a
+        // not-found on every streamed tool call.
+        entry = { callId: call.id ?? `call_${index}`, name: "", args: "", announced: false };
         pending.set(index, entry);
       }
-      // id and name may each arrive on a later fragment than the first.
+      // id and name may each arrive on a later fragment than the first, and
+      // the name may itself be split across fragments.
       if (call.id) entry.callId = call.id;
       if (call.function?.name) entry.name += call.function.name;
       if (!entry.announced && entry.name && entry.callId) {
