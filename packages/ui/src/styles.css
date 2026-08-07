@@ -328,10 +328,16 @@
 
 /* ── cards ────────────────────────────────────────────────────────────────── */
 
-/* A card is a query container so its internals size against the card, not the
-   window. This matters twice over: a card in a 380px embedded thread must
-   compact even though the window is wide, and a card rendered standalone (the
-   playground's /cards panel) has no thread ancestor to inherit a width from. */
+/* A card is a query container so its INTERNALS size against the card rather
+   than the window — a card inside a 380px embedded thread compacts even when
+   the window is wide.
+
+   The card's own padding is a different question, and one it cannot answer
+   itself: an element is never its own query container, so .sc-card's padding
+   measures the nearest container ABOVE it. Inside a Thread that is .sc-thread
+   and it works. A host that renders cards outside a Thread has to declare
+   `container-type: inline-size` on whatever wraps them, or they will keep
+   desktop padding at any width. The playground does this on .dev__preview. */
 .sc-card {
   container-type: inline-size;
   margin: var(--sc-sp-12) 0;
@@ -2041,6 +2047,20 @@
   .sc-ai__paletteitem { min-height: 44px; }
 }
 
+/* ── device: iOS focus zoom ───────────────────────────────────────────────
+   Safari zooms the page in when a focused field is under 16px, and does not
+   zoom back out. The threshold belongs to the browser, not to the layout: a
+   tablet at 768px is past the compact tier and zooms just the same. Keying
+   this on width was a category error — it is the pointer that predicts the
+   behaviour, exactly as the header's rule says.
+
+   16px is not a design size and gets no token: it is the number Safari stops
+   at, and naming it would imply it is ours to tune. */
+@media (pointer: coarse) {
+  .sc-ai__editor,
+  .sc-composer__input { font-size: 16px; }
+}
+
 /* ── device: no hover ─────────────────────────────────────────────────────
    The to-do header swaps its status glyph for a chevron on hover. On a touch
    device that swap is either unreachable or — worse — sticky, because a tap
@@ -2144,10 +2164,6 @@
 
 /* composer — queries .sc-ai */
 @container (max-width: 600px) {
-  /* Safari zooms the page when a focused field is under 16px and never zooms
-     back out. This is the single most visible defect on a phone. */
-  .sc-ai__editor { font-size: 16px; }
-
   /* "Claude Opus 4.5" would push the send button off the bar. */
   .sc-ai__model > span {
     max-width: 6em;
@@ -2193,9 +2209,4 @@
   }
 
   .sc-ai__chip { max-width: 60cqw; }
-}
-
-/* simple composer — queries .sc-composer */
-@container (max-width: 600px) {
-  .sc-composer__input { font-size: 16px; }
 }

@@ -6,3 +6,7 @@ dist/
 .env
 .env.local
 coverage/
+
+# Playwright (layer 2 of the responsive tests)
+test-results/
+playwright-report/

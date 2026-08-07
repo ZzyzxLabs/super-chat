@@ -44,7 +44,11 @@ html, body {
 .dev__foot code { font-size: 10px; color: var(--sc-text-muted); }
 
 .dev__main { overflow-y: auto; min-width: 0; }
-.dev__page { padding: 26px 30px 80px; max-width: 1080px; }
+/* The panel content box is the outermost query container the kit's components
+   get in this app. Panels render cards and composers outside a Thread, and
+   those measure the nearest container above them — without one they would
+   stay at desktop sizing however narrow the window gets. */
+.dev__page { container-type: inline-size; padding: 26px 30px 80px; max-width: 1080px; }
 
 .dev__head { margin-bottom: 22px; }
 .dev__title { font-size: 19px; margin: 0 0 6px; letter-spacing: -0.015em; }
@@ -58,7 +62,10 @@ html, body {
 .dev__spec { min-width: 0; }
 .dev__spec-label { font-size: 11px; font-family: var(--sc-mono); color: var(--sc-text-muted); margin-bottom: 5px; }
 .dev__code { margin: 0; max-height: 340px; overflow: auto; font-size: 11px; }
-.dev__preview { min-width: 0; }
+/* Cards here are rendered outside a Thread, so this is the query container
+   they size their own padding against. Without it they keep desktop padding
+   at any width — a card cannot measure itself. */
+.dev__preview { container-type: inline-size; min-width: 0; }
 .dev__preview > .sc-card:first-child { margin-top: 0; }
 
 @media (max-width: 900px) {

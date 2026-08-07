@@ -108,14 +108,18 @@ describe("rwd — mobile viewport defects", () => {
   });
 
   // Safari zooms in on a focused field under 16px and does not zoom back out.
-  // Both composers ship a smaller size on desktop by design, so the guarantee
-  // that matters is what the compact tier sets.
-  it("raises both composers to 16px in the compact tier", () => {
+  //
+  // This is keyed on the pointer, not on width, and the distinction is not
+  // pedantic: it first shipped in the compact tier and a tablet at 768px —
+  // past that tier, still a touch device, still Safari — kept the 15px size
+  // and the zoom with it. Layer 2 caught that at tablet-768.
+  it("raises both composers to 16px on any touch device", () => {
+    const coarse = blocksMatching(RULES, /pointer:\s*coarse/).join("\n");
+    expect(coarse).toMatch(/\.sc-ai__editor,\s*\n\s*\.sc-composer__input \{ font-size: 16px; \}/);
+
+    // And specifically NOT gated on a width, which would reintroduce the bug.
     const compact = blocksMatching(RULES, /max-width:\s*600px/).join("\n");
-    for (const sel of [".sc-ai__editor", ".sc-composer__input"]) {
-      const rule = new RegExp(`\\${sel}\\s*\\{[^}]*font-size:\\s*16px`);
-      expect(compact, `${sel} must reach 16px on a phone`).toMatch(rule);
-    }
+    expect(compact).not.toContain("font-size: 16px");
   });
 
   it("insets both composers for the home indicator", () => {
@@ -181,10 +185,9 @@ describe("rwd — token discipline", () => {
   it("sizes type from tokens, with one documented exemption", () => {
     const raw = [...CSS.matchAll(/^(?!.*--sc-fs-)(.*font-size:\s*[\d.]+px.*)$/gm)].map((m) => (m[1] ?? "").trim());
     expect(raw.filter((l) => !l.startsWith(".sc-chart__label"))).toEqual([
-      // The compact tier's two 16px composer rules are the deliberate
-      // exception to the scale: 16 is not a design size, it is the threshold
-      // Safari stops zooming at. A token would imply it is tunable.
-      ".sc-ai__editor { font-size: 16px; }",
+      // The one deliberate exception to the scale: 16 is not a design size,
+      // it is the threshold Safari stops zooming at. A token would imply it
+      // is ours to tune.
       ".sc-composer__input { font-size: 16px; }",
     ]);
   });
