@@ -185,3 +185,90 @@ test("cards compact on their own width, not the window's", async ({ page }) => {
     if (c.w <= 600) expect(c.padding, `card at ${c.w}px should use compact padding`).toBe("12px");
   }
 });
+
+test("P1 — nothing inside a card overflows the card", async ({ page }) => {
+  // The viewport-overflow check above misses a narrower failure: an element
+  // wider than its card, inside a page that still fits. That reads as a card
+  // whose content is clipped or bleeding over its own border.
+  await settle(page, "/cards");
+
+  const bleeding = await page.evaluate(() => {
+    const out: { card: string; child: string; over: number }[] = [];
+    const scrolls = (el: Element) => {
+      const o = getComputedStyle(el);
+      return /auto|scroll|hidden/.test(o.overflowX) || /auto|scroll|hidden/.test(o.overflow);
+    };
+
+    for (const card of Array.from(document.querySelectorAll<HTMLElement>(".sc-card"))) {
+      const box = card.getBoundingClientRect();
+      const kind = card.closest("[id]")?.id ?? card.className;
+      for (const child of Array.from(card.querySelectorAll<HTMLElement>("*"))) {
+        const r = child.getBoundingClientRect();
+        if (r.width === 0 || r.height === 0) continue;
+        const over = Math.round(r.right - box.right);
+        if (over <= 1) continue;
+
+        let excused = false;
+        for (let p = child.parentElement; p && p !== card.parentElement; p = p.parentElement) {
+          if (scrolls(p)) {
+            excused = true;
+            break;
+          }
+        }
+        if (!excused) out.push({ card: kind, child: child.className || child.tagName, over });
+      }
+    }
+    return out.slice(0, 12);
+  });
+
+  expect(bleeding, `card content bled past its border: ${JSON.stringify(bleeding, null, 2)}`).toEqual([]);
+});
+
+test("the width tiers actually differ", async ({ page }, testInfo) => {
+  // Guards against the tiers collapsing into each other — which they silently
+  // did once already, when the medium block was authored after compact and won
+  // on source order at every width compact was supposed to own. Both tiers
+  // match at 360px, so only source order separates them and only a browser can
+  // say which one actually applied.
+  await settle(page, "/run");
+
+  // Read the resolved declaration rather than a measured box: Chrome reports a
+  // percentage max-width back as a percentage, so dividing it by a pixel width
+  // produces a number that looks like a ratio and is not one.
+  const maxWidth = await page.evaluate(() => {
+    const thread = document.querySelector(".sc-thread");
+    if (!thread) return null;
+    const probe = document.createElement("div");
+    probe.className = "sc-bubble";
+    thread.appendChild(probe);
+    const value = getComputedStyle(probe).maxWidth;
+    probe.remove();
+    return value;
+  });
+
+  expect(maxWidth, "no thread to measure").not.toBeNull();
+  if (testInfo.project.name === "tablet-768") {
+    expect(maxWidth, "medium pulls the bubble back from its desktop cap").toContain("84%");
+  } else {
+    expect(maxWidth, "compact must win over medium at phone widths").toBe("88%");
+  }
+});
+
+test("P2 — every panel stays reachable on a phone", async ({ page }) => {
+  // The shell used to display:none the sidebar below 900px, which left a phone
+  // stranded on whichever panel it loaded. A strip that scrolls is the whole
+  // fix; this asserts the links are present, hit-sized and actually navigate.
+  await settle(page, "/");
+
+  const links = page.locator(".dev__nav a");
+  await expect(links).toHaveCount(8);
+
+  const first = links.first();
+  await expect(first).toBeVisible();
+  const box = await first.boundingBox();
+  expect(box!.height, "nav links need a touch-sized row").toBeGreaterThanOrEqual(30);
+
+  await page.locator('.dev__nav a[href="/cards"]').click();
+  await expect(page).toHaveURL(/\/cards$/);
+  await expect(page.locator(".sc-card").first()).toBeVisible();
+});

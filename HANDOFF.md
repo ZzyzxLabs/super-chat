@@ -19,7 +19,8 @@ apps/playground   Next.js dev panels. runs with NO API key.
 
 ```bash
 pnpm install && pnpm build && pnpm dev     # → http://localhost:3210
-pnpm test                                  # 237 tests, ~3s
+pnpm test                                  # 276 tests, ~5s
+pnpm test:rwd                              # 48 browser checks, 3 viewports
 ```
 
 The playground is **not a product**. It is six panels, one per capability, aimed
@@ -127,10 +128,16 @@ has a regression test now; the test names spell out the failure.
   `@superchat/core` through its built `dist`, so build core before typechecking
   them. `pnpm -r typecheck` after `pnpm build` is the safe order.
 - **G: is slow.** Scope searches; avoid unscoped recursive `find`/`du` here.
-- The one thing verified only by DOM inspection, never visually: the browser pane
-  was unavailable this whole session, so **nobody has actually looked at these
-  panels**. Layout and spacing are unreviewed. Open it before trusting the visual
-  design.
+- **Still nobody has looked at these panels with human eyes.** A headless
+  browser now drives them at 360/390/768 and asserts that nothing overflows,
+  that a message can be sent, and that touch targets are big enough — which
+  is a real floor, and is not the same as design review. Proportion, rhythm
+  and colour remain unexamined. Open it before trusting the visual design.
+- **`pnpm test:rwd` needs a Chromium the runner can launch.** The version
+  Playwright expects and the one installed here are usually different builds;
+  `playwright.config.ts` points at a preinstalled binary and
+  `PLAYWRIGHT_CHROMIUM_PATH` overrides it. Do not "fix" this by running
+  `playwright install` in an environment that ships its own.
 
 ---
 
@@ -169,18 +176,36 @@ job-resume routing, foreign-file degrade). What remains:
 
 Nothing on the previous roadmap is outstanding — concurrent proxy streaming now
 has a test, the REST `ThreadStore` ships, provider-native tools pass through,
-and the app-state seam landed. What is genuinely open:
+and the app-state seam landed.
+
+Responsive support landed since then (UI-SPEC Phase 5, batches M1–M3): two
+container-query tiers for width, media queries for device traits, and a
+phone can now hold a conversation end to end. Two things about it are worth
+knowing before touching the stylesheet:
+
+- **Width asks `@container`, not `@media`.** The kit is embedded, so a host
+  can drop `Thread` into a 380px sidebar inside a 1920px window, where a
+  media query answers confidently and wrongly. Device traits — touch
+  targets, iOS focus zoom, safe areas — stay on `@media`, and `.sc-toasts`
+  is on `@media` too because a `position: fixed` element's container really
+  is the viewport.
+- **An element is never its own query container.** A host rendering cards
+  outside a `Thread` must declare `container-type: inline-size` on its own
+  wrapper, or those cards keep desktop padding at any width. Card internals
+  are fine either way.
+
+`pnpm test:rwd` runs the browser layer (48 checks across 360/390/768). It
+needs Chromium; see the note in `playwright.config.ts` about pointing at a
+preinstalled binary.
+
+What is genuinely open:
 
 1. **A third provider (Gemini).** Two adapters proved the normalized content
    model holds; a third is now routine rather than risky.
 2. **Nobody has driven the app-state panel against a live model.** The demo
    transport is scripted, so the board actions are exercised by tests and by
    hand — not by an actual model deciding to call them.
-3. **The kit does not respond to width at all.** `styles.css` has zero
-   width breakpoints, so a phone or a narrow embedded sidebar gets the
-   desktop layout. UI-SPEC Phase 5 plans this out — scope, breakpoint
-   strategy, per-component rules, testing, and an M1/M2/M3 batch queue.
-   Planned, not built.
+
 
 Deliberately *not* done, and worth leaving alone unless asked: multi-agent
 orchestration, a plugin system, and any kind of visual builder. The framework's

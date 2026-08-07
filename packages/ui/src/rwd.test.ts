@@ -68,6 +68,17 @@ describe("rwd — breakpoints", () => {
     expect([...widths].sort()).toEqual(["600px", "900px"]);
   });
 
+  // The rule is only worth having if it covers the app too. The playground had
+  // drifted to a third value — 980px, for the run panel's side rail — which is
+  // how a two-tier spec becomes a three-tier one nobody decided on.
+  it("holds the app to the same two literals", () => {
+    const widths = new Set<string>();
+    for (const cond of queryConditions(PLAYGROUND_RULES)) {
+      for (const w of cond.matchAll(/(?:min|max)-width:\s*([^)]+)\)/g)) widths.add((w[1] ?? "").trim());
+    }
+    for (const w of widths) expect(["600px", "900px"]).toContain(w);
+  });
+
   // 5.1.3. The failure this catches is silent: a query condition containing
   // var() is invalid, and an invalid condition never matches. The rule would
   // simply never apply, on any screen, with nothing in the console.
