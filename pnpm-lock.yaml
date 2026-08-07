@@ -26,13 +26,13 @@ importers:
 
   apps/playground:
     dependencies:
-      '@superchat/core':
+      '@zzyzxlabs/super-chat-core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@superchat/react':
+      '@zzyzxlabs/super-chat-react':
         specifier: workspace:*
         version: link:../../packages/react
-      '@superchat/ui':
+      '@zzyzxlabs/super-chat-ui':
         specifier: workspace:*
         version: link:../../packages/ui
       next:
@@ -69,7 +69,7 @@ importers:
 
   packages/react:
     dependencies:
-      '@superchat/core':
+      '@zzyzxlabs/super-chat-core':
         specifier: workspace:*
         version: link:../core
     devDependencies:
@@ -88,10 +88,10 @@ importers:
 
   packages/ui:
     dependencies:
-      '@superchat/core':
+      '@zzyzxlabs/super-chat-core':
         specifier: workspace:*
         version: link:../core
-      '@superchat/react':
+      '@zzyzxlabs/super-chat-react':
         specifier: workspace:*
         version: link:../react
     devDependencies:

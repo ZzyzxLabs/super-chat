@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import "@superchat/ui/styles.css";
+import "@zzyzxlabs/super-chat-ui/styles.css";
 import "./globals.css";
 import { Shell } from "@/components/Shell";
 

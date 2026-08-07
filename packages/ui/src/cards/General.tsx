@@ -18,7 +18,7 @@ import type {
   GaugeCard,
   TreeCard,
   TreeNode,
-} from "@superchat/core";
+} from "@zzyzxlabs/super-chat-core";
 import type { CardRendererProps } from "../renderer-registry.js";
 import { formatValue, toneClass } from "../format.js";
 

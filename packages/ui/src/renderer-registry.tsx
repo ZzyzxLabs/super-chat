@@ -8,7 +8,7 @@
 // ticket three weeks later.
 
 import { Component, createContext, useContext, useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
-import type { Card, CardAction, CardSpec } from "@superchat/core";
+import type { Card, CardAction, CardSpec } from "@zzyzxlabs/super-chat-core";
 
 export type CardRendererProps<S extends CardSpec = CardSpec> = {
   spec: S;

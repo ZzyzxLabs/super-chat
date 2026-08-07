@@ -11,9 +11,9 @@ Not a chat app. The thing chat apps leave to you.
 > design-token and responsive spec lives in **[docs/UI-SPEC.md](docs/UI-SPEC.md)**.
 
 ```
-@superchat/core    provider-agnostic engine — no React, isomorphic       (packages/core/README.md)
-@superchat/react   thread state, run control, card actions               (packages/react/README.md)
-@superchat/ui      card renderers, chat primitives, context inspector    (packages/ui/README.md)
+@zzyzxlabs/super-chat-core    provider-agnostic engine — no React, isomorphic       (packages/core/README.md)
+@zzyzxlabs/super-chat-react   thread state, run control, card actions               (packages/react/README.md)
+@zzyzxlabs/super-chat-ui      card renderers, chat primitives, context inspector    (packages/ui/README.md)
 apps/playground    Next.js dev panels — one per capability, no API key needed (apps/playground/README.md)
 ```
 

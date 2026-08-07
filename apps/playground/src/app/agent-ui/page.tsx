@@ -23,7 +23,7 @@ import {
   type AgentAttachment,
   type OrbVariant,
   type TodoItem,
-} from "@superchat/ui";
+} from "@zzyzxlabs/super-chat-ui";
 import { PanelHeader } from "@/components/Shell";
 
 const REASONING = [

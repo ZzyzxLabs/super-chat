@@ -1,5 +1,5 @@
 {
-  "name": "@superchat/react",
+  "name": "@zzyzxlabs/super-chat-react",
   "version": "0.1.0",
   "description": "React bindings for superchat: thread state, run control, card actions, and context inspection.",
   "type": "module",
@@ -13,6 +13,14 @@
     }
   },
   "files": ["dist"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZzyzxLabs/super-chat.git",
+    "directory": "packages/react"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit"
@@ -21,7 +29,7 @@
     "react": "^18.0.0 || ^19.0.0"
   },
   "dependencies": {
-    "@superchat/core": "workspace:*"
+    "@zzyzxlabs/super-chat-core": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.0.2",

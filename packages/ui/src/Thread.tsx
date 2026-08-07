@@ -15,7 +15,7 @@ import {
   type MediaSource,
   type Message,
   type RunState,
-} from "@superchat/core";
+} from "@zzyzxlabs/super-chat-core";
 import {
   useAgentClient,
   useAttachments,
@@ -27,7 +27,7 @@ import {
   useThread,
   useTools,
   type TurnMeta,
-} from "@superchat/react";
+} from "@zzyzxlabs/super-chat-react";
 import { CardRenderer } from "./renderer-registry.js";
 import { renderMarkdown } from "./markdown.js";
 import {

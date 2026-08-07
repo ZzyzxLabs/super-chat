@@ -6,7 +6,7 @@
 // has nowhere to render.
 
 import type { ComponentType } from "react";
-import type { BuiltinCard, BuiltinCardKind } from "@superchat/core";
+import type { BuiltinCard, BuiltinCardKind } from "@zzyzxlabs/super-chat-core";
 import type { CardRendererMap, CardRendererProps } from "../renderer-registry.js";
 import {
   CodeCardView,

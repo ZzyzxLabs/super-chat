@@ -1,5 +1,5 @@
 {
-  "name": "@superchat/core",
+  "name": "@zzyzxlabs/super-chat-core",
   "version": "0.1.0",
   "description": "Provider-agnostic agent core: content model, skills, context assembly, tools, runtime, and hand-rolled provider adapters.",
   "type": "module",
@@ -21,6 +21,14 @@
     }
   },
   "files": ["dist"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZzyzxLabs/super-chat.git",
+    "directory": "packages/core"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit"

@@ -1,5 +1,5 @@
 {
-  "name": "@superchat/ui",
+  "name": "@zzyzxlabs/super-chat-ui",
   "version": "0.1.0",
   "description": "Card renderers and chat primitives for superchat. Bring your own styling; ships a self-contained CSS baseline.",
   "type": "module",
@@ -14,6 +14,14 @@
     "./styles.css": "./src/styles.css"
   },
   "files": ["dist", "src/styles.css"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ZzyzxLabs/super-chat.git",
+    "directory": "packages/ui"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit"
@@ -22,8 +30,8 @@
     "react": "^18.0.0 || ^19.0.0"
   },
   "dependencies": {
-    "@superchat/core": "workspace:*",
-    "@superchat/react": "workspace:*"
+    "@zzyzxlabs/super-chat-core": "workspace:*",
+    "@zzyzxlabs/super-chat-react": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.0.2",

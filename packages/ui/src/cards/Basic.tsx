@@ -14,7 +14,7 @@ import type {
   TableCard,
   TableColumn,
   TimelineCard,
-} from "@superchat/core";
+} from "@zzyzxlabs/super-chat-core";
 import type { CardRendererProps } from "../renderer-registry.js";
 import { deltaTone, formatDelta, formatValue, toneClass } from "../format.js";
 import { CodeBlock } from "../agent/CodeBlock.js";

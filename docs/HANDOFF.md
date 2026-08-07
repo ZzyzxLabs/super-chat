@@ -29,13 +29,23 @@ at a developer evaluating the framework: `/cards` `/skills` `/tools` `/requests`
 into an app.
 
 **Naming**: resolved. The framework was called `agentloom` and is now **superchat**,
-matching the repo — packages `@superchat/*`, CSS prefix `sc-`, storage keys
-`superchat:*`. Nothing in the tree answers to the old name except
-`runtime/storage.ts`, which is a deliberate shim: every read of a `superchat:`
-localStorage key falls back once to its `agentloom:` twin and promotes the value,
-so a browser that used the pre-rename build keeps its threads, memories, uploaded
-file refs and job handles. That file is removable — delete it and its four call
-sites when the old keys stop being worth carrying.
+matching the repo — CSS prefix `sc-`, storage keys `superchat:*`. Nothing in the
+tree answers to the old name except `runtime/storage.ts`, which is a deliberate
+shim: every read of a `superchat:` localStorage key falls back once to its
+`agentloom:` twin and promotes the value, so a browser that used the pre-rename
+build keeps its threads, memories, uploaded file refs and job handles. That file
+is removable — delete it and its four call sites when the old keys stop being
+worth carrying.
+
+**Publish scope**: the three publishable packages (`core`, `react`, `ui`) are
+scoped `@zzyzxlabs/super-chat-*` to publish to GitHub Packages under the
+ZzyzxLabs org — GitHub Packages requires the npm scope to equal the owning
+org/user, which `@superchat/*` never matched. `apps/playground` stays
+`@superchat/playground`: it's `private: true` and never published, so the
+GitHub Packages scope rule doesn't apply to it, and there's no reason to touch
+its name. "superchat" the *project* is still called superchat everywhere else
+(README, CSS prefix, storage keys) — only the three registry-facing package
+names changed.
 
 ---
 
@@ -118,14 +128,14 @@ has a regression test now; the test names spell out the failure.
   while `next dev` is live corrupts the running server and the page goes blank.
   Stop the server first.
 - **`tsup --clean` wipes `dist` on every rebuild.** That is why
-  `@superchat/ui`'s `styles.css` export points at `src/`, not `dist/` — a
+  `@zzyzxlabs/super-chat-ui`'s `styles.css` export points at `src/`, not `dist/` — a
   consuming dev server that compiles during the wipe fails on a missing
   stylesheet. Don't "tidy" it back into dist.
 - **Next's webpack does not resolve `.js` specifiers to `.ts`** in app source.
   Inside `apps/playground/src`, import without the extension. The workspace
   packages are fine because they resolve to built `dist`.
 - **Typecheck order matters.** `packages/react` and `packages/ui` resolve
-  `@superchat/core` through its built `dist`, so build core before typechecking
+  `@zzyzxlabs/super-chat-core` through its built `dist`, so build core before typechecking
   them. `pnpm -r typecheck` after `pnpm build` is the safe order.
 - **G: is slow.** Scope searches; avoid unscoped recursive `find`/`du` here.
 - **Still nobody has looked at these panels with human eyes.** A headless

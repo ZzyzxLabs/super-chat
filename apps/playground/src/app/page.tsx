@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BUILTIN_CARDS } from "@superchat/core";
+import { BUILTIN_CARDS } from "@zzyzxlabs/super-chat-core";
 import { PanelHeader } from "@/components/Shell";
 
 const RESOURCES = [
@@ -7,7 +7,7 @@ const RESOURCES = [
     href: "/cards",
     title: "Agent cards",
     body: "20 built-in card kinds the agent can choose from — tables, comparisons, funnels, gauges, citations, checklists, trees, and three interactive kinds that pause the run for an answer. Each shown with the spec that produced it.",
-    tag: "@superchat/core + /ui",
+    tag: "@zzyzxlabs/super-chat-core + /ui",
   },
   {
     href: "/skills",
@@ -83,7 +83,7 @@ export default function OverviewPanel() {
 
       <section className="dev__section">
         <h2 className="dev__section-title">Install</h2>
-        <pre className="sc-pre">{`pnpm add @superchat/core @superchat/react @superchat/ui`}</pre>
+        <pre className="sc-pre">{`pnpm add @zzyzxlabs/super-chat-core @zzyzxlabs/super-chat-react @zzyzxlabs/super-chat-ui`}</pre>
         <p className="dev__section-note" style={{ marginTop: 12 }}>
           Core is isomorphic and React-free. React and UI are optional — a server-side agent needs only core.
         </p>

@@ -34,7 +34,7 @@ import {
   siblingsOf,
   threadSnapshot,
   userMessage,
-} from "@superchat/core";
+} from "@zzyzxlabs/super-chat-core";
 import { Store } from "./store.js";
 
 export type ThreadState = {

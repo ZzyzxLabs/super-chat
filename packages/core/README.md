@@ -1,4 +1,4 @@
-# @superchat/core
+# @zzyzxlabs/super-chat-core
 
 Provider-agnostic agent core: content model, skills, context assembly, tools,
 runtime, and hand-rolled provider adapters. No React — isomorphic, runs on a
@@ -26,13 +26,13 @@ design decisions.
 ## Install
 
 ```bash
-pnpm add @superchat/core
+pnpm add @zzyzxlabs/super-chat-core
 ```
 
 ## Develop
 
 ```bash
-pnpm --filter @superchat/core build       # tsup, emits dist/
-pnpm --filter @superchat/core typecheck   # tsc --noEmit
+pnpm --filter @zzyzxlabs/super-chat-core build       # tsup, emits dist/
+pnpm --filter @zzyzxlabs/super-chat-core typecheck   # tsc --noEmit
 pnpm vitest run packages/core             # this package's tests
 ```
