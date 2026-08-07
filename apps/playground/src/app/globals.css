@@ -12,7 +12,7 @@ html, body {
 
 /* ── dev shell ────────────────────────────────────────────────────────────── */
 
-.dev { display: grid; grid-template-columns: 232px minmax(0, 1fr); height: 100vh; overflow: hidden; }
+.dev { display: grid; grid-template-columns: 232px minmax(0, 1fr); height: 100dvh; overflow: hidden; }
 
 .dev__nav {
   display: flex;
@@ -120,7 +120,7 @@ html, body {
 .dev__kind-summary { font-size: 12px; color: var(--sc-text-muted); line-height: 1.5; margin: 0 0 10px; max-width: 72ch; }
 
 /* run panel */
-.dev__run { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 0; height: 100vh; }
+.dev__run { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 0; height: 100dvh; }
 .dev__runmain { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--sc-border); }
 .dev__runside { overflow-y: auto; }
 .dev__runbar {
