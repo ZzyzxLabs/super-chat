@@ -24,16 +24,28 @@ export function pathTo(tree: readonly Message[], headId: string | null | undefin
   return path.reverse();
 }
 
+/** parentId → children, in tree insertion order. Built once per call site that needs repeated lookups. */
+function indexByParent(tree: readonly Message[]): Map<string | null, Message[]> {
+  const index = new Map<string | null, Message[]>();
+  for (const m of tree) {
+    const parentId = m.parentId ?? null;
+    const kids = index.get(parentId);
+    if (kids) kids.push(m);
+    else index.set(parentId, [m]);
+  }
+  return index;
+}
+
 /** Direct children of `parentId` (null = roots), in tree insertion order. */
 export function childrenOf(tree: readonly Message[], parentId: string | null): Message[] {
-  return tree.filter((m) => (m.parentId ?? null) === parentId);
+  return indexByParent(tree).get(parentId) ?? [];
 }
 
 /** The message plus its siblings (shared parent), in insertion order. */
 export function siblingsOf(tree: readonly Message[], id: string): Message[] {
   const self = tree.find((m) => m.id === id);
   if (!self) return [];
-  return childrenOf(tree, self.parentId ?? null);
+  return indexByParent(tree).get(self.parentId ?? null) ?? [];
 }
 
 /**
@@ -41,12 +53,15 @@ export function siblingsOf(tree: readonly Message[], id: string): Message[] {
  * switching to a branch resumes at where that branch last left off.
  */
 export function latestLeaf(tree: readonly Message[], fromId: string): string {
+  // Built once here rather than via repeated `childrenOf` scans — one O(n)
+  // pass instead of one per level of depth.
+  const index = indexByParent(tree);
   let cursor = fromId;
   const seen = new Set<string>();
   for (;;) {
     if (seen.has(cursor)) return cursor;
     seen.add(cursor);
-    const kids = childrenOf(tree, cursor);
+    const kids = index.get(cursor) ?? [];
     if (!kids.length) return cursor;
     cursor = kids[kids.length - 1]!.id;
   }

@@ -86,27 +86,56 @@ export type RetrievalDoc = { id: string; text: string; title?: string; source?: 
  * the whole retrieve → inject → cite loop honestly.
  */
 export function createKeywordRetriever(docs: readonly RetrievalDoc[]): Retriever {
-  type Chunk = RetrievedChunk & { terms: Set<string> };
-  const chunks: Chunk[] = docs.flatMap((doc) =>
-    doc.text
-      .split(/\n\s*\n/)
-      .map((p) => p.trim())
-      .filter((p) => p.length > 0)
-      .map((paragraph, i) => ({
-        id: `${doc.id}#${i}`,
-        text: paragraph,
-        ...(doc.title ? { title: doc.title } : {}),
-        ...(doc.source ? { source: doc.source } : {}),
-        ...(doc.uri ? { uri: doc.uri } : {}),
-        terms: new Set(tokenize(paragraph)),
-      })),
-  );
+  type Chunk = RetrievedChunk & { terms: Set<string>; idx: number };
+  const chunks: Chunk[] = docs
+    .flatMap((doc) =>
+      doc.text
+        .split(/\n\s*\n/)
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0)
+        .map((paragraph, i) => ({
+          id: `${doc.id}#${i}`,
+          text: paragraph,
+          ...(doc.title ? { title: doc.title } : {}),
+          ...(doc.source ? { source: doc.source } : {}),
+          ...(doc.uri ? { uri: doc.uri } : {}),
+          terms: new Set(tokenize(paragraph)),
+        })),
+    )
+    // `idx` records original corpus order so candidate gathering below (which
+    // visits chunks per query term, not in corpus order) can restore it before
+    // scoring — ties must break the same way the old full scan did.
+    .map((c, idx) => ({ ...c, idx }));
+
+  // term → chunks containing it, built once so a query only touches chunks
+  // sharing at least one query term instead of rescanning the whole corpus.
+  const invertedIndex = new Map<string, Chunk[]>();
+  for (const chunk of chunks) {
+    for (const term of chunk.terms) {
+      const bucket = invertedIndex.get(term);
+      if (bucket) bucket.push(chunk);
+      else invertedIndex.set(term, [chunk]);
+    }
+  }
 
   return {
     async retrieve(query, opts = {}) {
       const queryTerms = tokenize(query);
       if (!queryTerms.length) return [];
-      const scored = chunks
+
+      const seen = new Set<Chunk>();
+      const candidates: Chunk[] = [];
+      for (const term of queryTerms) {
+        for (const chunk of invertedIndex.get(term) ?? []) {
+          if (!seen.has(chunk)) {
+            seen.add(chunk);
+            candidates.push(chunk);
+          }
+        }
+      }
+      candidates.sort((a, b) => a.idx - b.idx);
+
+      const scored = candidates
         .map((c) => {
           const hits = queryTerms.filter((t) => c.terms.has(t)).length;
           return { chunk: c, score: hits / Math.sqrt(c.terms.size || 1) };
@@ -115,7 +144,7 @@ export function createKeywordRetriever(docs: readonly RetrievalDoc[]): Retriever
         .sort((a, b) => b.score - a.score)
         .slice(0, opts.limit ?? 5);
       return scored.map(({ chunk, score }) => {
-        const { terms: _terms, ...rest } = chunk;
+        const { terms: _terms, idx: _idx, ...rest } = chunk;
         return { ...rest, score };
       });
     },

@@ -131,7 +131,7 @@ export default function AppStatePanel() {
     // `createAlert` needs. Toggle the preset below to watch them disappear.
     registry.registerAll(actions, ["executor"]);
 
-    const bindings: AppStateBinding<any>[] = [boardBinding, selectionBinding];
+    const bindings: (AppStateBinding<Card[]> | AppStateBinding<string | null>)[] = [boardBinding, selectionBinding];
     return new AgentClient({
       provider: buildProvider(buildTransport("demo", "openai"), "demo"),
       model: "gpt-5.2",

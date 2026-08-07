@@ -22,6 +22,7 @@ import {
   type ContentPart,
   type ContextTrace,
   type Message,
+  type RunState,
   type Skill,
   type ThreadMeta,
   type ToolDefinition,
@@ -112,19 +113,66 @@ export function useBranches(messageId: string): { index: number; count: number; 
   );
 }
 
-/** The in-flight assistant turn: streamed parts, usage, step count. */
-export function useRun() {
-  return useAgentState((s) => s.run);
+/**
+ * The in-flight assistant turn: streamed parts, usage, step count.
+ *
+ * Called with no arguments, this subscribes to the WHOLE `RunState` — every
+ * RunEvent (a streamed token included) re-renders the caller, which is what a
+ * live-turn renderer wants. A consumer that only needs a slice — `status`,
+ * `job`, `pendingCard` — should pass a selector (and, if it returns a new
+ * object each call, an `isEqual`) so a token landing does not wake it. Same
+ * pattern as `useAgentState`.
+ */
+export function useRun(): RunState;
+export function useRun<T>(selector: (run: RunState) => T, isEqual?: (a: T, b: T) => boolean): T;
+export function useRun<T = RunState>(selector?: (run: RunState) => T, isEqual?: (a: T, b: T) => boolean): T {
+  return useAgentState((s) => (selector ? selector(s.run) : (s.run as unknown as T)), isEqual);
 }
 
 /** Streamed text of the current turn, without re-rendering on tool events. */
 export function useStreamingText(): string {
-  return useAgentState((s) =>
-    s.run.parts
-      .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
-      .map((p) => p.text)
-      .join(""),
+  const client = useAgentClient();
+
+  const compute = useCallback(
+    () =>
+      client.store
+        .get()
+        .run.parts.filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
+        .map((p) => p.text)
+        .join(""),
+    [client],
   );
+
+  // This recomputes (filter+map+join over `parts`) on every notify, which
+  // during a stream is every token. Coalesce those to one recompute per
+  // animation frame instead of one per token — but flush immediately the
+  // moment the run leaves "running", so the final text is never one frame
+  // stale once streaming actually ends.
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => {
+      let raf: number | null = null;
+      const unsub = client.store.subscribe(() => {
+        if (client.store.get().status !== "running") {
+          if (raf != null) cancelAnimationFrame(raf);
+          raf = null;
+          onStoreChange();
+          return;
+        }
+        if (raf != null) return;
+        raf = requestAnimationFrame(() => {
+          raf = null;
+          onStoreChange();
+        });
+      });
+      return () => {
+        if (raf != null) cancelAnimationFrame(raf);
+        unsub();
+      };
+    },
+    [client],
+  );
+
+  return useSyncExternalStore(subscribe, compute, compute);
 }
 
 export function useCards(): Card[] {
@@ -311,7 +359,12 @@ export function useThreadList(): {
 
   useEffect(() => {
     // `status` is a dependency on purpose: a run finishing is when the client
-    // saves, so it is exactly when the list's metadata goes stale.
+    // saves, so it is exactly when the list's metadata goes stale. But it
+    // transitions through "running" (and sometimes "awaiting-user") on the
+    // way there, and refreshing on those would round-trip the store 2-3x per
+    // turn for no reason — only the terminal statuses actually change what a
+    // save just wrote.
+    if (status === "running" || status === "awaiting-user") return;
     void refresh();
   }, [refresh, activeId, status]);
 
@@ -336,6 +389,16 @@ export function useThreadList(): {
 export function useAgentClientInstance(config: AgentClientConfig): AgentClient {
   const ref = useRef<AgentClient | null>(null);
   if (!ref.current) ref.current = new AgentClient(config);
+
+  // The instance is constructed once and outlives every render, but not the
+  // component — without this, a streaming run started before unmount keeps
+  // running (and writing to a store nothing reads anymore) forever.
+  useEffect(() => {
+    return () => {
+      ref.current?.stop();
+    };
+  }, []);
+
   return ref.current;
 }
 

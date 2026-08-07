@@ -79,6 +79,16 @@ export default function RunPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider, threadBackend]);
 
+  // The outgoing client's in-flight run does not stop on its own just because
+  // a new one replaced it in the provider — without this, switching provider
+  // or thread backend mid-stream leaves the old run streaming into a store
+  // nothing renders anymore.
+  useEffect(() => {
+    return () => {
+      client.stop();
+    };
+  }, [client]);
+
   /** Upload (or reuse a previous upload of the same file) and stage the part. */
   const attachFile = async (picked: File) => {
     if (!provider.uploadFile) return;
@@ -231,6 +241,8 @@ export default function RunPanel() {
   );
 }
 
+const THREADS_PAGE_SIZE = 20;
+
 /**
  * The thread picker — the ThreadStore demo. Snapshot-per-thread in
  * localStorage: reload the page and the conversation is still here.
@@ -238,6 +250,11 @@ export default function RunPanel() {
 function ThreadsPanel({ backend }: { backend?: { value: ThreadBackend; onChange: (v: ThreadBackend) => void } }) {
   const { threads, activeId, open, create, remove } = useThreadList();
   const { isRunning } = useThread();
+  // A demo cap, not virtualization — the list only grows while this panel is
+  // open, so "show more" is enough to keep it from rendering everything ever
+  // saved.
+  const [visible, setVisible] = useState(THREADS_PAGE_SIZE);
+  const shown = threads.slice(0, visible);
 
   return (
     <div className="dev__events">
@@ -272,32 +289,44 @@ function ThreadsPanel({ backend }: { backend?: { value: ThreadBackend; onChange:
           Threads persist to localStorage as you chat.
         </p>
       ) : (
-        threads.map((t) => (
-          <div key={t.id} className="dev__event" style={{ alignItems: "center", gap: 6 }}>
+        <>
+          {shown.map((t) => (
+            <div key={t.id} className="dev__event" style={{ alignItems: "center", gap: 6 }}>
+              <button
+                type="button"
+                className="sc-btn sc-btn--ghost sc-btn--sm"
+                style={{ flex: 1, textAlign: "left", ...(t.id === activeId ? { fontWeight: 600 } : {}) }}
+                disabled={isRunning}
+                onClick={() => void open(t.id)}
+                title={t.id}
+              >
+                {t.title ?? "(untitled)"}
+                <span className="sc-muted" style={{ display: "block", fontSize: 11 }}>
+                  {t.messageCount} message{t.messageCount === 1 ? "" : "s"}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="sc-btn sc-btn--ghost sc-btn--sm"
+                aria-label={`Delete ${t.title ?? t.id}`}
+                disabled={isRunning}
+                onClick={() => void remove(t.id)}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          {threads.length > visible ? (
             <button
               type="button"
               className="sc-btn sc-btn--ghost sc-btn--sm"
-              style={{ flex: 1, textAlign: "left", ...(t.id === activeId ? { fontWeight: 600 } : {}) }}
-              disabled={isRunning}
-              onClick={() => void open(t.id)}
-              title={t.id}
+              style={{ width: "100%", marginTop: 4 }}
+              onClick={() => setVisible((n) => n + THREADS_PAGE_SIZE)}
             >
-              {t.title ?? "(untitled)"}
-              <span className="sc-muted" style={{ display: "block", fontSize: 11 }}>
-                {t.messageCount} message{t.messageCount === 1 ? "" : "s"}
-              </span>
+              Show more ({threads.length - visible} more)
             </button>
-            <button
-              type="button"
-              className="sc-btn sc-btn--ghost sc-btn--sm"
-              aria-label={`Delete ${t.title ?? t.id}`}
-              disabled={isRunning}
-              onClick={() => void remove(t.id)}
-            >
-              ×
-            </button>
-          </div>
-        ))
+          ) : null}
+        </>
       )}
     </div>
   );
@@ -314,7 +343,17 @@ function ReattachPicker({ providerId }: { providerId: string }) {
   const [files, setFiles] = useState<StoredFile[]>([]);
 
   useEffect(() => {
-    void fileStore.list().then((all) => setFiles(all.filter((f) => f.ref.provider === providerId)));
+    // A fast provider switch can let an older `.list()` resolve after a newer
+    // one — the ignore flag makes sure a stale response never overwrites a
+    // fresher one that already landed.
+    let ignore = false;
+    void fileStore.list().then((all) => {
+      if (ignore) return;
+      setFiles(all.filter((f) => f.ref.provider === providerId));
+    });
+    return () => {
+      ignore = true;
+    };
   }, [providerId, attachments.length]);
 
   if (!files.length) return null;
@@ -387,30 +426,60 @@ function EventStream() {
   // without this call, a persisted job handle would never be polled again.
   const jobs = useJobs();
   const run = useAgentState((s) => s.run);
-  const [events, setEvents] = useState<{ type: string; detail: string }[]>([]);
-  const seen = useRef(0);
+  type LogEntry = { type: string; detail: string };
+  const [streamEvents, setStreamEvents] = useState<LogEntry[]>([]);
 
-  // Derive a readable log from run state transitions. (A host wanting the true
-  // stream just consumes runAgent() directly — this panel reconstructs it so the
-  // demo needn't fork the client.)
+  // `run.parts`/`run.cards` only ever GROW within one run (text deltas merge
+  // into the last part rather than appending), so re-scanning all of them on
+  // every notify — which during a stream is every token — redoes the same
+  // work each time. Track how far in we already are and append only what's
+  // new; a new run (fresh `runId`) resets the cursors and the log.
+  const partsSeen = useRef(0);
+  const cardsSeen = useRef(0);
+  const traceSeen = useRef(false);
+  const runIdSeen = useRef<string | undefined>(undefined);
+
   useEffect(() => {
-    const next: { type: string; detail: string }[] = [];
-    if (run.trace) next.push({ type: "context-built", detail: `${run.trace.totals.total} tok · ${run.trace.entries.length} layers` });
-    for (const p of run.parts) {
-      if (p.type === "tool-call") next.push({ type: "tool-call", detail: `${p.name}(${JSON.stringify(p.input).slice(0, 46)}…)` });
-      if (p.type === "tool-result") next.push({ type: "tool-result", detail: `${p.name}${p.failure ? ` · ${p.failure}` : ""}` });
+    if (run.runId !== runIdSeen.current) {
+      runIdSeen.current = run.runId;
+      partsSeen.current = 0;
+      cardsSeen.current = 0;
+      traceSeen.current = false;
+      setStreamEvents([]);
     }
-    for (const c of run.cards) next.push({ type: "card", detail: (c.spec as { kind?: string }).kind ?? "?" });
-    if (run.pendingCard) next.push({ type: "awaiting-user", detail: (run.pendingCard.spec as { kind?: string }).kind ?? "?" });
-    if (run.job) next.push({ type: "job-status", detail: `${run.job.handle.id.slice(0, 14)}… ${run.job.status}` });
+
+    const additions: LogEntry[] = [];
+    if (run.trace && !traceSeen.current) {
+      traceSeen.current = true;
+      additions.push({ type: "context-built", detail: `${run.trace.totals.total} tok · ${run.trace.entries.length} layers` });
+    }
+    for (let i = partsSeen.current; i < run.parts.length; i += 1) {
+      const p = run.parts[i]!;
+      if (p.type === "tool-call") additions.push({ type: "tool-call", detail: `${p.name}(${JSON.stringify(p.input).slice(0, 46)}…)` });
+      if (p.type === "tool-result") additions.push({ type: "tool-result", detail: `${p.name}${p.failure ? ` · ${p.failure}` : ""}` });
+    }
+    partsSeen.current = run.parts.length;
+    for (let i = cardsSeen.current; i < run.cards.length; i += 1) {
+      additions.push({ type: "card", detail: (run.cards[i]!.spec as { kind?: string }).kind ?? "?" });
+    }
+    cardsSeen.current = run.cards.length;
+
+    if (additions.length) setStreamEvents((prev) => [...prev, ...additions]);
+  }, [run]);
+
+  // These reflect a CURRENT value rather than an accumulating list — cheap to
+  // recompute in full each render, unlike the parts/cards scan above.
+  const events = useMemo(() => {
+    const extras: LogEntry[] = [];
+    if (run.pendingCard) extras.push({ type: "awaiting-user", detail: (run.pendingCard.spec as { kind?: string }).kind ?? "?" });
+    if (run.job) extras.push({ type: "job-status", detail: `${run.job.handle.id.slice(0, 14)}… ${run.job.status}` });
     for (const j of jobs) {
-      if (j.handle.id !== run.job?.handle.id) next.push({ type: "job-resumed", detail: `${j.handle.id.slice(0, 14)}… ${j.status}` });
+      if (j.handle.id !== run.job?.handle.id) extras.push({ type: "job-resumed", detail: `${j.handle.id.slice(0, 14)}… ${j.status}` });
     }
-    if (run.usage.totalTokens) next.push({ type: "usage", detail: `${run.usage.totalTokens} tok total` });
-    if (run.status === "done") next.push({ type: "run-finish", detail: `${run.finishReason} · ${run.steps} step(s)` });
-    setEvents(next);
-    seen.current = next.length;
-  }, [run, jobs]);
+    if (run.usage.totalTokens) extras.push({ type: "usage", detail: `${run.usage.totalTokens} tok total` });
+    if (run.status === "done") extras.push({ type: "run-finish", detail: `${run.finishReason} · ${run.steps} step(s)` });
+    return [...streamEvents, ...extras];
+  }, [streamEvents, run.pendingCard, run.job, jobs, run.usage.totalTokens, run.status, run.finishReason, run.steps]);
 
   const cls = (t: string) =>
     t.startsWith("tool") ? "tool" : t === "card" ? "card" : t === "awaiting-user" ? "user" : t === "error" ? "error" : "";

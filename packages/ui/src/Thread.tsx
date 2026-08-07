@@ -7,7 +7,15 @@
 // collapse — a turn that made six lookups should not push the answer off screen.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { estimateTokens, isCardCarrier, type Card, type ContentPart, type MediaSource, type Message } from "@superchat/core";
+import {
+  estimateTokens,
+  isCardCarrier,
+  type Card,
+  type ContentPart,
+  type MediaSource,
+  type Message,
+  type RunState,
+} from "@superchat/core";
 import {
   useAgentClient,
   useAttachments,
@@ -20,7 +28,7 @@ import {
   useTools,
   type TurnMeta,
 } from "@superchat/react";
-import { CardRenderer, useCardRenderers } from "./renderer-registry.js";
+import { CardRenderer } from "./renderer-registry.js";
 import { renderMarkdown } from "./markdown.js";
 import {
   applyPick,
@@ -141,19 +149,35 @@ export function MessageView({
   respond?: ReturnType<typeof useCardAction>["respond"];
   onRegenerate?: () => void;
 }) {
-  const renderers = useCardRenderers();
   const { cards, rest, providerTools } = useMemo(() => partsOf(message), [message]);
 
-  const text = rest.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join("");
-  const reasoning = rest.filter((p) => p.type === "reasoning").map((p) => (p as { text: string }).text).join("");
-  const calls = rest.filter((p): p is Extract<ContentPart, { type: "tool-call" }> => p.type === "tool-call");
-  const results = rest.filter((p): p is Extract<ContentPart, { type: "tool-result" }> => p.type === "tool-result");
+  // One pass over `rest` instead of four separate filter/map passes.
+  const { text, reasoning, calls, results } = useMemo(() => {
+    let text = "";
+    let reasoning = "";
+    const calls: Extract<ContentPart, { type: "tool-call" }>[] = [];
+    const results: Extract<ContentPart, { type: "tool-result" }>[] = [];
+    for (const p of rest) {
+      if (p.type === "text") text += (p as { text: string }).text;
+      else if (p.type === "reasoning") reasoning += (p as { text: string }).text;
+      else if (p.type === "tool-call") calls.push(p);
+      else if (p.type === "tool-result") results.push(p);
+    }
+    return { text, reasoning, calls, results };
+  }, [rest]);
   const html = useMemo(() => renderMarkdown(text), [text]);
 
   // Split cards: interactive ones stay at top level, read-only ones may sit with
-  // the tool activity they came from.
-  const interactive = cards.filter((c) => isInteractiveKind((c.spec as { kind?: string }).kind));
-  const passive = cards.filter((c) => !interactive.includes(c));
+  // the tool activity they came from. One pass rather than a filter whose
+  // predicate does an O(n) `.includes()` scan of the other filter's output.
+  const { interactive, passive } = useMemo(() => {
+    const interactive: Card[] = [];
+    const passive: Card[] = [];
+    for (const c of cards) {
+      (isInteractiveKind((c.spec as { kind?: string }).kind) ? interactive : passive).push(c);
+    }
+    return { interactive, passive };
+  }, [cards]);
 
   const media = rest.filter(
     (p): p is Extract<ContentPart, { type: "image" | "file" | "audio" }> =>
@@ -358,8 +382,11 @@ function ToolActivity({
   results: Extract<ContentPart, { type: "tool-result" }>[];
 }) {
   const [open, setOpen] = useState(false);
-  const byId = new Map(results.map((r) => [r.callId, r]));
-  const items = calls.length ? calls : results.map((r) => ({ callId: r.callId, name: r.name, input: undefined, status: "done" as const }));
+  const { byId, items } = useMemo(() => {
+    const byId = new Map(results.map((r) => [r.callId, r]));
+    const items = calls.length ? calls : results.map((r) => ({ callId: r.callId, name: r.name, input: undefined, status: "done" as const }));
+    return { byId, items };
+  }, [calls, results]);
   const failures = results.filter((r) => r.failure).length;
 
   const running = items.filter((c) => !byId.has(c.callId));
@@ -445,6 +472,46 @@ function useThinkingDuration(runId: string, hasReasoning: boolean, hasText: bool
   return seconds;
 }
 
+/**
+ * Batches a fast-changing value to at most once per animation frame while
+ * `active`, so a caller doing real work off it (e.g. reparsing markdown) does
+ * that work once per frame instead of once per streamed token. Once `active`
+ * goes false, any pending frame is dropped and the exact current value is
+ * returned immediately — no stale throttled snapshot lingers past the point
+ * the caller stops throttling.
+ */
+function useFrameThrottled<T>(value: T, active: boolean): T {
+  const [display, setDisplay] = useState(value);
+  const frame = useRef<number | null>(null);
+  const latest = useRef(value);
+  latest.current = value;
+
+  useEffect(() => {
+    if (!active) {
+      if (frame.current != null) {
+        cancelAnimationFrame(frame.current);
+        frame.current = null;
+      }
+      setDisplay(value);
+      return;
+    }
+    if (frame.current != null) return; // a frame is already pending — it will pick up the latest value
+    frame.current = requestAnimationFrame(() => {
+      frame.current = null;
+      setDisplay(latest.current);
+    });
+  }, [value, active]);
+
+  useEffect(
+    () => () => {
+      if (frame.current != null) cancelAnimationFrame(frame.current);
+    },
+    [],
+  );
+
+  return active ? display : value;
+}
+
 /** The live turn: streamed text, cards as they arrive, and any blocking card. */
 export function LiveTurn() {
   const run = useRun();
@@ -454,7 +521,12 @@ export function LiveTurn() {
   // Hooks must run on every render path — this sits above the early return, or
   // the hook count changes the moment a run starts and React tears the page down.
   const text = run.parts.filter((p) => p.type === "text").map((p) => (p as { text: string }).text).join("");
-  const html = useMemo(() => renderMarkdown(text), [text]);
+  // Streamed text arrives token by token; re-running the markdown pipeline on
+  // every one of them is O(n²) over the full response. Batch it to once per
+  // frame while the run is actually streaming, and snap to the exact final
+  // text the instant it isn't.
+  const throttledText = useFrameThrottled(text, run.status === "running");
+  const html = useMemo(() => renderMarkdown(throttledText), [throttledText]);
   const thoughtFor = useThinkingDuration(run.runId, run.parts.some((p) => p.type === "reasoning"), Boolean(text));
 
   if (run.status === "idle" || run.status === "done") return null;
@@ -514,7 +586,7 @@ export function LiveTurn() {
  * status line that cycles through plausible-sounding stages while the agent does
  * something else is a lie, and users notice when it never matches the tool list.
  */
-function statusLine(run: ReturnType<typeof useRun>): string {
+function statusLine(run: RunState): string {
   if (run.job) return `Working in the background — ${run.job.status}`;
   if (run.pendingCard) return "Waiting for you";
   const lastCall = [...run.parts].reverse().find((p) => p.type === "tool-call") as

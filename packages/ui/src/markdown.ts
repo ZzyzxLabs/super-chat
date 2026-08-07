@@ -3,7 +3,15 @@
 // Deliberately not a full parser — a chat message or card body is short, and
 // pulling in a markdown library plus a sanitizer for this is disproportionate.
 // Everything is escaped first, so model output cannot inject markup.
+
+// Cheap pre-check: none of these characters appear anywhere, so none of the
+// heading/emphasis/link/list/fence rules below could possibly match — plain
+// chat replies (the common case) skip the whole regex pipeline.
+const MARKDOWN_SIGNIFICANT = /[`*_#[\]>-]/;
+
 export function renderMarkdown(src: string): string {
+  if (!MARKDOWN_SIGNIFICANT.test(src)) return renderPlainText(src);
+
   // Quotes are escaped because link URLs are interpolated into href="…" — an
   // unescaped quote in a URL would close the attribute and open a new one
   // (browsers recover from the missing-whitespace parse error by reading
@@ -43,4 +51,22 @@ export function renderMarkdown(src: string): string {
   // Restore fences last, as <pre><code> — the body is already HTML-escaped
   // from the pass above, and untouched by anything run in between.
   return html.replace(/<!--sc-fence-(\d+)-->/g, (_m, i: string) => `<pre><code>${fences[Number(i)]}</code></pre>`);
+}
+
+/**
+ * The no-markdown-syntax path: escape for safety and wrap blank-line-separated
+ * blocks in `<p>`, same as the full pipeline's final pass — just without
+ * running the heading/code/emphasis/link/list regexes that could not have
+ * matched anything anyway.
+ */
+function renderPlainText(src: string): string {
+  const escaped = src
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+  return escaped
+    .split(/\n{2,}/)
+    .map((block) => `<p>${block.replace(/\n/g, "<br/>")}</p>`)
+    .join("");
 }

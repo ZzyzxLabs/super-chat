@@ -159,11 +159,15 @@ export function repairToolArguments(raw: unknown): RepairResult {
 
   const candidates: string[] = [];
   const defenced = trimmed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+  // Computed once and reused below — every candidate after this one builds on
+  // the same `defenced` input, so repeating the call just repeats the work.
+  const controlCharsEscaped = escapeControlCharsInStrings(defenced);
+  const noTrailingCommas = dropTrailingCommas(controlCharsEscaped);
   candidates.push(defenced);
-  candidates.push(escapeControlCharsInStrings(defenced));
-  candidates.push(dropTrailingCommas(escapeControlCharsInStrings(defenced)));
+  candidates.push(controlCharsEscaped);
+  candidates.push(noTrailingCommas);
   candidates.push(
-    dropTrailingCommas(escapeControlCharsInStrings(defenced))
+    noTrailingCommas
       // Python literals, only as standalone tokens so "None of the above" survives.
       .replace(/\bTrue\b/g, "true")
       .replace(/\bFalse\b/g, "false")
@@ -171,9 +175,7 @@ export function repairToolArguments(raw: unknown): RepairResult {
   );
   // Single quotes last: it is the most destructive fix (an apostrophe inside a
   // value becomes a quote), so it only runs when everything else has failed.
-  candidates.push(
-    dropTrailingCommas(escapeControlCharsInStrings(defenced)).replace(/'([^'\\]*)'(\s*[:,}\]])/g, '"$1"$2'),
-  );
+  candidates.push(noTrailingCommas.replace(/'([^'\\]*)'(\s*[:,}\]])/g, '"$1"$2'));
   const extracted = extractJsonObject(defenced);
   if (extracted) {
     candidates.push(extracted, dropTrailingCommas(escapeControlCharsInStrings(extracted)));

@@ -13,6 +13,7 @@
 import { AgentError, toAgentError } from "../../errors.js";
 import { errorFromResponse, withRetry } from "../../transport/retry.js";
 import type { RetryPolicy, Transport } from "../../transport/types.js";
+import { withDefaultTimeout } from "../shared.js";
 import type {
   CallOptions,
   GenerateResult,
@@ -22,7 +23,7 @@ import type {
   ProviderCapabilities,
   StreamEvent,
 } from "../types.js";
-import { buildAnthropicRequest, usesOwnFiles } from "./map-in.js";
+import { buildAnthropicRequest } from "./map-in.js";
 import { finishFromAnthropic, partsFromAnthropic, usageFromAnthropic } from "./map-out.js";
 import { streamAnthropic } from "./stream.js";
 import type { AnthropicResponse } from "./wire.js";
@@ -72,6 +73,10 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): Provid
     opts: CallOptions | undefined,
     extra: { stream?: boolean; betas?: string[] } = {},
   ): Promise<Response> {
+    // A caller that never passes (or triggers) its own signal must not hang
+    // forever on a stalled connection — the default timeout is a floor, not a
+    // ceiling: whichever of the two signals fires first wins.
+    const signal = withDefaultTimeout(opts?.signal);
     return withRetry(
       async () => {
         const res = await config.transport.fetch({
@@ -85,16 +90,44 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): Provid
             ...(extra.betas?.length ? { "anthropic-beta": extra.betas.join(",") } : {}),
             ...opts?.headers,
           },
-          signal: opts?.signal,
+          signal,
         });
         if (!res.ok) throw await errorFromResponse(res, id);
         return res;
       },
-      { policy: config.retry, signal: opts?.signal, provider: id },
+      { policy: config.retry, signal, provider: id },
     );
   }
 
-  function guardRequest(req: NormalizedRequest) {
+  /** Everything `guardRequest` and `betasFor` need, computed in one pass over every part. */
+  type MediaScan = { hasImage: boolean; hasSilentAudio: boolean; usesOwnFiles: boolean };
+
+  /**
+   * `guardRequest`'s per-type capability checks and `betasFor`'s "does this
+   * request reference a file this provider instance minted" check used to
+   * each rescan the whole message list independently — up to three full
+   * walks of the same parts per call. One pass computes all of it together.
+   */
+  function scanRequest(req: NormalizedRequest): MediaScan {
+    let hasImage = false;
+    let hasSilentAudio = false;
+    let usesOwnFiles = false;
+    for (const m of req.messages) {
+      for (const p of m.parts) {
+        if (p.type === "image") {
+          hasImage = true;
+          if (p.source.kind === "providerFile" && p.source.provider === id) usesOwnFiles = true;
+        } else if (p.type === "file") {
+          if (p.source.kind === "providerFile" && p.source.provider === id) usesOwnFiles = true;
+        } else if (p.type === "audio" && !p.transcript) {
+          hasSilentAudio = true;
+        }
+      }
+    }
+    return { hasImage, hasSilentAudio, usesOwnFiles };
+  }
+
+  function guardRequest(req: NormalizedRequest, scan: MediaScan) {
     if (req.background) {
       throw new AgentError("not-supported", `Provider "${id}" has no background mode. Use streaming or sync.`, {
         provider: id,
@@ -107,17 +140,13 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): Provid
         { provider: id },
       );
     }
-    const has = (type: "image" | "file" | "audio") => req.messages.some((m) => m.parts.some((p) => p.type === type));
-    if (!capabilities.images && has("image")) {
+    if (!capabilities.images && scan.hasImage) {
       throw new AgentError("not-supported", `Provider "${id}" does not accept image parts.`, { provider: id });
     }
-    if (!capabilities.audio && has("audio")) {
-      // Audio degrades to transcript text in the builder; only refuse when
-      // there is nothing to degrade to.
-      const silent = req.messages.some((m) => m.parts.some((p) => p.type === "audio" && !p.transcript));
-      if (silent) {
-        throw new AgentError("not-supported", `Provider "${id}" does not accept audio parts.`, { provider: id });
-      }
+    // Audio degrades to transcript text in the builder; only refuse when
+    // there is a part with nothing to degrade to.
+    if (!capabilities.audio && scan.hasSilentAudio) {
+      throw new AgentError("not-supported", `Provider "${id}" does not accept audio parts.`, { provider: id });
     }
   }
 
@@ -133,8 +162,7 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): Provid
       ? req
       : { ...req, tools: req.tools!.map(({ strict: _strict, ...t }) => t) };
 
-  const betasFor = (req: NormalizedRequest): string[] =>
-    usesOwnFiles(req, id) ? ["files-api-2025-04-14"] : [];
+  const betasFor = (scan: MediaScan): string[] => (scan.usesOwnFiles ? ["files-api-2025-04-14"] : []);
 
   return {
     id,
@@ -143,9 +171,10 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): Provid
     transport: config.transport,
 
     async generate(rawReq, opts): Promise<GenerateResult> {
-      guardRequest(rawReq);
+      const scan = scanRequest(rawReq);
+      guardRequest(rawReq, scan);
       const req = applyCapabilities(rawReq);
-      const res = await call(buildAnthropicRequest(req, buildOpts()), opts, { betas: betasFor(req) });
+      const res = await call(buildAnthropicRequest(req, buildOpts()), opts, { betas: betasFor(scan) });
       const json = (await res.json()) as AnthropicResponse;
       return {
         parts: partsFromAnthropic(json),
@@ -158,12 +187,13 @@ export function createAnthropicProvider(config: AnthropicProviderConfig): Provid
     },
 
     async *stream(rawReq, opts): AsyncIterable<StreamEvent> {
-      guardRequest(rawReq);
+      const scan = scanRequest(rawReq);
+      guardRequest(rawReq, scan);
       const req = applyCapabilities(rawReq);
       try {
         const res = await call(buildAnthropicRequest(req, buildOpts(true)), opts, {
           stream: true,
-          betas: betasFor(req),
+          betas: betasFor(scan),
         });
         if (!res.body) throw new AgentError("network", "Response had no body to stream.", { provider: id });
         yield* streamAnthropic(res.body);

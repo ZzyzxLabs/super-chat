@@ -34,14 +34,34 @@ export type MemoryStore = {
   remove(key: string, vars?: Record<string, unknown>): Promise<void>;
 };
 
-export function createMemoryMemoryStore(): MemoryStore {
+/**
+ * Total facts a store keeps before it starts evicting. Distinct from
+ * `MemorySourceOptions.maxEntries` (below), which caps how many of the
+ * stored facts are injected into a single turn's context — this cap bounds
+ * the store itself so it doesn't grow forever.
+ */
+const DEFAULT_STORE_CAP = 500;
+
+/** Most-recently-updated first, so a cap-and-slice keeps the freshest facts. */
+function byRecency(a: MemoryEntry, b: MemoryEntry): number {
+  return b.updatedAt - a.updatedAt;
+}
+
+export function createMemoryMemoryStore(opts: { maxEntries?: number } = {}): MemoryStore {
+  const cap = opts.maxEntries ?? DEFAULT_STORE_CAP;
   const entries = new Map<string, MemoryEntry>();
   return {
     async list() {
-      return [...entries.values()].sort((a, b) => a.key.localeCompare(b.key));
+      return [...entries.values()].sort(byRecency);
     },
     async set(key, value) {
       entries.set(key, { key, value, updatedAt: Date.now() });
+      if (entries.size > cap) {
+        // Evict oldest-by-updatedAt beyond the cap, at write time — a store
+        // that only trims at read time never actually shrinks.
+        const overflow = [...entries.values()].sort(byRecency).slice(cap);
+        for (const e of overflow) entries.delete(e.key);
+      }
     },
     async remove(key) {
       entries.delete(key);
@@ -50,7 +70,8 @@ export function createMemoryMemoryStore(): MemoryStore {
 }
 
 /** localStorage-backed store — same defensiveness as the job/file stores. */
-export function createLocalMemoryStore(storageKey = "superchat:memory"): MemoryStore {
+export function createLocalMemoryStore(storageKey = "superchat:memory", opts: { maxEntries?: number } = {}): MemoryStore {
+  const cap = opts.maxEntries ?? DEFAULT_STORE_CAP;
   const read = (): Record<string, MemoryEntry> => {
     try {
       const raw = getItemWithLegacy(storageKey);
@@ -69,11 +90,16 @@ export function createLocalMemoryStore(storageKey = "superchat:memory"): MemoryS
   };
   return {
     async list() {
-      return Object.values(read()).sort((a, b) => a.key.localeCompare(b.key));
+      return Object.values(read()).sort(byRecency);
     },
     async set(key, value) {
       const all = read();
       all[key] = { key, value, updatedAt: Date.now() };
+      const keys = Object.keys(all);
+      if (keys.length > cap) {
+        const overflow = keys.map((k) => all[k]!).sort(byRecency).slice(cap);
+        for (const e of overflow) delete all[e.key];
+      }
       write(all);
     },
     async remove(key) {

@@ -54,9 +54,32 @@ export async function awaitJob(
         provider: provider.id,
       });
     }
-    await new Promise((r) => setTimeout(r, interval));
+    await pollWait(interval, opts.signal);
     interval = Math.min(interval * 1.5, maxInterval);
   }
+}
+
+/**
+ * Abort-aware wait for the poll interval. A plain `setTimeout` promise
+ * ignores `signal`, which lets cancelling a background-job wait lag behind by
+ * up to `maxIntervalMs` — this rejects the moment the signal aborts instead.
+ */
+function pollWait(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new AgentError("cancelled", "Job wait was cancelled."));
+      return;
+    }
+    const onAbort = () => {
+      clearTimeout(t);
+      reject(new AgentError("cancelled", "Job wait was cancelled."));
+    };
+    const t = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export type StoredJob = {
@@ -95,44 +118,73 @@ export function createMemoryJobStore(): JobStore {
 }
 
 /**
- * localStorage-backed store. Survives reloads, which is the whole point.
+ * localStorage-backed store, key per job: `{prefix}:index` holds the list of
+ * live job ids, `{prefix}:{id}` holds one job. `resumeJobs`/`reap` put or
+ * remove one job at a time in a loop — a single-blob layout would mean
+ * re-parsing and re-stringifying every OTHER job's data on each of those
+ * calls, which turns an O(n) sweep into O(n²) localStorage churn.
+ *
  * Every read is defensive: a corrupted or hand-edited entry must not throw on
  * app start.
  */
-export function createLocalJobStore(key = "superchat:jobs"): JobStore {
-  const read = (): Record<string, StoredJob> => {
+export function createLocalJobStore(prefix = "superchat:jobs"): JobStore {
+  const indexKey = `${prefix}:index`;
+  const jobKey = (id: string) => `${prefix}:${id}`;
+
+  const readIndex = (): string[] => {
     try {
-      const raw = getItemWithLegacy(key);
-      const parsed = raw ? (JSON.parse(raw) as unknown) : {};
-      return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, StoredJob>) : {};
+      const raw = getItemWithLegacy(indexKey);
+      const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+      return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
     } catch {
-      return {};
+      return [];
     }
   };
-  const write = (all: Record<string, StoredJob>) => {
+  const writeIndex = (ids: string[]): void => {
     try {
-      globalThis.localStorage?.setItem(key, JSON.stringify(all));
+      globalThis.localStorage?.setItem(indexKey, JSON.stringify(ids));
     } catch {
-      // Quota or private mode — a lost handle degrades to "no resume", not a crash.
+      // Quota or private mode — a stale index degrades to a missed job, not a crash.
+    }
+  };
+  const readJob = (id: string): StoredJob | undefined => {
+    try {
+      const raw = getItemWithLegacy(jobKey(id));
+      return raw ? (JSON.parse(raw) as StoredJob) : undefined;
+    } catch {
+      return undefined;
     }
   };
 
   return {
     async list() {
-      return Object.values(read()).sort((a, b) => b.createdAt - a.createdAt);
+      const jobs = readIndex()
+        .map((id) => readJob(id))
+        .filter((j): j is StoredJob => j != null);
+      return jobs.sort((a, b) => b.createdAt - a.createdAt);
     },
     async get(id) {
-      return read()[id];
+      return readJob(id);
     },
     async put(job) {
-      const all = read();
-      all[job.handle.id] = job;
-      write(all);
+      const id = job.handle.id;
+      try {
+        globalThis.localStorage?.setItem(jobKey(id), JSON.stringify(job));
+      } catch {
+        // Quota or private mode — a lost handle degrades to "no resume", not a crash.
+        return;
+      }
+      const index = readIndex();
+      if (!index.includes(id)) writeIndex([...index, id]);
     },
     async remove(id) {
-      const all = read();
-      delete all[id];
-      write(all);
+      try {
+        globalThis.localStorage?.removeItem(jobKey(id));
+      } catch {
+        // removeItem does not throw for quota; being defensive costs nothing.
+      }
+      const index = readIndex();
+      if (index.includes(id)) writeIndex(index.filter((x) => x !== id));
     },
   };
 }

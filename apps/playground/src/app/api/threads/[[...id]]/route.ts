@@ -14,6 +14,28 @@ export const dynamic = "force-dynamic";
 
 const threads = new Map<string, StoredThread>();
 
+/**
+ * Demo-scale cap, not an LRU library: once over this, evict the
+ * least-recently-updated thread(s) so the process doesn't grow forever. A real
+ * deployment swaps the Map for a database, which doesn't have this problem.
+ */
+const MAX_THREADS = 500;
+
+function evictOldest(): void {
+  while (threads.size > MAX_THREADS) {
+    let oldestId: string | undefined;
+    let oldestAt = Infinity;
+    for (const [id, t] of threads) {
+      if (t.meta.updatedAt < oldestAt) {
+        oldestAt = t.meta.updatedAt;
+        oldestId = id;
+      }
+    }
+    if (!oldestId) break;
+    threads.delete(oldestId);
+  }
+}
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
@@ -45,6 +67,7 @@ export async function PUT(request: Request, ctx: { params: Promise<{ id?: string
   // Trust the path, not the payload — a mismatched body.meta.id must not let
   // one thread overwrite another.
   threads.set(id, { ...body, meta: { ...body.meta, id } });
+  evictOldest();
   return new Response(null, { status: 204 });
 }
 

@@ -60,9 +60,27 @@ function formatTimeTick(t: number, span: number): string {
 }
 
 /** Keep an axis to ~8 labels; past that they overlap into an unreadable smear. */
-function thin<T>(items: T[]): T[] {
-  const step = Math.ceil(items.length / 8) || 1;
+function thin<T>(items: T[], max = 8): T[] {
+  const step = Math.ceil(items.length / max) || 1;
   return items.filter((_, i) => i % step === 0);
+}
+
+// Beyond this many points, bar/scatter series are thinned the same way axis
+// ticks are — one <rect>/<circle> per data point stops being free once a
+// series has thousands of them, and they'd overdraw into a solid smear anyway.
+const MAX_MARKS = 500;
+
+/** `Math.min(...values)` throws past ~100k call-stack args; a plain loop doesn't. */
+function arrMin(values: number[], seed = Infinity): number {
+  let m = seed;
+  for (const v of values) if (v < m) m = v;
+  return m;
+}
+
+function arrMax(values: number[], seed = -Infinity): number {
+  let m = seed;
+  for (const v of values) if (v > m) m = v;
+  return m;
 }
 
 export function ChartCardView({ spec }: CardRendererProps<ChartCard>) {
@@ -75,8 +93,8 @@ export function ChartCardView({ spec }: CardRendererProps<ChartCard>) {
 
     if (isCandles) {
       const candles = spec.candles!;
-      const lo = Math.min(...candles.map((c) => c.l));
-      const hi = Math.max(...candles.map((c) => c.h));
+      const lo = arrMin(candles.map((c) => c.l));
+      const hi = arrMax(candles.map((c) => c.h));
       const pad = (hi - lo) * 0.05 || 1;
       const yMin = lo - pad;
       const yMax = hi + pad;
@@ -104,10 +122,10 @@ export function ChartCardView({ spec }: CardRendererProps<ChartCard>) {
     // The x domain is the data's own extent. Seeding it with 0 the way the y
     // domain is would put the epoch on a time axis and squash every point into
     // the last pixel of the plot.
-    const xMin = xs.length ? Math.min(...xs) : 0;
-    const xMax = xs.length ? Math.max(...xs) : 1;
-    const yMinRaw = Math.min(...ys, 0);
-    const yMaxRaw = Math.max(...ys, 1);
+    const xMin = xs.length ? arrMin(xs) : 0;
+    const xMax = xs.length ? arrMax(xs) : 1;
+    const yMinRaw = arrMin(ys, 0);
+    const yMaxRaw = arrMax(ys, 1);
     const yPad = (yMaxRaw - yMinRaw) * 0.08 || 1;
     const yMin = yMinRaw < 0 ? yMinRaw - yPad : Math.max(0, yMinRaw - yPad);
     const yMax = yMaxRaw + yPad;
@@ -172,12 +190,14 @@ export function ChartCardView({ spec }: CardRendererProps<ChartCard>) {
 
                 if (s.type === "bar") {
                   const bw = Math.max(2, ((W - PAD.left - PAD.right) / Math.max(1, pts.length)) * 0.6);
-                  return pts.map(([px, py], i) => (
+                  const marks = pts.length > MAX_MARKS ? thin(pts, MAX_MARKS) : pts;
+                  return marks.map(([px, py], i) => (
                     <rect key={`${si}-${i}`} x={px - bw / 2} y={py} width={bw} height={Math.max(0, model.y(0) - py)} fill={color} rx={2} />
                   ));
                 }
                 if (s.type === "scatter") {
-                  return pts.map(([px, py], i) => <circle key={`${si}-${i}`} cx={px} cy={py} r={3} fill={color} />);
+                  const marks = pts.length > MAX_MARKS ? thin(pts, MAX_MARKS) : pts;
+                  return marks.map(([px, py], i) => <circle key={`${si}-${i}`} cx={px} cy={py} r={3} fill={color} />);
                 }
 
                 const d = pts.map(([px, py], i) => `${i === 0 ? "M" : "L"}${px.toFixed(2)},${py.toFixed(2)}`).join(" ");

@@ -30,7 +30,7 @@ export type CardKindDefinition = {
   estimateTokens?: (spec: CardSpec) => number;
 };
 
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+export const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Small validator helpers — enough to give the model an actionable correction. */
 export const check = {
@@ -50,7 +50,7 @@ export const check = {
   },
 };
 
-const failed = (v: unknown): v is CardValidation => isObj(v) && "ok" in v && (v as { ok: unknown }).ok === false;
+export const failed = (v: unknown): v is CardValidation => isObj(v) && "ok" in v && (v as { ok: unknown }).ok === false;
 
 export class CardRegistry {
   private kinds = new Map<string, CardKindDefinition>();

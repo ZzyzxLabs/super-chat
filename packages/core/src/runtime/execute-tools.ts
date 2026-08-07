@@ -55,11 +55,17 @@ export type ExecuteToolOptions = {
   requestCard?: (callId: string, spec: CardSpec) => Promise<unknown>;
   /** Host-executed tools (no `execute`) are delegated here. */
   onHostTool?: (call: ToolCallRequest) => Promise<unknown>;
+  /**
+   * Precomputed name→tool index. `executeToolCalls` builds this once per
+   * batch and reuses it here instead of a linear `tools.find` per call; a
+   * standalone `executeToolCall` caller can leave it unset and pay the scan.
+   */
+  toolIndex?: ReadonlyMap<string, ToolDefinition>;
 };
 
 export async function executeToolCall(call: ToolCallRequest, opts: ExecuteToolOptions): Promise<ToolCallOutcome> {
   const started = Date.now();
-  const tool = opts.tools.find((t) => t.name === call.name);
+  const tool = opts.toolIndex ? opts.toolIndex.get(call.name) : opts.tools.find((t) => t.name === call.name);
 
   if (!tool) {
     // Name the tools that DO exist — a model that hallucinated a name recovers
@@ -154,14 +160,20 @@ export async function executeToolCalls(
   calls: readonly ToolCallRequest[],
   opts: ExecuteToolOptions,
 ): Promise<ToolCallOutcome[]> {
+  // Built once for the whole batch and reused for both the interactive filter
+  // below and every executeToolCall — a linear tools.find() per call, twice
+  // over, is wasted work once the tool list is more than a handful long.
+  const toolIndex = opts.toolIndex ?? new Map(opts.tools.map((t) => [t.name, t] as const));
+  const callOpts: ExecuteToolOptions = opts.toolIndex ? opts : { ...opts, toolIndex };
+
   // Interactive tools must NOT run in parallel — two confirm dialogs racing for
   // the same user is not a thing a user can answer.
-  const interactive = calls.filter((c) => opts.tools.find((t) => t.name === c.name)?.side === "confirm");
+  const interactive = calls.filter((c) => toolIndex.get(c.name)?.side === "confirm");
   const concurrent = calls.filter((c) => !interactive.includes(c));
 
-  const concurrentResults = await Promise.all(concurrent.map((c) => executeToolCall(c, opts)));
+  const concurrentResults = await Promise.all(concurrent.map((c) => executeToolCall(c, callOpts)));
   const serialResults: ToolCallOutcome[] = [];
-  for (const c of interactive) serialResults.push(await executeToolCall(c, opts));
+  for (const c of interactive) serialResults.push(await executeToolCall(c, callOpts));
 
   const byId = new Map([...concurrentResults, ...serialResults].map((r) => [r.callId, r]));
   return calls.map((c) => byId.get(c.callId)!).filter(Boolean);

@@ -57,6 +57,18 @@ describe("McpClient", () => {
     expect(sent.filter((s) => s.rpc.method === "initialize")).toHaveLength(1);
   });
 
+  it("dedupes concurrent connects into a single in-flight initialize", async () => {
+    const { transport, sent } = mcpTransport({ initialize: initHandler });
+    const client = new McpClient({ transport });
+
+    // Three callers racing before the first handshake resolves must share it,
+    // not each fire their own `initialize` round trip.
+    const [a, b, c] = await Promise.all([client.connect(), client.connect(), client.connect()]);
+    expect(sent.filter((s) => s.rpc.method === "initialize")).toHaveLength(1);
+    expect(a).toEqual(b);
+    expect(b).toEqual(c);
+  });
+
   it("captures the session id from initialize and echoes it on later requests", async () => {
     const { transport, sent } = mcpTransport(
       { initialize: initHandler, "tools/list": () => ({ result: { tools: [] } }) },
@@ -210,6 +222,13 @@ describe("McpClient", () => {
     const client = new McpClient({ transport });
     const controller = new AbortController();
     await client.callTool("x", {}, { signal: controller.signal });
-    expect(seenSignal).toBe(controller.signal);
+    // The client combines the caller's signal with its own default timeout
+    // (so a hung server can't block forever), so the transport doesn't see
+    // the exact same object — but aborting the caller's signal must still
+    // abort the one the transport was given.
+    expect(seenSignal).toBeDefined();
+    expect(seenSignal?.aborted).toBe(false);
+    controller.abort();
+    expect(seenSignal?.aborted).toBe(true);
   });
 });

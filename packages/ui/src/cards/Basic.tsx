@@ -57,6 +57,21 @@ export function TableCardView({ spec }: CardRendererProps<TableCard>) {
     });
   }, [spec.rows, sortBy, sortDir]);
 
+  // A stable key per row: the row's own `id` when the payload carries one,
+  // otherwise its position in spec.rows *before* sorting. Sorting reorders the
+  // `rows` array on every column click — keying off the sorted array's index
+  // would rekey (and remount) every row each time the user re-sorts.
+  const originalIndex = useMemo(() => {
+    const m = new Map<Record<string, unknown>, number>();
+    spec.rows.forEach((row, i) => m.set(row, i));
+    return m;
+  }, [spec.rows]);
+  const rowKey = (row: Record<string, unknown>): string | number => {
+    const id = row["id"];
+    if (typeof id === "string" || typeof id === "number") return id;
+    return originalIndex.get(row) ?? -1;
+  };
+
   // Truncation reads off the sorted array, not spec.rows — the user asked to
   // see the top 30 of *this* ordering, not the top 30 of whatever order the
   // agent originally sent.
@@ -96,8 +111,8 @@ export function TableCardView({ spec }: CardRendererProps<TableCard>) {
                 </td>
               </tr>
             ) : (
-              visibleRows.map((row, i) => (
-                <tr key={i}>
+              visibleRows.map((row) => (
+                <tr key={rowKey(row)}>
                   {spec.columns.map((c) => (
                     <td key={c.key} style={{ textAlign: c.align ?? "left" }}>
                       {c.pill ? (
@@ -305,7 +320,14 @@ export function DiffCardView({ spec }: CardRendererProps<DiffCard>) {
   );
 }
 
+// Above this many lines on either side, the classic (n+1)×(m+1) LCS matrix
+// gets big enough to matter (a 5000-line file is 25M cells) — fall back to a
+// cheap linear diff instead of allocating it.
+const DIFF_LCS_LINE_CAP = 2000;
+
 function diffLines(a: string[], b: string[]): { kind: "same" | "add" | "del"; text: string }[] {
+  if (a.length > DIFF_LCS_LINE_CAP || b.length > DIFF_LCS_LINE_CAP) return diffLinesFast(a, b);
+
   const n = a.length;
   const m = b.length;
   const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
@@ -332,5 +354,32 @@ function diffLines(a: string[], b: string[]): { kind: "same" | "add" | "del"; te
   }
   while (i < n) out.push({ kind: "del", text: a[i++]! });
   while (j < m) out.push({ kind: "add", text: b[j++]! });
+  return out;
+}
+
+/**
+ * O(n) fallback for inputs too large for full LCS. Trims the matching prefix
+ * and suffix and treats everything between as one wholesale removal +
+ * addition. It won't line up a match buried in the middle the way LCS would,
+ * but it never allocates more than a handful of arrays no matter how large
+ * the input is.
+ */
+function diffLinesFast(a: string[], b: string[]): { kind: "same" | "add" | "del"; text: string }[] {
+  let start = 0;
+  const maxStart = Math.min(a.length, b.length);
+  while (start < maxStart && a[start] === b[start]) start += 1;
+
+  let endA = a.length;
+  let endB = b.length;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) {
+    endA -= 1;
+    endB -= 1;
+  }
+
+  const out: { kind: "same" | "add" | "del"; text: string }[] = [];
+  for (let i = 0; i < start; i += 1) out.push({ kind: "same", text: a[i]! });
+  for (let i = start; i < endA; i += 1) out.push({ kind: "del", text: a[i]! });
+  for (let i = start; i < endB; i += 1) out.push({ kind: "add", text: b[i]! });
+  for (let i = endA; i < a.length; i += 1) out.push({ kind: "same", text: a[i]! });
   return out;
 }

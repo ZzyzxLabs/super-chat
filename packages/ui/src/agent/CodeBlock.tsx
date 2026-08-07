@@ -57,6 +57,11 @@ const CheckIcon = () => (
   </svg>
 );
 
+// Rows beyond this render behind a "Show all" toggle — a multi-thousand-line
+// file would otherwise put that many DOM rows on the page up front, unrendered
+// or not, for a block nobody scrolled to.
+const LINE_TRUNCATE_AT = 500;
+
 const DownloadIcon = () => (
   <svg
     viewBox="0 0 24 24"
@@ -75,12 +80,15 @@ const DownloadIcon = () => (
 
 export function CodeBlock({ code, lang, filename, lineNumbers = true, highlight, downloadName }: CodeBlockProps) {
   const [copied, setCopied] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => void (timer.current && clearTimeout(timer.current)), []);
 
   const lines = code.replace(/\n$/, "").split("\n");
   const marked = new Set(highlight ?? []);
   const title = filename ?? lang ?? "code";
+  const truncated = lines.length > LINE_TRUNCATE_AT;
+  const visibleLines = showAll ? lines : lines.slice(0, LINE_TRUNCATE_AT);
 
   const copy = () => {
     // clipboard is absent on http:// origins and in some embedded webviews;
@@ -139,7 +147,7 @@ export function CodeBlock({ code, lang, filename, lineNumbers = true, highlight,
         ) : null}
       </div>
       <div className={"sc-code__body" + (lineNumbers ? "" : " sc-code__body--nogutter")}>
-        {lines.map((line, i) => (
+        {visibleLines.map((line, i) => (
           <div
             className={"sc-code__row" + (marked.has(i + 1) ? " sc-code__row--mark" : "")}
             key={i}
@@ -149,6 +157,11 @@ export function CodeBlock({ code, lang, filename, lineNumbers = true, highlight,
           </div>
         ))}
       </div>
+      {truncated ? (
+        <button type="button" className="sc-btn sc-btn--ghost sc-btn--sm sc-code__more" onClick={() => setShowAll((v) => !v)}>
+          {showAll ? "Show fewer lines" : `Show all (${lines.length} lines)`}
+        </button>
+      ) : null}
     </div>
   );
 }

@@ -14,6 +14,7 @@
 
 import type { ContentPart, Message } from "../../content/types.js";
 import type { NormalizedRequest, ToolSpec } from "../types.js";
+import { collectAnsweredIds, dropUnanswered, filterNativeTools, foreignFileText } from "../shared.js";
 import type {
   ChatContentPart,
   ChatMessage,
@@ -35,18 +36,6 @@ function dataUrl(mediaType: string, base64: string): string {
 // several instances (openai, groq, nvidia, demo) a file id minted by one is
 // meaningless to the others.
 const ownFile = (source: { provider: string }, providerId: string): boolean => source.provider === providerId;
-
-/**
- * A foreign file ref DEGRADES to text instead of throwing. Throwing would be
- * correct for the turn that attached it — but the ref lives in persisted
- * history, so a throw poisons every subsequent turn of the thread (the exact
- * failure mode dropOrphanToolCalls exists to prevent for tool calls). The
- * model reading "[attachment unavailable]" can say so; a permanently 400ing
- * thread can't say anything.
- */
-function foreignFileText(kind: "image" | "file", filename: string | undefined, source: { id: string; provider: string }) {
-  return `[${kind} "${filename ?? source.id}" unavailable — it was uploaded to "${source.provider}" and cannot be read here. Ask the user to re-attach it.]`;
-}
 
 const stringifyOutput = (output: unknown): string =>
   typeof output === "string" ? output : JSON.stringify(output ?? null);
@@ -167,10 +156,8 @@ export function toResponsesInput(messages: readonly Message[], providerId = "ope
  * dangling call costs one lost step and keeps the thread alive.
  */
 export function dropOrphanToolCalls(items: ResponsesInputItem[]): ResponsesInputItem[] {
-  const answered = new Set(
-    items.filter((i) => i.type === "function_call_output").map((i) => (i as { call_id: string }).call_id),
-  );
-  return items.filter((i) => i.type !== "function_call" || answered.has((i as { call_id: string }).call_id));
+  const answered = collectAnsweredIds(items, (i) => (i.type === "function_call_output" ? i.call_id : undefined));
+  return dropUnanswered(items, answered, (i) => (i.type === "function_call" ? i.call_id : undefined));
 }
 
 function toResponsesTools(tools: readonly ToolSpec[]): ResponsesTool[] {
@@ -213,7 +200,7 @@ export function buildResponsesRequest(req: NormalizedRequest, opts: BuildOptions
   // Provider-hosted tools ride in the SAME array as function tools — they are
   // declarations, not executors — and are appended verbatim: the vendor owns
   // this shape and versions it on their cadence, not ours.
-  const nativeTools = (req.providerTools?.[opts.providerId ?? "openai"] ?? []) as Record<string, unknown>[];
+  const nativeTools = filterNativeTools(req.providerTools?.[opts.providerId ?? "openai"]);
   if (req.tools?.length || nativeTools.length) {
     out.tools = [...(req.tools?.length ? toResponsesTools(req.tools) : []), ...nativeTools] as ResponsesTool[];
     if (req.tools?.length) out.tool_choice = toResponsesToolChoice(req);
@@ -392,13 +379,11 @@ export function toChatMessages(messages: readonly Message[], system?: string, pr
 
 /** Same orphan problem as Responses: an assistant tool_call with no `role:"tool"` reply 400s. */
 export function dropOrphanChatToolCalls(messages: ChatMessage[]): ChatMessage[] {
-  const answered = new Set(
-    messages.filter((m): m is Extract<ChatMessage, { role: "tool" }> => m.role === "tool").map((m) => m.tool_call_id),
-  );
+  const answered = collectAnsweredIds(messages, (m) => (m.role === "tool" ? m.tool_call_id : undefined));
   return messages
     .map((m) => {
       if (m.role !== "assistant" || !m.tool_calls?.length) return m;
-      const kept = m.tool_calls.filter((c) => answered.has(c.id));
+      const kept = dropUnanswered(m.tool_calls, answered, (c) => c.id);
       if (kept.length === m.tool_calls.length) return m;
       if (kept.length === 0) {
         const { tool_calls: _dropped, ...rest } = m;
@@ -427,11 +412,12 @@ export function buildChatRequest(req: NormalizedRequest, opts: BuildOptions = {}
     model: req.model,
     messages: toChatMessages(req.messages, req.system, opts.providerId),
   };
-  const nativeChatTools = (req.providerTools?.[opts.providerId ?? "openai"] ?? []) as Record<string, unknown>[];
+  const nativeChatTools = filterNativeTools(req.providerTools?.[opts.providerId ?? "openai"]);
   if (req.tools?.length || nativeChatTools.length) {
     // Chat Completions has no activeTools concept, so narrowing here really does
     // mean shipping fewer declarations.
-    const active = req.activeTools ? (req.tools ?? []).filter((t) => req.activeTools!.includes(t.name)) : (req.tools ?? []);
+    const activeNames = req.activeTools ? new Set(req.activeTools) : undefined;
+    const active = activeNames ? (req.tools ?? []).filter((t) => activeNames.has(t.name)) : (req.tools ?? []);
     if (active.length || nativeChatTools.length) {
       out.tools = [...(active.length ? toChatTools(active) : []), ...nativeChatTools] as ChatTool[];
       if (opts.parallelToolCalls !== false) out.parallel_tool_calls = true;

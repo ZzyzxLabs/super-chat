@@ -15,6 +15,10 @@ export class ToolRegistry {
   private presets = new Map<PresetName, Set<string>>();
   private listeners = new Set<() => void>();
   private version = 0;
+  // Reverse of `presets`: tool name → presets that grant it. Lazily rebuilt —
+  // `touch()` just nulls it out, so a burst of register()/addToPreset() calls
+  // pays for one rebuild on the next presetsFor()/resolve(), not one per call.
+  private reversePresetIndex: Map<string, PresetName[]> | null = null;
 
   constructor(tools: readonly ToolDefinition[] = []) {
     for (const t of tools) this.register(t);
@@ -60,6 +64,7 @@ export class ToolRegistry {
 
   private touch(): void {
     this.version += 1;
+    this.reversePresetIndex = null;
     for (const l of this.listeners) l();
   }
 
@@ -88,7 +93,22 @@ export class ToolRegistry {
 
   /** Which presets grant `name`. Used by the UI to explain why a tool is available. */
   presetsFor(name: string): PresetName[] {
-    return [...this.presets.entries()].filter(([, set]) => set.has(name)).map(([p]) => p);
+    return this.reverseIndex().get(name) ?? [];
+  }
+
+  /** Tool name → presets that grant it, rebuilt on demand after the last mutation. */
+  private reverseIndex(): Map<string, PresetName[]> {
+    if (this.reversePresetIndex) return this.reversePresetIndex;
+    const index = new Map<string, PresetName[]>();
+    for (const [preset, names] of this.presets) {
+      for (const name of names) {
+        const grants = index.get(name);
+        if (grants) grants.push(preset);
+        else index.set(name, [preset]);
+      }
+    }
+    this.reversePresetIndex = index;
+    return index;
   }
 
   /**

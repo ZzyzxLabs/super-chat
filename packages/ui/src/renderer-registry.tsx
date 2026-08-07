@@ -7,7 +7,7 @@
 // bug you can see, whereas a card that vanishes is a bug you find in a support
 // ticket three weeks later.
 
-import { Component, createContext, useContext, useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { Component, createContext, useContext, useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import type { Card, CardAction, CardSpec } from "@superchat/core";
 
 export type CardRendererProps<S extends CardSpec = CardSpec> = {
@@ -25,7 +25,8 @@ const RendererContext = createContext<CardRendererMap>({});
 
 export function CardRendererProvider({ renderers, children }: { renderers: CardRendererMap; children: ReactNode }) {
   const inherited = useContext(RendererContext);
-  return <RendererContext.Provider value={{ ...inherited, ...renderers }}>{children}</RendererContext.Provider>;
+  const value = useMemo(() => ({ ...inherited, ...renderers }), [inherited, renderers]);
+  return <RendererContext.Provider value={value}>{children}</RendererContext.Provider>;
 }
 
 export function useCardRenderers(): CardRendererMap {

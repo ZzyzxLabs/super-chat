@@ -76,11 +76,15 @@ describe("stores read pre-rename data", () => {
     expect(await createLocalFileStore().get("file_1")).toEqual(stored);
   });
 
-  it("job store", async () => {
+  it("job store — index and per-job keys both migrate", async () => {
     const data = fakeLocalStorage();
     const stored = { handle: { id: "resp_1", provider: "openai", status: "queued" }, createdAt: 1 };
-    data.set("agentloom:jobs", JSON.stringify({ resp_1: stored }));
-    expect(await createLocalJobStore().get("resp_1")).toEqual(stored);
+    data.set("agentloom:jobs:index", JSON.stringify(["resp_1"]));
+    data.set("agentloom:jobs:resp_1", JSON.stringify(stored));
+
+    const store = createLocalJobStore();
+    expect(await store.get("resp_1")).toEqual(stored);
+    expect((await store.list()).map((j) => j.handle.id)).toEqual(["resp_1"]);
   });
 
   it("thread store — index and per-thread keys both migrate", async () => {

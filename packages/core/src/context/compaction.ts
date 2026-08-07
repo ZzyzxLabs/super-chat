@@ -57,8 +57,10 @@ export function trimHistory(
   messages: readonly Message[],
   limitTokens: number,
   counter?: TokenCounter,
+  /** Pass this when the caller already scanned `messages` (e.g. `compactHistory`'s `tokensBefore`) to skip a second full-history scan. */
+  knownTokensBefore?: number,
 ): CompactionResult {
-  const tokensBefore = countMessagesTokens(messages, counter);
+  const tokensBefore = knownTokensBefore ?? countMessagesTokens(messages, counter);
   if (tokensBefore <= limitTokens) {
     return { messages: [...messages], strategy: "none", droppedCount: 0, tokensBefore, tokensAfter: tokensBefore };
   }
@@ -111,7 +113,7 @@ export async function compactHistory(
   if (tokensBefore <= opts.limitTokens) {
     return { messages: [...messages], strategy: "none", droppedCount: 0, tokensBefore, tokensAfter: tokensBefore };
   }
-  if (!opts.summarizer) return trimHistory(messages, opts.limitTokens, counter);
+  if (!opts.summarizer) return trimHistory(messages, opts.limitTokens, counter, tokensBefore);
 
   const keepRecent = opts.keepRecent ?? 8;
   const desiredCut = Math.max(0, messages.length - keepRecent);
@@ -120,15 +122,15 @@ export async function compactHistory(
   const recent = messages.slice(cut);
 
   // Nothing old enough to be worth a summarization round-trip.
-  if (older.length < 2) return trimHistory(messages, opts.limitTokens, counter);
+  if (older.length < 2) return trimHistory(messages, opts.limitTokens, counter, tokensBefore);
 
   let summary: string;
   try {
     summary = (await opts.summarizer(older, opts.signal)).trim();
   } catch {
-    return trimHistory(messages, opts.limitTokens, counter);
+    return trimHistory(messages, opts.limitTokens, counter, tokensBefore);
   }
-  if (!summary) return trimHistory(messages, opts.limitTokens, counter);
+  if (!summary) return trimHistory(messages, opts.limitTokens, counter, tokensBefore);
 
   const summaryMessage: Message = {
     id: `summary_${cut}`,
@@ -153,7 +155,9 @@ export async function compactHistory(
   // artifact we just paid a model call to produce.
   if (tokensAfter > opts.limitTokens) {
     const summaryTokens = countMessageTokens(summaryMessage, counter);
-    const trimmed = trimHistory(recent, Math.max(0, opts.limitTokens - summaryTokens), counter);
+    // tokensAfter already accounts for summaryMessage + recent, so recent's
+    // token count falls out for free instead of a second scan.
+    const trimmed = trimHistory(recent, Math.max(0, opts.limitTokens - summaryTokens), counter, tokensAfter - summaryTokens);
     const messages = [summaryMessage, ...trimmed.messages];
     return {
       messages,

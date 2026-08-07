@@ -42,6 +42,8 @@ export class SkillRegistry {
   private readonly matcher: SkillMatcher;
   private readonly maxMatched: number;
   private readonly threshold: number;
+  /** Cached `manualIndex()` render; invalidated by `register`/`unregister`. */
+  private manualIndexCache: string | undefined;
 
   constructor(skills: readonly Skill[] = [], options: SkillRegistryOptions = {}) {
     this.threshold = options.threshold ?? 1.5;
@@ -52,11 +54,13 @@ export class SkillRegistry {
 
   register(skill: Skill): this {
     this.skills.set(skill.id, skill);
+    this.manualIndexCache = undefined;
     return this;
   }
 
   unregister(id: string): this {
     this.skills.delete(id);
+    this.manualIndexCache = undefined;
     return this;
   }
 
@@ -81,8 +85,12 @@ export class SkillRegistry {
    */
   async resolveForTurn(ctx: SkillContext, opts: { forceIds?: string[] } = {}): Promise<ResolvedSkill[]> {
     const forced = new Set(opts.forceIds ?? []);
-    const always = this.list().filter((s) => s.mode === "always" || forced.has(s.id));
-    const matched = this.match(ctx.query)
+    // Computed once and fed to the matcher directly (rather than through
+    // `this.match`, which would call `this.list()` again) — one array
+    // allocation per turn instead of two.
+    const list = this.list();
+    const always = list.filter((s) => s.mode === "always" || forced.has(s.id));
+    const matched = this.matcher(list, ctx.query)
       .filter((m) => m.skill.mode === "matched" && !forced.has(m.skill.id))
       .slice(0, this.maxMatched);
 
@@ -120,13 +128,14 @@ export class SkillRegistry {
    * include every turn — this is the "menu" half of progressive disclosure.
    */
   manualIndex(): string {
+    if (this.manualIndexCache !== undefined) return this.manualIndexCache;
     const manual = this.list().filter((s) => s.mode === "manual");
-    if (!manual.length) return "";
     const lines = manual.map((s) => `- ${s.id}: ${s.description}`);
-    return [
-      "Loadable skills — call `loadSkill` with an id before acting in these areas:",
-      ...lines,
-    ].join("\n");
+    const index = !manual.length
+      ? ""
+      : ["Loadable skills — call `loadSkill` with an id before acting in these areas:", ...lines].join("\n");
+    this.manualIndexCache = index;
+    return index;
   }
 
   /** Everything a `loadSkill` call should return for `id`. */

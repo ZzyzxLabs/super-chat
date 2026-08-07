@@ -292,6 +292,28 @@ function stepIndex(input: ResponsesItem[]): number {
 let seq = 0;
 
 /**
+ * Resolve after `ms`, but reject early if `signal` aborts — a canned delay
+ * must not outlast the user hitting Stop.
+ */
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/**
  * A transport that answers from a script instead of the network.
  *
  * `latencyMs` is deliberate: an instant reply hides every loading state, and the
@@ -304,7 +326,7 @@ export function createDemoTransport(opts: { latencyMs?: number } = {}): Transpor
     kind: "custom",
     credentialSafe: true,
     async fetch(req: TransportRequest): Promise<Response> {
-      await new Promise((r) => setTimeout(r, latency));
+      await delay(latency, req.signal);
 
       // Uploads get a fake file id, so the attach flow works keyless too.
       if (req.path === "/files" && req.method === "POST") {
@@ -391,9 +413,21 @@ export function createDemoTransport(opts: { latencyMs?: number } = {}): Transpor
         const stream = new ReadableStream<Uint8Array>({
           async start(controller) {
             for (const e of events) {
+              if (req.signal?.aborted) {
+                controller.error(new DOMException("Aborted", "AbortError"));
+                return;
+              }
               controller.enqueue(encoder.encode(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`));
-              // Pace the text deltas so streaming is visibly streaming.
-              if (e.type === "response.output_text.delta") await new Promise((r) => setTimeout(r, 18));
+              // Pace the text deltas so streaming is visibly streaming — but a
+              // Stop mid-pace should cut the wait short, not run it to the end.
+              if (e.type === "response.output_text.delta") {
+                try {
+                  await delay(18, req.signal);
+                } catch {
+                  controller.error(new DOMException("Aborted", "AbortError"));
+                  return;
+                }
+              }
             }
             controller.close();
           },

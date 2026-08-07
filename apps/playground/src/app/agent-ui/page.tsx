@@ -52,6 +52,29 @@ const TODO_LABELS = [
   "Polish the landing page",
 ];
 
+/**
+ * Resolve after `ms`, but reject early if `signal` aborts — checking
+ * `signal.aborted` only after the full wait already elapsed would mean
+ * cancelling never actually shortens it.
+ */
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException("Aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 /** Re-runs `tick` on an interval until `steps` is reached, then restarts. */
 function useLoop(steps: number, ms: number) {
   const [i, setI] = useState(0);
@@ -307,8 +330,7 @@ export default function AgentUiPanel() {
             }
             onRemoveAttachment={(id) => setAttachments((a) => a.filter((x) => x.id !== id))}
             onEnhance={async (prompt, signal) => {
-              await new Promise((r) => setTimeout(r, 1400));
-              if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+              await abortableDelay(1400, signal);
               return `${prompt.trim()} — rewritten to be specific: state the goal, the relevant constraints, the expected output format, and note any assumptions.`;
             }}
             onSubmit={(text, meta) => setSent((s) => [{ text, ...meta }, ...s].slice(0, 4))}

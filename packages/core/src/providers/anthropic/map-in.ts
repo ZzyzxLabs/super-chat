@@ -9,6 +9,7 @@
 
 import type { ContentPart, Message } from "../../content/types.js";
 import type { NormalizedRequest, ToolSpec } from "../types.js";
+import { collectAnsweredIds, dropUnanswered, filterNativeTools, foreignFileText } from "../shared.js";
 import type {
   AnthropicContentBlock,
   AnthropicMessage,
@@ -27,9 +28,6 @@ export type AnthropicBuildOptions = {
 
 const DEFAULT_MAX_TOKENS = 4096;
 
-const foreignFileText = (kind: string, source: { id: string; provider: string }) =>
-  `[${kind} unavailable — it was uploaded to "${source.provider}" and cannot be read here. Ask the user to re-attach it.]`;
-
 function toBlocks(part: ContentPart, providerId: string): AnthropicContentBlock | null {
   switch (part.type) {
     case "text":
@@ -46,7 +44,7 @@ function toBlocks(part: ContentPart, providerId: string): AnthropicContentBlock 
       if (s.kind === "base64") {
         return { type: "image", source: { type: "base64", media_type: part.mediaType ?? "image/png", data: s.data } };
       }
-      if (s.provider !== providerId) return { type: "text", text: foreignFileText("image", s) };
+      if (s.provider !== providerId) return { type: "text", text: foreignFileText("image", undefined, s) };
       return { type: "image", source: { type: "file", file_id: s.id } };
     }
     case "file": {
@@ -59,7 +57,7 @@ function toBlocks(part: ContentPart, providerId: string): AnthropicContentBlock 
           ...(part.filename ? { title: part.filename } : {}),
         };
       }
-      if (s.provider !== providerId) return { type: "text", text: foreignFileText(`file "${part.filename ?? s.id}"`, s) };
+      if (s.provider !== providerId) return { type: "text", text: foreignFileText("file", part.filename, s) };
       return { type: "document", source: { type: "file", file_id: s.id }, ...(part.filename ? { title: part.filename } : {}) };
     }
     case "audio":
@@ -122,16 +120,14 @@ export function toAnthropicMessages(messages: readonly Message[], providerId = "
  * thread forever.
  */
 export function dropOrphanToolUses(messages: AnthropicMessage[]): AnthropicMessage[] {
-  const answered = new Set<string>();
-  for (const m of messages) {
-    for (const b of m.content) {
-      if (b.type === "tool_result") answered.add(b.tool_use_id);
-    }
-  }
+  const answered = collectAnsweredIds(
+    messages.flatMap((m) => m.content),
+    (b) => (b.type === "tool_result" ? b.tool_use_id : undefined),
+  );
   return messages
     .map((m) => ({
       ...m,
-      content: m.content.filter((b) => b.type !== "tool_use" || answered.has(b.id)),
+      content: dropUnanswered(m.content, answered, (b) => (b.type === "tool_use" ? b.id : undefined)),
     }))
     .filter((m) => m.content.length > 0);
 }
@@ -189,7 +185,7 @@ export function buildAnthropicRequest(req: NormalizedRequest, opts: AnthropicBui
 
   // Provider-hosted tools (web search, code execution) share the tools array
   // with function tools and are appended verbatim — the vendor owns the shape.
-  const nativeTools = (req.providerTools?.[providerId] ?? []) as Record<string, unknown>[];
+  const nativeTools = filterNativeTools(req.providerTools?.[providerId]);
   if (req.tools?.length || nativeTools.length) {
     out.tools = [...(req.tools?.length ? toAnthropicTools(req.tools) : []), ...nativeTools] as AnthropicTool[];
     if (req.tools?.length) {

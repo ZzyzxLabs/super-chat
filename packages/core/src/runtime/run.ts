@@ -84,7 +84,12 @@ export async function* runAgent(
 
   yield { type: "run-start", runId, mode };
 
-  let history: Message[] = [...messages];
+  // Mutable accumulators: `.push()`, not `[...arr, x]` — this loop runs once
+  // per step of a potentially long tool-calling turn, and re-copying the
+  // whole array every step is wasted work on a long thread. Neither array is
+  // returned or exposed outside this generator (see the yields below), so
+  // there is no reference-equality contract to preserve.
+  const history: Message[] = [...messages];
   let totalUsage: Usage = {};
   let finishReason: FinishReason = "unknown";
   let step = 0;
@@ -112,7 +117,7 @@ export async function* runAgent(
     let activeTools = config.tools.resolve({ ...config.toolResolution, allow: unlockedNames });
     let specs = config.tools.toSpecs(activeTools);
 
-    let working: Message[] = [...context.messages];
+    const working: Message[] = [...context.messages];
 
     while (step < maxSteps) {
       if (config.signal?.aborted) throw new AgentError("cancelled", "Run was cancelled.");
@@ -202,8 +207,8 @@ export async function* runAgent(
       yield { type: "step-finish", step, finishReason: stepFinish, ...(stepUsage ? { usage: stepUsage } : {}) };
 
       const assistant = assistantMessage(parts);
-      working = [...working, assistant];
-      history = [...history, assistant];
+      working.push(assistant);
+      history.push(assistant);
 
       const calls: ToolCallRequest[] = parts
         .filter((p): p is Extract<ContentPart, { type: "tool-call" }> => p.type === "tool-call")
@@ -290,8 +295,8 @@ export async function* runAgent(
 
       const createdAt = Date.now();
       const toolId = nextId("tool");
-      working = [...working, { id: toolId, role: "tool", parts: providerParts, createdAt }];
-      history = [...history, { id: toolId, role: "tool", parts: persistedParts, createdAt }];
+      working.push({ id: toolId, role: "tool", parts: providerParts, createdAt });
+      history.push({ id: toolId, role: "tool", parts: persistedParts, createdAt });
 
       // loadSkill's pull half: an outcome that unlocked tools re-resolves the
       // active set so the names it announced are callable from the NEXT step.

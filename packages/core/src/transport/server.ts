@@ -45,9 +45,8 @@ export type ProxyHandlerConfig = {
   fetchImpl?: typeof fetch;
 };
 
-// Compile a wildcard pattern into a matcher. Anchored at both ends, so no
-// prefix tricks — "/responses" must not match "/responses-admin".
-export function pathMatches(pattern: string, path: string): boolean {
+/** Build the anchored regex a wildcard path pattern compiles to. */
+function compilePathPattern(pattern: string): RegExp {
   const source = pattern
     .split("/")
     .map((seg) => {
@@ -57,17 +56,29 @@ export function pathMatches(pattern: string, path: string): boolean {
     })
     .join("/")
     .replace("@@REST@@", ".*");
-  return new RegExp(`^${source}$`).test(path);
+  return new RegExp(`^${source}$`);
 }
 
-/** Split an allowlist entry into its optional method prefix and path pattern. */
-function entryMatches(entry: string, method: string, path: string): boolean {
+// Compile a wildcard pattern into a matcher. Anchored at both ends, so no
+// prefix tricks — "/responses" must not match "/responses-admin".
+export function pathMatches(pattern: string, path: string): boolean {
+  return compilePathPattern(pattern).test(path);
+}
+
+/** An allowlist entry, precompiled once rather than on every request it is checked against. */
+type CompiledAllowEntry = { method?: string; regex: RegExp };
+
+/** Split an allowlist entry into its optional method prefix and path pattern, and compile the pattern. */
+function compileAllowEntry(entry: string): CompiledAllowEntry {
   const space = entry.indexOf(" ");
   if (space > 0 && !entry.startsWith("/")) {
-    const wantMethod = entry.slice(0, space).toUpperCase();
-    return method.toUpperCase() === wantMethod && pathMatches(entry.slice(space + 1).trim(), path);
+    return { method: entry.slice(0, space).toUpperCase(), regex: compilePathPattern(entry.slice(space + 1).trim()) };
   }
-  return pathMatches(entry, path);
+  return { regex: compilePathPattern(entry) };
+}
+
+function compiledEntryMatches(entry: CompiledAllowEntry, method: string, path: string): boolean {
+  return (!entry.method || entry.method === method.toUpperCase()) && entry.regex.test(path);
 }
 
 /** Never forwarded from the client — the credential comes from the operator. */
@@ -93,6 +104,12 @@ const json = (body: unknown, status: number) =>
 
 export function createProxyHandler(config: ProxyHandlerConfig) {
   const doFetch = config.fetchImpl ?? globalThis.fetch;
+  // Precompiled once per provider, at construction time — not per allowPaths
+  // entry per incoming request, which is how many requests a proxy handler is
+  // built to serve.
+  const compiledAllowPaths = new Map<string, CompiledAllowEntry[]>(
+    Object.entries(config.providers).map(([providerId, provider]) => [providerId, provider.allowPaths.map(compileAllowEntry)]),
+  );
 
   return async function handle(request: Request): Promise<Response> {
     const startedAt = Date.now();
@@ -111,7 +128,8 @@ export function createProxyHandler(config: ProxyHandlerConfig) {
     // Normalize before matching so "/responses/../files" can't slip past the
     // allowlist and reach an endpoint the operator never opened up.
     const path = normalizePath(envelope.path);
-    if (!path || !provider.allowPaths.some((p) => entryMatches(p, envelope.method, path))) {
+    const allowed = compiledAllowPaths.get(envelope.provider) ?? [];
+    if (!path || !allowed.some((entry) => compiledEntryMatches(entry, envelope.method, path))) {
       return json({ error: { message: `Path "${envelope.path}" is not allowed for ${envelope.provider}.` } }, 403);
     }
 

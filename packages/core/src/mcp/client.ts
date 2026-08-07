@@ -44,6 +44,31 @@ export type McpClientConfig = {
 
 const DEFAULT_PROTOCOL = "2025-06-18";
 
+/** Bounds every request when the caller supplies no signal of its own — a hung MCP server must not block forever. */
+const DEFAULT_RPC_TIMEOUT_MS = 30_000;
+
+/**
+ * Combine signals so any one of them can abort the request. Prefers the
+ * platform `AbortSignal.any` where available; falls back to a manual
+ * listener-based combine for runtimes that lack it.
+ */
+function combineSignals(signals: readonly (AbortSignal | undefined)[]): AbortSignal {
+  const present = signals.filter((s): s is AbortSignal => s != null);
+  if (present.length === 0) return new AbortController().signal; // never aborts
+  if (present.length === 1) return present[0]!;
+  if (typeof AbortSignal.any === "function") return AbortSignal.any(present);
+
+  const controller = new AbortController();
+  for (const s of present) {
+    if (s.aborted) {
+      controller.abort(s.reason);
+      break;
+    }
+    s.addEventListener("abort", () => controller.abort(s.reason), { once: true });
+  }
+  return controller.signal;
+}
+
 /** Thrown for protocol-level JSON-RPC errors (unknown method, bad params). */
 export class McpRpcError extends Error {
   readonly code: number;
@@ -66,6 +91,8 @@ export class McpClient {
   private rpcId = 0;
   private sessionId: string | undefined;
   private handshake: { serverInfo: McpServerInfo; protocolVersion: string } | undefined;
+  /** The in-flight `connect()` call, if any — concurrent callers await this instead of starting their own `initialize` round trip. */
+  private connecting: Promise<{ serverInfo: McpServerInfo; protocolVersion: string }> | undefined;
 
   constructor(config: McpClientConfig) {
     this.transport = config.transport;
@@ -76,9 +103,21 @@ export class McpClient {
     this.onElicit = config.onElicit;
   }
 
-  /** Idempotent: a second call returns the cached handshake. */
+  /**
+   * Idempotent: a second call returns the cached handshake. Concurrent calls
+   * while the first is still in flight share that same call rather than each
+   * firing their own `initialize` round trip.
+   */
   async connect(): Promise<{ serverInfo: McpServerInfo; protocolVersion: string }> {
     if (this.handshake) return this.handshake;
+    if (this.connecting) return this.connecting;
+    this.connecting = this.doConnect().finally(() => {
+      this.connecting = undefined;
+    });
+    return this.connecting;
+  }
+
+  private async doConnect(): Promise<{ serverInfo: McpServerInfo; protocolVersion: string }> {
     const result = (await this.rpc("initialize", {
       protocolVersion: this.protocolVersion,
       // Declaring elicitation is what permits the server to ask; without a
@@ -166,7 +205,11 @@ export class McpClient {
   }
 
   private async post(body: JsonRpcRequest, signal?: AbortSignal): Promise<Response> {
-    const res = await this.transport.fetch({ ...this.request("POST", body), ...(signal ? { signal } : {}) });
+    // Every call gets bounded by DEFAULT_RPC_TIMEOUT_MS, even when the caller
+    // supplies its own signal — a caller's signal is typically for run-level
+    // cancellation, not a guarantee the server will ever respond.
+    const combined = combineSignals([signal, AbortSignal.timeout(DEFAULT_RPC_TIMEOUT_MS)]);
+    const res = await this.transport.fetch({ ...this.request("POST", body), signal: combined });
     const sid = res.headers.get("mcp-session-id");
     if (sid) this.sessionId = sid;
     if (!res.ok) throw await errorFromResponse(res, this.provider);

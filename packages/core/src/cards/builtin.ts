@@ -11,12 +11,10 @@
 // whose `rows` is a string is a crash, so that is what we reject.
 
 import { estimateJsonTokens } from "../tokens/estimate.js";
-import { check, type CardKindDefinition, type CardValidation } from "./registry.js";
+import { check, failed, isObj, type CardKindDefinition, type CardValidation } from "./registry.js";
 import type { CardSpec } from "./types.js";
 
 const ok: CardValidation = { ok: true };
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
-const failed = (v: unknown): v is CardValidation => isObj(v) && (v as { ok?: unknown }).ok === false;
 
 const tokensOf = (spec: CardSpec) => estimateJsonTokens(spec);
 

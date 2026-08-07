@@ -23,15 +23,20 @@ export function parseRetryAfter(headers: Headers): number | undefined {
 
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
-    const t = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(t);
-        reject(new AgentError("cancelled", "Request was cancelled."));
-      },
-      { once: true },
-    );
+    const onAbort = () => {
+      clearTimeout(t);
+      reject(new AgentError("cancelled", "Request was cancelled."));
+    };
+    // `{once:true}` only detaches the listener once "abort" actually FIRES —
+    // when the timer wins the race instead, it stays attached to the signal
+    // for as long as the signal lives. A retry loop's signal is long-lived
+    // (one AbortController for the whole call), so that leak accumulates one
+    // stale listener per retry. Detach it explicitly on the timer-wins path too.
+    const t = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 
 /**

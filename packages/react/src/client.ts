@@ -144,13 +144,19 @@ export class AgentClient {
     });
   }
 
-  /** Append under `parent` (default: the current head) and move the head there. */
-  private appendMessage(message: Message, parent?: string | null): void {
+  /**
+   * Append under `parent` (default: the current head) and move the head there.
+   *
+   * `extra` merges into the SAME `store.set()` — e.g. clearing `attachments`
+   * alongside the append — so a caller touching both fields does not force two
+   * notifications for one logical change.
+   */
+  private appendMessage(message: Message, parent?: string | null, extra?: Partial<ThreadState>): void {
     this.store.set((s) => {
       const parentId = parent !== undefined ? parent : s.headId;
       const linked: Message = { ...message, parentId };
       const tree = [...s.tree, linked];
-      return { ...s, tree, headId: linked.id, messages: pathTo(tree, linked.id) };
+      return { ...s, tree, headId: linked.id, messages: pathTo(tree, linked.id), ...extra };
     });
   }
 
@@ -190,8 +196,7 @@ export class AgentClient {
     const staged = this.store.get().attachments;
     const parts: ContentPart[] = typeof input === "string" ? [{ type: "text", text: input }] : [...input];
     const message = userMessage(staged.length ? [...parts, ...staged] : input);
-    this.appendMessage(message);
-    this.store.set((s) => ({ ...s, attachments: [] }));
+    this.appendMessage(message, undefined, { attachments: [] });
     // Persist the user turn before running — a reload mid-run keeps it.
     this.persist();
     await this.run([...this.store.get().messages], opts);
@@ -521,6 +526,14 @@ export class AgentClient {
     const results = await resumeJobs(store, { [this.config.provider.id]: this.config.provider });
     this.store.set((s) => ({ ...s, jobs: results.map((r) => r.job) }));
 
+    const currentId = this.store.get().id;
+    // Jobs landing in an AWAY thread are grouped by threadId: two jobs for the
+    // SAME away thread read-modify-write that thread's one stored snapshot, so
+    // they must land in order or the second save clobbers the first. Jobs for
+    // DIFFERENT away threads touch different snapshots and have no ordering
+    // dependency on each other, so those groups load/save concurrently.
+    const away = new Map<string, ContentPart[][]>();
+
     for (const { job, snapshot } of results) {
       const parts: ContentPart[] | null =
         snapshot.status === "completed" && snapshot.result
@@ -530,24 +543,32 @@ export class AgentClient {
             : null;
       if (!parts) continue;
 
-      const currentId = this.store.get().id;
       if (!job.threadId || job.threadId === currentId) {
         this.appendMessage(assistantMessage(parts));
         if (job.threadId === currentId) this.persist();
         continue;
       }
 
-      // The job belongs to a thread that is not open. Land the result there,
-      // appended under that thread's own head.
-      const threads = this.config.threadStore;
-      if (!threads) continue; // nowhere to put it; the handle was already reaped
-      const stored = await threads.load(job.threadId);
-      if (!stored) continue;
-      const awayHead = stored.headId ?? stored.messages.at(-1)?.id ?? null;
-      const appended: Message = { ...assistantMessage(parts), parentId: awayHead };
-      await threads.save(
-        threadSnapshot(job.threadId, [...stored.messages, appended], stored.meta, appended.id),
-      );
+      const bucket = away.get(job.threadId) ?? [];
+      bucket.push(parts);
+      away.set(job.threadId, bucket);
     }
+
+    const threads = this.config.threadStore;
+    if (!threads || !away.size) return; // nowhere to put it; the handle was already reaped
+
+    await Promise.all(
+      [...away].map(async ([threadId, partsList]) => {
+        for (const parts of partsList) {
+          const stored = await threads.load(threadId);
+          if (!stored) continue;
+          const awayHead = stored.headId ?? stored.messages.at(-1)?.id ?? null;
+          const appended: Message = { ...assistantMessage(parts), parentId: awayHead };
+          await threads.save(
+            threadSnapshot(threadId, [...stored.messages, appended], stored.meta, appended.id),
+          );
+        }
+      }),
+    );
   }
 }

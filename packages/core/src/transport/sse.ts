@@ -76,9 +76,9 @@ export class SSEDecoder {
   }
 }
 
-/** Locate the next line terminator, or null if the buffer may still be mid-terminator. */
-function findLineEnd(buf: string): { index: number; length: number } | null {
-  for (let i = 0; i < buf.length; i += 1) {
+/** Locate the next line terminator at or after `from`, or null if the buffer may still be mid-terminator. */
+function findLineEnd(buf: string, from = 0): { index: number; length: number } | null {
+  for (let i = from; i < buf.length; i += 1) {
     const ch = buf[i];
     if (ch === "\n") return { index: i, length: 1 };
     if (ch === "\r") {
@@ -107,14 +107,20 @@ export async function* parseSSE(stream: ReadableStream<Uint8Array>): AsyncGenera
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
 
-      let end = findLineEnd(buffer);
+      // Track a read offset instead of slicing the buffer after every line —
+      // a chunk with many short lines would otherwise re-copy the (shrinking)
+      // remainder once per line. Slice once, after every complete line in
+      // this chunk has been extracted.
+      let offset = 0;
+      let end = findLineEnd(buffer, offset);
       while (end) {
-        const line = buffer.slice(0, end.index);
-        buffer = buffer.slice(end.index + end.length);
+        const line = buffer.slice(offset, end.index);
+        offset = end.index + end.length;
         const msg = sse.push(line);
         if (msg) yield msg;
-        end = findLineEnd(buffer);
+        end = findLineEnd(buffer, offset);
       }
+      if (offset > 0) buffer = buffer.slice(offset);
     }
 
     // Flush a trailing event that arrived without its final blank line — some

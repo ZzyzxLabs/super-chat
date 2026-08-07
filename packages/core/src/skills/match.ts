@@ -22,6 +22,20 @@ export function tokenize(input: string): string[] {
     .filter((t) => t.length > 1 && !STOPWORDS.has(t));
 }
 
+// Aliases/tags/names are registered once and matched against on every query
+// thereafter, so their tokenization is cached rather than redone per call.
+// Unbounded by design: the keys are the distinct alias/tag/name strings a
+// process ever sees, which for a curated skill set is tens, not millions.
+const aliasTokenCache = new Map<string, string[]>();
+function tokenizeAlias(a: string): string[] {
+  let tokens = aliasTokenCache.get(a);
+  if (!tokens) {
+    tokens = tokenize(a);
+    aliasTokenCache.set(a, tokens);
+  }
+  return tokens;
+}
+
 /**
  * Score one alias against the query.
  *
@@ -38,7 +52,7 @@ function scoreAlias(alias: string, query: string, queryTokens: Set<string>): num
   if (query.includes(a)) return 3;
   if (a.includes(query) && query.length >= 3) return 2;
   // Partial token overlap for multi-word aliases: "provide liquidity" vs "liquidity".
-  const aliasTokens = tokenize(a);
+  const aliasTokens = tokenizeAlias(a);
   if (aliasTokens.length > 1) {
     const hits = aliasTokens.filter((t) => queryTokens.has(t)).length;
     if (hits) return 1.5 * (hits / aliasTokens.length);

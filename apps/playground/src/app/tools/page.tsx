@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { McpClient, createHttpTransport, createMcpSkill, importMcpTools } from "@superchat/core";
 import { PanelHeader } from "@/components/Shell";
 import { skills, toolRegistry } from "@/agent/setup";
@@ -10,7 +10,7 @@ const PRESETS = ["observer", "executor"] as const;
 export default function ToolsPanel() {
   // The SHARED registry — imports done here are live in the /run agent too.
   const registry = toolRegistry;
-  useSyncExternalStore(
+  const registryVersion = useSyncExternalStore(
     (cb) => registry.subscribe(cb),
     () => registry.getVersion(),
     () => registry.getVersion(),
@@ -45,13 +45,20 @@ export default function ToolsPanel() {
     }
   };
 
-  const resolution = {
-    presets: enabled,
-    ...(allowImported && imported.length ? { allow: imported } : {}),
-  };
-  const all = registry.list();
-  const exposed = new Set(registry.resolve(resolution).map((t) => t.name));
-  const specs = registry.toSpecs(registry.resolve(resolution));
+  // `resolve()` walks presets/allow/deny over the full tool list — compute it
+  // once per render (instead of once for `exposed` and again for `specs`) and
+  // memoize so an unrelated re-render (e.g. `open` toggling) doesn't redo it.
+  const resolution = useMemo(
+    () => ({
+      presets: enabled,
+      ...(allowImported && imported.length ? { allow: imported } : {}),
+    }),
+    [enabled, allowImported, imported],
+  );
+  const all = useMemo(() => registry.list(), [registry, registryVersion]);
+  const resolved = useMemo(() => registry.resolve(resolution), [registry, resolution, registryVersion]);
+  const exposed = useMemo(() => new Set(resolved.map((t) => t.name)), [resolved]);
+  const specs = useMemo(() => registry.toSpecs(resolved), [registry, resolved]);
 
   return (
     <div className="dev__page">

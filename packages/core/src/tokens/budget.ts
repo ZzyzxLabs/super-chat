@@ -80,7 +80,25 @@ export function packByPriority<T>(
   return { included, dropped, used };
 }
 
+// Per-message token counts, cached by message object identity. Persisted
+// messages are never mutated in place (a new object is built for every
+// change — see runtime/run.ts), so a cached count never goes stale, and a
+// context build that re-walks the same history on every step (budget checks,
+// compaction, the builder's own summation) does not re-count every character
+// of every message it already counted last time.
+//
+// Keyed by object identity rather than `message.id`: compaction mints
+// synthetic summary messages with a formulaic, non-unique id
+// (`summary_${cut}`), so two DIFFERENT messages can share an id — an id-keyed
+// cache would risk serving one message's count for another's. The counter is
+// also part of the key: a caller-supplied counter and the default estimator
+// must not share a cache entry.
+const messageTokenCache = new WeakMap<Message, WeakMap<TokenCounter, number>>();
+
 export function countMessageTokens(m: Message, counter: TokenCounter = estimateTokens): number {
+  const cached = messageTokenCache.get(m)?.get(counter);
+  if (cached !== undefined) return cached;
+
   let total = MESSAGE_OVERHEAD_TOKENS;
   for (const part of m.parts) {
     switch (part.type) {
@@ -110,6 +128,13 @@ export function countMessageTokens(m: Message, counter: TokenCounter = estimateT
         break; // stripped before send — costs nothing
     }
   }
+
+  let byCounter = messageTokenCache.get(m);
+  if (!byCounter) {
+    byCounter = new WeakMap();
+    messageTokenCache.set(m, byCounter);
+  }
+  byCounter.set(counter, total);
   return total;
 }
 

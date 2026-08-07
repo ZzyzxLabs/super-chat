@@ -10,6 +10,7 @@
 import { AgentError, toAgentError } from "../../errors.js";
 import { errorFromResponse, withRetry } from "../../transport/retry.js";
 import type { RetryPolicy, Transport } from "../../transport/types.js";
+import { withDefaultTimeout } from "../shared.js";
 import type {
   CallOptions,
   FileUploadRequest,
@@ -89,6 +90,10 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
     },
     opts?: CallOptions,
   ): Promise<Response> {
+    // A caller that never passes (or triggers) its own signal must not hang
+    // forever on a stalled connection — the default timeout is a floor, not a
+    // ceiling: whichever of the two signals fires first wins.
+    const signal = withDefaultTimeout(opts?.signal);
     return withRetry(
       async () => {
         const res = await config.transport.fetch({
@@ -99,12 +104,12 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
           stream: init.stream,
           query: init.query,
           headers: opts?.headers,
-          signal: opts?.signal,
+          signal,
         });
         if (!res.ok) throw await errorFromResponse(res, id);
         return res;
       },
-      { policy: config.retry, signal: opts?.signal, provider: id },
+      { policy: config.retry, signal, provider: id },
     );
   }
 
@@ -120,17 +125,31 @@ export function createOpenAIProvider(config: OpenAIProviderConfig): Provider {
       throw new AgentError("not-supported", `Provider "${id}" does not support tools.`, { provider: id });
     }
     // Media guards: a text-only compatible endpoint should fail HERE with a
-    // capability error, not upstream with an inscrutable 400.
-    const unsupported = (type: "image" | "file" | "audio") =>
-      req.messages.some((m) => m.parts.some((p) => p.type === type));
-    if (!capabilities.images && unsupported("image")) {
-      throw new AgentError("not-supported", `Provider "${id}" does not accept image parts.`, { provider: id });
-    }
-    if (!capabilities.files && unsupported("file")) {
-      throw new AgentError("not-supported", `Provider "${id}" does not accept file parts.`, { provider: id });
-    }
-    if (!capabilities.audio && unsupported("audio")) {
-      throw new AgentError("not-supported", `Provider "${id}" does not accept audio parts.`, { provider: id });
+    // capability error, not upstream with an inscrutable 400. One pass over
+    // every part flags all three media types together, rather than
+    // rescanning the whole message list once per type; skipped entirely when
+    // every media capability is already supported.
+    if (!capabilities.images || !capabilities.files || !capabilities.audio) {
+      let hasImage = false;
+      let hasFile = false;
+      let hasAudio = false;
+      req.messages.some((m) =>
+        m.parts.some((p) => {
+          if (p.type === "image") hasImage = true;
+          else if (p.type === "file") hasFile = true;
+          else if (p.type === "audio") hasAudio = true;
+          return hasImage && hasFile && hasAudio;
+        }),
+      );
+      if (!capabilities.images && hasImage) {
+        throw new AgentError("not-supported", `Provider "${id}" does not accept image parts.`, { provider: id });
+      }
+      if (!capabilities.files && hasFile) {
+        throw new AgentError("not-supported", `Provider "${id}" does not accept file parts.`, { provider: id });
+      }
+      if (!capabilities.audio && hasAudio) {
+        throw new AgentError("not-supported", `Provider "${id}" does not accept audio parts.`, { provider: id });
+      }
     }
   }
 

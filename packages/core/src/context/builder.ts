@@ -13,7 +13,7 @@ import { lastUserText, stripUiOnlyParts } from "../content/parts.js";
 import type { Message } from "../content/types.js";
 import { isCardCarrier, stripCardPayload } from "../cards/types.js";
 import { compactHistory, type Summarizer } from "./compaction.js";
-import { countMessagesTokens, createBudget, packByPriority, type TokenBudget } from "../tokens/budget.js";
+import { createBudget, packByPriority, type TokenBudget } from "../tokens/budget.js";
 import { estimateTokens, type TokenCounter } from "../tokens/estimate.js";
 import type { SkillRegistry } from "../skills/registry.js";
 import type { ResolvedSkill } from "../skills/types.js";
@@ -219,7 +219,11 @@ export class ContextBuilder {
     }
 
     const system = included.map((l) => l.text.trim()).filter(Boolean).join("\n\n");
-    const systemTokens = counter(system);
+    // Sum of the layers' own precomputed token counts, rather than re-tokenizing
+    // the joined string. This slightly undercounts the "\n\n" join separators,
+    // but that's a handful of tokens against an already-approximate counter
+    // (see tokens/estimate.ts) — not worth a second full-text scan to close.
+    const systemTokens = included.reduce((n, l) => n + l.tokens, 0);
 
     // ── 6. history ──────────────────────────────────────────────────────────
     // Sanitize first: strip UI-only parts and shrink card payloads. A card spec
@@ -252,7 +256,10 @@ export class ContextBuilder {
       entries.push({ id: "history", kind: "history", status: "included", tokens: compaction.tokensAfter });
     }
 
-    const historyTokens = countMessagesTokens(compaction.messages, counter);
+    // compaction.tokensAfter is already an exact count of compaction.messages —
+    // computed inside compactHistory/trimHistory with this same counter — so
+    // reuse it instead of scanning the history a second time.
+    const historyTokens = compaction.tokensAfter;
     const toolNames = [...unlockedTools].sort();
     const total = systemTokens + historyTokens;
 

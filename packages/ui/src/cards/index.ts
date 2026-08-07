@@ -5,7 +5,9 @@
 // two stay in sync — which is the guardrail against a card that validates but
 // has nowhere to render.
 
-import type { CardRendererMap } from "../renderer-registry.js";
+import type { ComponentType } from "react";
+import type { BuiltinCard, BuiltinCardKind } from "@superchat/core";
+import type { CardRendererMap, CardRendererProps } from "../renderer-registry.js";
 import {
   CodeCardView,
   DiffCardView,
@@ -29,25 +31,38 @@ import {
 } from "./General.js";
 import { ChoiceCardView, ConfirmCardView, FormCardView } from "./Interactive.js";
 
+// One cast lives here instead of once per entry below: `register` still needs
+// to widen a `ComponentType<CardRendererProps<SpecificCard>>` into the map's
+// `ComponentType<CardRendererProps<never>>` value type (the map has to hold
+// every card's renderer, so it cannot know any one of them specifically), but
+// the call site stays checked — passing e.g. ChartCardView for "table" is a
+// type error because ChartCardView doesn't accept a TableCard spec.
+function register<K extends BuiltinCardKind>(
+  kind: K,
+  Renderer: ComponentType<CardRendererProps<Extract<BuiltinCard, { kind: K }>>>,
+): CardRendererMap {
+  return { [kind]: Renderer as CardRendererMap[string] };
+}
+
 export const BUILTIN_RENDERERS: CardRendererMap = {
-  table: TableCardView as CardRendererMap[string],
-  stats: StatsCardView as CardRendererMap[string],
-  comparison: ComparisonCardView as CardRendererMap[string],
-  keyvalue: KeyValueCardView as CardRendererMap[string],
-  tree: TreeCardView as CardRendererMap[string],
-  chart: ChartCardView as CardRendererMap[string],
-  funnel: FunnelCardView as CardRendererMap[string],
-  gauge: GaugeCardView as CardRendererMap[string],
-  timeline: TimelineCardView as CardRendererMap[string],
-  progress: ProgressCardView as CardRendererMap[string],
-  checklist: ChecklistCardView as CardRendererMap[string],
-  markdown: MarkdownCardView as CardRendererMap[string],
-  callout: CalloutCardView as CardRendererMap[string],
-  citations: CitationsCardView as CardRendererMap[string],
-  code: CodeCardView as CardRendererMap[string],
-  diff: DiffCardView as CardRendererMap[string],
-  media: MediaCardView as CardRendererMap[string],
-  choice: ChoiceCardView as CardRendererMap[string],
-  form: FormCardView as CardRendererMap[string],
-  confirm: ConfirmCardView as CardRendererMap[string],
+  ...register("table", TableCardView),
+  ...register("stats", StatsCardView),
+  ...register("comparison", ComparisonCardView),
+  ...register("keyvalue", KeyValueCardView),
+  ...register("tree", TreeCardView),
+  ...register("chart", ChartCardView),
+  ...register("funnel", FunnelCardView),
+  ...register("gauge", GaugeCardView),
+  ...register("timeline", TimelineCardView),
+  ...register("progress", ProgressCardView),
+  ...register("checklist", ChecklistCardView),
+  ...register("markdown", MarkdownCardView),
+  ...register("callout", CalloutCardView),
+  ...register("citations", CitationsCardView),
+  ...register("code", CodeCardView),
+  ...register("diff", DiffCardView),
+  ...register("media", MediaCardView),
+  ...register("choice", ChoiceCardView),
+  ...register("form", FormCardView),
+  ...register("confirm", ConfirmCardView),
 };
