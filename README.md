@@ -6,14 +6,15 @@ gives the agent a **flexible visual vocabulary** to answer with.
 
 Not a chat app. The thing chat apps leave to you.
 
-> **Picking this up cold?** Read **[HANDOFF.md](HANDOFF.md)** first — load-bearing
-> decisions, bugs already fixed, and what will bite you.
+> **Picking this up cold?** Read **[docs/HANDOFF.md](docs/HANDOFF.md)** first —
+> load-bearing decisions, bugs already fixed, and what will bite you. The full
+> design-token and responsive spec lives in **[docs/UI-SPEC.md](docs/UI-SPEC.md)**.
 
 ```
-@superchat/core    provider-agnostic engine — no React, isomorphic
-@superchat/react   thread state, run control, card actions
-@superchat/ui      card renderers, chat primitives, context inspector
-apps/playground    Next.js dev panels — one per capability, no API key needed
+@superchat/core    provider-agnostic engine — no React, isomorphic       (packages/core/README.md)
+@superchat/react   thread state, run control, card actions               (packages/react/README.md)
+@superchat/ui      card renderers, chat primitives, context inspector    (packages/ui/README.md)
+apps/playground    Next.js dev panels — one per capability, no API key needed (apps/playground/README.md)
 ```
 
 ---
