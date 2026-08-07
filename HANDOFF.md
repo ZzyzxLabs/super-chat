@@ -176,6 +176,11 @@ and the app-state seam landed. What is genuinely open:
 2. **Nobody has driven the app-state panel against a live model.** The demo
    transport is scripted, so the board actions are exercised by tests and by
    hand — not by an actual model deciding to call them.
+3. **The kit does not respond to width at all.** `styles.css` has zero
+   width breakpoints, so a phone or a narrow embedded sidebar gets the
+   desktop layout. UI-SPEC Phase 5 plans this out — scope, breakpoint
+   strategy, per-component rules, testing, and an M1/M2/M3 batch queue.
+   Planned, not built.
 
 Deliberately *not* done, and worth leaving alone unless asked: multi-agent
 orchestration, a plugin system, and any kind of visual builder. The framework's
