@@ -20,8 +20,9 @@
  * These are NOT custom properties, and the omission is deliberate: a query
  * condition does not accept var(), and `@container (max-width: var(--x))`
  * fails silently rather than erroring. So the values live here as prose and
- * appear as literals at the two query sites. rwd.test.ts enforces that no
- * third literal ever joins them.
+ * appear as literals at every query site that needs them (several, by now —
+ * see the responsive block at the foot of this file). rwd.test.ts enforces
+ * that no third literal ever joins them.
  *
  * Which query to reach for is a fixed rule, not a judgement call:
  *
@@ -60,6 +61,34 @@
   --sc-series-3: #b8860b;
   --sc-series-4: #8b3fc4;
   --sc-series-5: #c8341f;
+
+  /* Dark palette — private, declared once here and only ever referenced (never
+     redeclared) by the two triggers below: the OS-preference media query and
+     the explicit [data-theme="dark"] override. Without this indirection each
+     hex would need to be copied into both trigger blocks, since one has to
+     fire without the other (an explicit override must win even when the OS
+     preference disagrees) and plain CSS has no mixin to share a value block
+     across two unrelated selectors. This is the only place a dark hex literal
+     appears in the file. */
+  --sc-dark-bg: #0f1115;
+  --sc-dark-surface: #161920;
+  --sc-dark-surface-2: #1e222b;
+  --sc-dark-border: #2a2f3a;
+  --sc-dark-text: #e7e9ee;
+  --sc-dark-text-muted: #949cab;
+  --sc-dark-accent: #6b9bff;
+  --sc-dark-accent-contrast: #0f1115;
+  --sc-dark-negative-contrast: #0f1115;
+  --sc-dark-positive: #46c07f;
+  --sc-dark-negative: #ff6b57;
+  --sc-dark-warning: #e0a53a;
+  --sc-dark-info: #6b9bff;
+  --sc-dark-series-1: #6b9bff;
+  --sc-dark-series-2: #46c07f;
+  --sc-dark-series-3: #e0a53a;
+  --sc-dark-series-4: #c084fc;
+  --sc-dark-series-5: #ff6b57;
+  --sc-dark-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.5);
 
   /* spacing scale — theme-independent, declared once here only */
   --sc-sp-2: 2px;
@@ -121,75 +150,66 @@
   --sc-z-menu: 20;    /* dropdown, mention menu */
   --sc-z-toast: 30;
   --sc-z-modal: 40;
-  --sc-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.16); /* dark: 0 8px 24px rgb(0 0 0 / 0.5) */
+  --sc-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.16);
 }
 
+/* Dark, by OS preference. Excludes both explicit overrides via :not() rather
+   than relying on a specificity tie-break: [data-theme="light"] must win when
+   the OS prefers dark (handled below by simply not matching, so the light
+   :root above stands uncontested), and [data-theme="dark"] already wins on
+   its own higher specificity, so excluding it here just states that plainly
+   instead of leaving it implicit. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --sc-bg: #0f1115;
-    --sc-surface: #161920;
-    --sc-surface-2: #1e222b;
-    --sc-border: #2a2f3a;
-    --sc-text: #e7e9ee;
-    --sc-text-muted: #949cab;
-    --sc-accent: #6b9bff;
-    --sc-accent-contrast: #0f1115;
-    --sc-negative-contrast: #0f1115;
-    --sc-positive: #46c07f;
-    --sc-negative: #ff6b57;
-    --sc-warning: #e0a53a;
-    --sc-info: #6b9bff;
-    --sc-series-1: #6b9bff;
-    --sc-series-2: #46c07f;
-    --sc-series-3: #e0a53a;
-    --sc-series-4: #c084fc;
-    --sc-series-5: #ff6b57;
-    --sc-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.5);
+  :root:not([data-theme="light"]):not([data-theme="dark"]) {
+    --sc-bg: var(--sc-dark-bg);
+    --sc-surface: var(--sc-dark-surface);
+    --sc-surface-2: var(--sc-dark-surface-2);
+    --sc-border: var(--sc-dark-border);
+    --sc-text: var(--sc-dark-text);
+    --sc-text-muted: var(--sc-dark-text-muted);
+    --sc-accent: var(--sc-dark-accent);
+    --sc-accent-contrast: var(--sc-dark-accent-contrast);
+    --sc-negative-contrast: var(--sc-dark-negative-contrast);
+    --sc-positive: var(--sc-dark-positive);
+    --sc-negative: var(--sc-dark-negative);
+    --sc-warning: var(--sc-dark-warning);
+    --sc-info: var(--sc-dark-info);
+    --sc-series-1: var(--sc-dark-series-1);
+    --sc-series-2: var(--sc-dark-series-2);
+    --sc-series-3: var(--sc-dark-series-3);
+    --sc-series-4: var(--sc-dark-series-4);
+    --sc-series-5: var(--sc-dark-series-5);
+    --sc-shadow-overlay: var(--sc-dark-shadow-overlay);
   }
 }
 
+/* Dark, by explicit override. Wins over both the OS preference and the light
+   default regardless of source order, purely on specificity (an attribute
+   selector outranks the media-query block above, which carries none). There
+   is no matching [data-theme="light"] block: with the media query above
+   excluding that case, the light values declared on the base :root already
+   stand on their own once nothing overrides them, so a dedicated light block
+   would just be restating them a third time. */
 :root[data-theme="dark"] {
-  --sc-bg: #0f1115;
-  --sc-surface: #161920;
-  --sc-surface-2: #1e222b;
-  --sc-border: #2a2f3a;
-  --sc-text: #e7e9ee;
-  --sc-text-muted: #949cab;
-  --sc-accent: #6b9bff;
-  --sc-accent-contrast: #0f1115;
-  --sc-negative-contrast: #0f1115;
-  --sc-positive: #46c07f;
-  --sc-negative: #ff6b57;
-  --sc-warning: #e0a53a;
-  --sc-info: #6b9bff;
-  --sc-series-1: #6b9bff;
-  --sc-series-2: #46c07f;
-  --sc-series-3: #e0a53a;
-  --sc-series-4: #c084fc;
-  --sc-series-5: #ff6b57;
-  --sc-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.5);
-}
-
-:root[data-theme="light"] {
-  --sc-bg: #ffffff;
-  --sc-surface: #f7f8fa;
-  --sc-surface-2: #eef0f4;
-  --sc-border: #e2e5ea;
-  --sc-text: #14161a;
-  --sc-text-muted: #646b76;
-  --sc-accent: #3a6df0;
-  --sc-accent-contrast: #ffffff;
-  --sc-negative-contrast: #ffffff;
-  --sc-positive: #17864b;
-  --sc-negative: #c8341f;
-  --sc-warning: #9a6400;
-  --sc-info: #2b6cb0;
-  --sc-series-1: #3a6df0;
-  --sc-series-2: #17864b;
-  --sc-series-3: #b8860b;
-  --sc-series-4: #8b3fc4;
-  --sc-series-5: #c8341f;
-  --sc-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.16);
+  --sc-bg: var(--sc-dark-bg);
+  --sc-surface: var(--sc-dark-surface);
+  --sc-surface-2: var(--sc-dark-surface-2);
+  --sc-border: var(--sc-dark-border);
+  --sc-text: var(--sc-dark-text);
+  --sc-text-muted: var(--sc-dark-text-muted);
+  --sc-accent: var(--sc-dark-accent);
+  --sc-accent-contrast: var(--sc-dark-accent-contrast);
+  --sc-negative-contrast: var(--sc-dark-negative-contrast);
+  --sc-positive: var(--sc-dark-positive);
+  --sc-negative: var(--sc-dark-negative);
+  --sc-warning: var(--sc-dark-warning);
+  --sc-info: var(--sc-dark-info);
+  --sc-series-1: var(--sc-dark-series-1);
+  --sc-series-2: var(--sc-dark-series-2);
+  --sc-series-3: var(--sc-dark-series-3);
+  --sc-series-4: var(--sc-dark-series-4);
+  --sc-series-5: var(--sc-dark-series-5);
+  --sc-shadow-overlay: var(--sc-dark-shadow-overlay);
 }
 
 /* ── primitives ───────────────────────────────────────────────────────────── */
@@ -315,15 +335,6 @@
   .sc-skeleton__bar { animation: none; background: var(--sc-surface-2); }
   /* The caret stays put rather than blinking — it still marks the write head. */
   .sc-msg__text--streaming::after { animation: none; }
-  /* Drop the shimmer entirely rather than slow it: a moving gradient across
-     text is exactly what this preference exists to stop. */
-  .sc-think--live .sc-think__label {
-    animation: none;
-    background: none;
-    -webkit-background-clip: border-box;
-    background-clip: border-box;
-    color: var(--sc-text-muted);
-  }
 }
 
 /* ── cards ────────────────────────────────────────────────────────────────── */
@@ -647,7 +658,7 @@
   display: inline-block;
   width: 2px;
   height: 1em;
-  margin-left: 2px;
+  margin-left: var(--sc-sp-2);
   vertical-align: -0.15em;
   background: var(--sc-accent);
   animation: sc-caret 1s step-end infinite;
@@ -709,27 +720,7 @@
   text-align: left;
   cursor: pointer;
 }
-.sc-think__icon { font-size: var(--sc-fs-glyph); flex: none; }
 .sc-think__label { flex: none; }
-/* The peek must never grow the row: one line, clipped, and it yields all
-   remaining width so a long reasoning line cannot push the layout. */
-.sc-think__peek {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  opacity: 0.75;
-}
-.sc-think__body { max-height: 260px; overflow-y: auto; }
-.sc-think--live .sc-think__label {
-  background: linear-gradient(90deg, var(--sc-text-muted) 30%, var(--sc-text) 50%, var(--sc-text-muted) 70%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: sc-shimmer 1.2s linear infinite;
-}
 @keyframes sc-shimmer { to { background-position: -200% 0; } }
 
 .sc-tools { margin: var(--sc-sp-8) 0; }
@@ -873,7 +864,7 @@
   display: flex;
   flex-direction: column;
   max-width: 100%;
-  margin-bottom: 10px;
+  margin-bottom: var(--sc-sp-10);
   animation: sc-fade-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 @keyframes sc-fade-in { from { opacity: 0; } to { opacity: 1; } }
@@ -881,7 +872,7 @@
 .sc-think__head {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sc-sp-6);
   align-self: flex-start;
   min-height: 20px;
   padding: 0;
@@ -923,7 +914,7 @@
    pushed up behind a soft fade; once the user unfolds it, it scrolls natively
    and the fades follow the scroll position. */
 .sc-think__viewport {
-  margin-top: 6px;
+  margin-top: var(--sc-sp-6);
   overflow: hidden;
   transition: height 360ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -933,7 +924,7 @@
 .sc-think__stream {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--sc-sp-4);
   transition: transform 560ms cubic-bezier(0.22, 1, 0.36, 1);
   will-change: transform;
 }
@@ -960,7 +951,7 @@
   display: inline-block;
   width: 8px;
   height: 1.05em;
-  margin-left: 2px;
+  margin-left: var(--sc-sp-2);
   background: var(--sc-text);
   vertical-align: text-bottom;
   animation: sc-caret-blink 1s step-end infinite;
@@ -1294,7 +1285,7 @@
    selection copies the code without dragging the line numbers along. */
 
 .sc-code {
-  margin: 10px 0;
+  margin: var(--sc-sp-10) 0;
   border-radius: var(--sc-radius);
   background: var(--sc-bg);
   border: 1px solid var(--sc-border);
@@ -1303,8 +1294,8 @@
 .sc-code__head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px 8px 12px;
+  gap: var(--sc-sp-8);
+  padding: var(--sc-sp-8) var(--sc-sp-10) var(--sc-sp-8) var(--sc-sp-12);
   border-bottom: 1px solid var(--sc-border);
 }
 .sc-code__file { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
@@ -1322,7 +1313,7 @@
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sc-sp-4);
   flex: none;
   font: inherit;
   font-size: var(--sc-fs-meta);
@@ -1339,7 +1330,7 @@
 
 .sc-code__body {
   position: relative;
-  padding: 10px 0;
+  padding: var(--sc-sp-10) 0;
   font-family: var(--sc-mono);
   font-size: var(--sc-fs-meta);
   line-height: 20px;
@@ -1366,24 +1357,25 @@
   color: var(--sc-text-muted);
   font-size: var(--sc-fs-micro);
 }
-.sc-code__line { white-space: pre; padding: 0 12px 0 8px; color: var(--sc-text); }
+.sc-code__line { white-space: pre; padding: 0 var(--sc-sp-12) 0 var(--sc-sp-8); color: var(--sc-text); }
+.sc-code__more { margin: var(--sc-sp-8) 0 0 var(--sc-sp-8); }
 
 /* ── to-do list ───────────────────────────────────────────────────────── */
 
 .sc-todo {
-  margin: 10px 0;
+  margin: var(--sc-sp-10) 0;
   font-size: var(--sc-fs-ui);
   color: var(--sc-text);
   background: var(--sc-surface);
   border: 1px solid var(--sc-border);
   border-radius: var(--sc-radius);
-  padding: 8px 12px 12px;
+  padding: var(--sc-sp-8) var(--sc-sp-12) var(--sc-sp-12);
 }
 .sc-todo__head {
   display: flex;
   width: 100%;
   align-items: center;
-  gap: 8px;
+  gap: var(--sc-sp-8);
   padding: 0;
   border: 0;
   background: transparent;
@@ -1422,7 +1414,7 @@
 }
 .sc-todo__collapsible--closed { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
 .sc-todo__inner { min-height: 0; overflow: hidden; }
-.sc-todo__list { list-style: none; display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 10px 0 0; }
+.sc-todo__list { list-style: none; display: flex; flex-direction: column; gap: var(--sc-sp-8); margin: 0; padding: var(--sc-sp-10) 0 0; }
 .sc-todo__item {
   display: flex;
   align-items: flex-start;
@@ -1533,11 +1525,11 @@
 }
 .sc-ai[data-disabled] { opacity: 0.6; pointer-events: none; }
 
-.sc-ai__attachments { display: flex; flex-wrap: wrap; gap: 6px; }
+.sc-ai__attachments { display: flex; flex-wrap: wrap; gap: var(--sc-sp-6); }
 .sc-ai__chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sc-sp-6);
   max-width: 220px;
   padding: 4px 6px 4px 9px;
   border-radius: 999px;
@@ -1550,7 +1542,7 @@
 .sc-ai__chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sc-ai__chip-x {
   display: inline-flex;
-  padding: 2px;
+  padding: var(--sc-sp-2);
   border: 0;
   border-radius: 50%;
   background: none;
@@ -1591,7 +1583,7 @@
 .sc-ai__pill {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--sc-sp-2);
   margin: 0 2px 0 1px;
   padding: 1px 3px 1px 7px;
   border-radius: 999px;
@@ -1624,7 +1616,7 @@
   z-index: 20;
   max-height: 240px;
   overflow-y: auto;
-  padding: 4px;
+  padding: var(--sc-sp-4);
   border-radius: var(--sc-radius);
   border: 1px solid var(--sc-border);
   background: var(--sc-bg);
@@ -1648,8 +1640,8 @@
 .sc-ai__palettename { font-size: var(--sc-fs-ui); font-weight: 500; }
 .sc-ai__palettedesc { font-size: var(--sc-fs-micro); color: var(--sc-text-muted); }
 
-.sc-ai__bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px 10px; }
-.sc-ai__left, .sc-ai__right { display: flex; align-items: center; gap: 6px; }
+.sc-ai__bar { display: flex; align-items: center; gap: var(--sc-sp-8); padding: var(--sc-sp-6) var(--sc-sp-8) var(--sc-sp-8) var(--sc-sp-10); }
+.sc-ai__left, .sc-ai__right { display: flex; align-items: center; gap: var(--sc-sp-6); }
 .sc-ai__right { margin-left: auto; }
 
 .sc-ai__icon {
@@ -1674,7 +1666,7 @@
   bottom: calc(100% + 6px);
   z-index: 20;
   min-width: 190px;
-  padding: 4px;
+  padding: var(--sc-sp-4);
   border-radius: var(--sc-radius);
   border: 1px solid var(--sc-border);
   background: var(--sc-bg);
@@ -1685,7 +1677,7 @@
 .sc-ai__menuitem {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--sc-sp-8);
   width: 100%;
   padding: 7px 9px;
   border: 0;
@@ -1705,7 +1697,7 @@
   left: calc(100% + 4px);
   bottom: 0;
   min-width: 170px;
-  padding: 4px;
+  padding: var(--sc-sp-4);
   border-radius: var(--sc-radius);
   border: 1px solid var(--sc-border);
   background: var(--sc-bg);
@@ -1715,7 +1707,7 @@
 .sc-ai__model {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--sc-sp-6);
   padding: 5px 10px;
   border: 1px solid var(--sc-border);
   border-radius: 999px;
@@ -1729,7 +1721,7 @@
 .sc-ai__modelitem {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--sc-sp-2);
   width: 100%;
   padding: 8px 9px;
   border: 0;
@@ -1741,7 +1733,7 @@
   cursor: pointer;
 }
 .sc-ai__modelitem:hover { background: var(--sc-surface-2); }
-.sc-ai__modelhead { display: flex; align-items: center; gap: 6px; }
+.sc-ai__modelhead { display: flex; align-items: center; gap: var(--sc-sp-6); }
 .sc-ai__modelname { font-size: var(--sc-fs-ui); font-weight: 500; }
 .sc-ai__modelcheck { margin-left: auto; color: var(--sc-accent); display: inline-flex; }
 .sc-ai__modeldesc { font-size: var(--sc-fs-micro); color: var(--sc-text-muted); line-height: 1.4; }
