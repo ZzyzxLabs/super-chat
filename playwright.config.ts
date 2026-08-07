@@ -59,6 +59,11 @@ export default defineConfig({
     { name: "phone-360", use: phone(360, 640) },
     { name: "phone-390", use: phone(390, 844) },
     { name: "tablet-768", use: { ...phone(768, 1024), deviceScaleFactor: 2 } },
+    // Desktop is not a responsive tier — it is the regression guard. Every
+    // rule above was added to a stylesheet that already worked at this width,
+    // and a compact value that leaks past its query is invisible to a suite
+    // that only ever looks at phones.
+    { name: "desktop-1280", use: { ...devices["Desktop Chrome"], viewport: { width: 1280, height: 900 } } },
   ],
 
   webServer: {

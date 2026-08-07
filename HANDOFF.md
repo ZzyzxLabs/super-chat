@@ -20,7 +20,7 @@ apps/playground   Next.js dev panels. runs with NO API key.
 ```bash
 pnpm install && pnpm build && pnpm dev     # → http://localhost:3210
 pnpm test                                  # 276 tests, ~5s
-pnpm test:rwd                              # 48 browser checks, 3 viewports
+pnpm test:rwd                              # 64 browser checks, 4 viewports
 ```
 
 The playground is **not a product**. It is six panels, one per capability, aimed
@@ -129,7 +129,7 @@ has a regression test now; the test names spell out the failure.
   them. `pnpm -r typecheck` after `pnpm build` is the safe order.
 - **G: is slow.** Scope searches; avoid unscoped recursive `find`/`du` here.
 - **Still nobody has looked at these panels with human eyes.** A headless
-  browser now drives them at 360/390/768 and asserts that nothing overflows,
+  browser now drives them at 360/390/768/1280 and asserts that nothing overflows,
   that a message can be sent, and that touch targets are big enough — which
   is a real floor, and is not the same as design review. Proportion, rhythm
   and colour remain unexamined. Open it before trusting the visual design.
@@ -194,7 +194,8 @@ knowing before touching the stylesheet:
   wrapper, or those cards keep desktop padding at any width. Card internals
   are fine either way.
 
-`pnpm test:rwd` runs the browser layer (48 checks across 360/390/768). It
+`pnpm test:rwd` runs the browser layer (64 checks across 360/390/768/1280 —
+the last a desktop regression guard, not a tier). It
 needs Chromium; see the note in `playwright.config.ts` about pointing at a
 preinstalled binary.
 

@@ -101,7 +101,10 @@ test("P0 — a phone can hold a conversation", async ({ page }) => {
   expect(out, `reply overflowed: ${JSON.stringify(out, null, 2)}`).toEqual([]);
 });
 
-test("P0 — the composer clears Safari's zoom threshold", async ({ page }) => {
+test("P0 — the composer clears Safari's zoom threshold", async ({ page }, testInfo) => {
+  // Keyed on the pointer, so it is asserted where a pointer:coarse device is
+  // being emulated — and deliberately NOT on desktop, where 15px is correct.
+  test.skip(!testInfo.project.use.hasTouch, "touch devices only");
   await settle(page, "/run");
   const size = await page
     .locator(".sc-composer__input")
@@ -111,6 +114,7 @@ test("P0 — the composer clears Safari's zoom threshold", async ({ page }) => {
 });
 
 test("composer controls meet the 44px touch target", async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.use.hasTouch, "touch devices only");
   await settle(page, "/agent-ui");
 
   // The painted control stays small by design; the target is carried by a
@@ -224,34 +228,43 @@ test("P1 — nothing inside a card overflows the card", async ({ page }) => {
   expect(bleeding, `card content bled past its border: ${JSON.stringify(bleeding, null, 2)}`).toEqual([]);
 });
 
-test("the width tiers actually differ", async ({ page }, testInfo) => {
-  // Guards against the tiers collapsing into each other — which they silently
-  // did once already, when the medium block was authored after compact and won
-  // on source order at every width compact was supposed to own. Both tiers
-  // match at 360px, so only source order separates them and only a browser can
-  // say which one actually applied.
+test("the bubble tier follows the thread, not the window", async ({ page }) => {
+  // Two things at once.
+  //
+  // Guards the failure that already happened: compact and medium both match at
+  // 360px, so only source order separates them, and authoring medium last
+  // silently handed phones the tablet cap.
+  //
+  // And states the premise the whole design rests on. Writing this as "desktop
+  // viewport implies desktop bubble" is what failed first at 1280px — the run
+  // panel gives up 232px to the sidebar and 330 to the event rail, so its
+  // thread is 678px and the medium tier is exactly right there. The viewport
+  // was never the question; the container is.
   await settle(page, "/run");
 
-  // Read the resolved declaration rather than a measured box: Chrome reports a
-  // percentage max-width back as a percentage, so dividing it by a pixel width
-  // produces a number that looks like a ratio and is not one.
-  const maxWidth = await page.evaluate(() => {
-    const thread = document.querySelector(".sc-thread");
+  const measured = await page.evaluate(() => {
+    const thread = document.querySelector(".sc-thread") as HTMLElement | null;
     if (!thread) return null;
+    const cs = getComputedStyle(thread);
+    const inner = thread.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+
     const probe = document.createElement("div");
     probe.className = "sc-bubble";
     thread.appendChild(probe);
-    const value = getComputedStyle(probe).maxWidth;
+    // Read the resolved declaration, not a measured box: Chrome reports a
+    // percentage max-width back as a percentage, and dividing that by a pixel
+    // width yields a number that looks like a ratio and is not one.
+    const cap = getComputedStyle(probe).maxWidth;
     probe.remove();
-    return value;
+    return { inner, cap };
   });
 
-  expect(maxWidth, "no thread to measure").not.toBeNull();
-  if (testInfo.project.name === "tablet-768") {
-    expect(maxWidth, "medium pulls the bubble back from its desktop cap").toContain("84%");
-  } else {
-    expect(maxWidth, "compact must win over medium at phone widths").toBe("88%");
-  }
+  expect(measured, "no thread to measure").not.toBeNull();
+  const { inner, cap } = measured!;
+
+  if (inner <= 600) expect(cap, `thread ${inner}px is compact`).toBe("88%");
+  else if (inner <= 900) expect(cap, `thread ${inner}px is medium`).toContain("84%");
+  else expect(cap, `thread ${inner}px is desktop`).toContain("76%");
 });
 
 test("P2 — every panel stays reachable on a phone", async ({ page }) => {
@@ -271,4 +284,46 @@ test("P2 — every panel stays reachable on a phone", async ({ page }) => {
   await page.locator('.dev__nav a[href="/cards"]').click();
   await expect(page).toHaveURL(/\/cards$/);
   await expect(page.locator(".sc-card").first()).toBeVisible();
+});
+
+test("desktop keeps the values the compact tier overrides", async ({ page }, testInfo) => {
+  // A regression guard, not a tier. Everything in the responsive section was
+  // bolted onto a stylesheet that already worked at this width, and a leaked
+  // compact value — a query that matches wider than intended, a rule authored
+  // after the one it was meant to lose to — is invisible to a suite that only
+  // looks at phones.
+  test.skip(testInfo.project.name !== "desktop-1280", "desktop-only regression check");
+  await settle(page, "/run");
+
+  const desktop = await page.evaluate(() => {
+    const thread = document.querySelector(".sc-thread") as HTMLElement | null;
+    if (!thread) return null;
+    const input = document.querySelector(".sc-composer__input");
+    return {
+      threadPadding: getComputedStyle(thread).paddingLeft,
+      composerFont: input ? getComputedStyle(input).fontSize : null,
+      // No pointer:coarse here, so the hit-area pseudo-element must not paint.
+      sendTarget: (() => {
+        const btn = document.querySelector(".sc-btn--primary");
+        return btn ? getComputedStyle(btn, "::after").content : null;
+      })(),
+    };
+  });
+
+  expect(desktop).not.toBeNull();
+  expect(desktop!.threadPadding, "desktop thread keeps 20px").toBe("20px");
+  expect(desktop!.composerFont, "desktop composer keeps its designed 15px").toBe("15px");
+  expect(desktop!.sendTarget, "touch hit areas must not exist on a mouse").toBe("none");
+});
+
+test("desktop shell keeps the sidebar", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-1280", "desktop-only regression check");
+  await settle(page, "/");
+
+  const nav = page.locator(".dev__nav");
+  await expect(nav).toBeVisible();
+  const box = await nav.boundingBox();
+  expect(box!.width, "the sidebar is a column, not a strip").toBeGreaterThan(200);
+  // The per-link hints are hidden in the strip; they belong on desktop.
+  await expect(page.locator(".dev__link-hint").first()).toBeVisible();
 });
