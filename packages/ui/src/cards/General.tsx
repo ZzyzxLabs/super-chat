@@ -200,10 +200,11 @@ export function FunnelCardView({ spec }: CardRendererProps<FunnelCard>) {
                 {stage.note ? <span className="sc-muted sc-funnel__note">{stage.note}</span> : null}
               </div>
               <div className="sc-funnel__track">
-                <div className="sc-funnel__bar" style={{ width: `${Math.max(2, (stage.value / top) * 100)}%` }}>
-                  <span className="sc-funnel__value">{formatValue(stage.value, spec.format ?? "number")}</span>
-                </div>
+                {/* The bar carries no text: a number wider than its own bar
+                    used to spill onto the track and vanish into it. */}
+                <div className="sc-funnel__bar" style={{ width: `${Math.max(2, (stage.value / top) * 100)}%` }} />
               </div>
+              <span className="sc-funnel__value">{formatValue(stage.value, spec.format ?? "number")}</span>
               <div className="sc-funnel__rate">
                 {stepRate == null ? (
                   <span className="sc-muted">—</span>

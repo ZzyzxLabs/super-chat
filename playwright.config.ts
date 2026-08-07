@@ -19,12 +19,18 @@ import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 3311;
 
-// This environment ships Chromium at a pinned build that will not match
-// whatever revision the installed @playwright/test wants, and re-downloading
-// browsers here is not an option. Pointing at the provided binary keeps the
-// runner working across that mismatch; unset the variable and Playwright falls
-// back to its own managed download, which is what a normal CI would do.
-const CHROMIUM = process.env.PLAYWRIGHT_CHROMIUM_PATH ?? "/opt/pw-browsers/chromium";
+// Some sandboxes ship Chromium at a pinned build that will not match whatever
+// revision the installed @playwright/test wants, and re-downloading browsers
+// there is not an option — PLAYWRIGHT_CHROMIUM_PATH points the runner at the
+// provided binary instead.
+//
+// It has to stay OPTIONAL. Setting executablePath unconditionally (to a
+// sandbox path that exists on exactly one machine) is not a fallback: every
+// project fails at launch with "executable doesn't exist" on any normal
+// checkout, which is precisely where this suite earns its keep. Unset, the
+// launch options carry no executablePath at all and Playwright uses its own
+// managed download.
+const CHROMIUM = process.env.PLAYWRIGHT_CHROMIUM_PATH;
 
 // All three run on Chromium, which is the only engine available here. The
 // named iPhone/iPad descriptors are deliberately NOT used: they carry
@@ -49,7 +55,7 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
     trace: "retain-on-failure",
-    launchOptions: { executablePath: CHROMIUM },
+    ...(CHROMIUM ? { launchOptions: { executablePath: CHROMIUM } } : {}),
   },
 
   // The three widths in 5.5. 360 is the floor worth supporting, 390 is the
