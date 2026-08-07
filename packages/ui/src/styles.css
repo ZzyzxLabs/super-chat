@@ -10,7 +10,32 @@
  * needs no compilation, so there is nothing to gain by routing it through dist.
  *
  * Light and dark are both first-class: the media query is the default signal,
- * and an explicit [data-theme] attribute wins over it in both directions. */
+ * and an explicit [data-theme] attribute wins over it in both directions.
+ *
+ * ── Breakpoint constants (UI-SPEC 5.1) ───────────────────────────────────
+ *
+ *   compact: 600px   phone portrait, narrow embedded sidebar
+ *   medium:  900px   tablet portrait, split view
+ *
+ * These are NOT custom properties, and the omission is deliberate: a query
+ * condition does not accept var(), and `@container (max-width: var(--x))`
+ * fails silently rather than erroring. So the values live here as prose and
+ * appear as literals at the two query sites. rwd.test.ts enforces that no
+ * third literal ever joins them.
+ *
+ * Which query to reach for is a fixed rule, not a judgement call:
+ *
+ *   "how wide am I"      → @container. The kit is embedded; a host can drop
+ *                          Thread into a 380px sidebar inside a 1920px
+ *                          window, where a media query answers confidently
+ *                          and wrongly.
+ *   "what device is this" → @media (pointer / hover / prefers-*). Touch
+ *                          targets and iOS input zoom are device traits and
+ *                          have nothing to do with container width.
+ *
+ * Compact layout rules live in one block at the foot of this file rather
+ * than beside each component, so that "what does this look like on a phone"
+ * is answerable by reading one place. */
 
 :root {
   --sc-bg: #ffffff;
@@ -21,6 +46,7 @@
   --sc-text-muted: #646b76;
   --sc-accent: #3a6df0;
   --sc-accent-contrast: #ffffff;
+  --sc-negative-contrast: #ffffff;
   --sc-positive: #17864b;
   --sc-negative: #c8341f;
   --sc-warning: #9a6400;
@@ -55,6 +81,7 @@
   --sc-fs-ui: 13px;    /* card body, buttons, tables — UI default */
   --sc-fs-meta: 12px;  /* auxiliary text, detail, table headers */
   --sc-fs-micro: 11px; /* pills, overlines, footnotes */
+  --sc-fs-glyph: 9px;  /* decorative caret/marker glyphs — never prose */
   --sc-fs-stat: 22px;  /* stat values */
   --sc-fs-hero: 26px;  /* gauge headline value */
   --sc-lh-tight: 1.25; /* large numbers, stat value */
@@ -107,6 +134,7 @@
     --sc-text-muted: #949cab;
     --sc-accent: #6b9bff;
     --sc-accent-contrast: #0f1115;
+    --sc-negative-contrast: #0f1115;
     --sc-positive: #46c07f;
     --sc-negative: #ff6b57;
     --sc-warning: #e0a53a;
@@ -129,6 +157,7 @@
   --sc-text-muted: #949cab;
   --sc-accent: #6b9bff;
   --sc-accent-contrast: #0f1115;
+  --sc-negative-contrast: #0f1115;
   --sc-positive: #46c07f;
   --sc-negative: #ff6b57;
   --sc-warning: #e0a53a;
@@ -150,6 +179,7 @@
   --sc-text-muted: #646b76;
   --sc-accent: #3a6df0;
   --sc-accent-contrast: #ffffff;
+  --sc-negative-contrast: #ffffff;
   --sc-positive: #17864b;
   --sc-negative: #c8341f;
   --sc-warning: #9a6400;
@@ -231,7 +261,7 @@
 .sc-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .sc-btn--primary { background: var(--sc-accent); border-color: var(--sc-accent); color: var(--sc-accent-contrast); }
 .sc-btn--primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--sc-accent); }
-.sc-btn--danger { background: var(--sc-negative); border-color: var(--sc-negative); color: #fff; }
+.sc-btn--danger { background: var(--sc-negative); border-color: var(--sc-negative); color: var(--sc-negative-contrast); }
 .sc-btn--ghost { background: transparent; }
 .sc-btn--sm { padding: var(--sc-sp-4) var(--sc-sp-8); font-size: var(--sc-fs-meta); }
 
@@ -298,7 +328,18 @@
 
 /* ── cards ────────────────────────────────────────────────────────────────── */
 
+/* A card is a query container so its INTERNALS size against the card rather
+   than the window — a card inside a 380px embedded thread compacts even when
+   the window is wide.
+
+   The card's own padding is a different question, and one it cannot answer
+   itself: an element is never its own query container, so .sc-card's padding
+   measures the nearest container ABOVE it. Inside a Thread that is .sc-thread
+   and it works. A host that renders cards outside a Thread has to declare
+   `container-type: inline-size` on whatever wraps them, or they will keep
+   desktop padding at any width. The playground does this on .dev__preview. */
 .sc-card {
+  container-type: inline-size;
   margin: var(--sc-sp-12) 0;
   padding: var(--sc-sp-12) var(--sc-sp-16);
   border-radius: var(--sc-radius);
@@ -350,6 +391,9 @@
 .sc-chart svg { width: 100%; height: auto; display: block; }
 .sc-chart__grid { stroke: var(--sc-border); stroke-width: 1; }
 .sc-chart__axis { stroke: var(--sc-border); stroke-width: 1; }
+/* The one exempt font-size in the file: this is painted inside the chart's SVG
+   user space, where the number is a coordinate rather than a type size. Same
+   carve-out 2.0.2 gives SVG spacing. The rwd test knows about this line. */
 .sc-chart__label { fill: var(--sc-text-muted); font-size: 10px; font-family: var(--sc-mono); }
 .sc-chart__annotation { stroke: currentColor; stroke-width: 1; stroke-dasharray: 4 3; }
 .sc-candle line { stroke: currentColor; stroke-width: 1; }
@@ -539,14 +583,16 @@
 
 /* ── thread ───────────────────────────────────────────────────────────────── */
 
-.sc-thread { flex: 1; overflow-y: auto; padding: var(--sc-sp-20); scroll-behavior: smooth; font-family: var(--sc-sans); }
+.sc-thread { container-type: inline-size; flex: 1; overflow-y: auto; padding: var(--sc-sp-20); scroll-behavior: smooth; font-family: var(--sc-sans); }
 /* Reading size, not UI size: the empty state is the first screen a user meets,
    and it is prose to be read rather than chrome to be scanned. */
 .sc-empty { color: var(--sc-text-muted); text-align: center; padding: var(--sc-sp-48) var(--sc-sp-20); font-size: var(--sc-fs-body); }
 
 /* The thread needs a positioned parent for the jump button to anchor to, but
    must not itself become the scroll container's offset parent. */
-.sc-threadwrap { position: relative; flex: 1; min-height: 0; display: flex; }
+/* Also a container, so .sc-thread's own padding has something to query: an
+   element is never its own query container, only its descendants'. */
+.sc-threadwrap { container-type: inline-size; position: relative; flex: 1; min-height: 0; display: flex; }
 
 .sc-jump {
   position: absolute;
@@ -663,7 +709,7 @@
   text-align: left;
   cursor: pointer;
 }
-.sc-think__icon { font-size: 9px; flex: none; }
+.sc-think__icon { font-size: var(--sc-fs-glyph); flex: none; }
 .sc-think__label { flex: none; }
 /* The peek must never grow the row: one line, clipped, and it yields all
    remaining width so a long reasoning line cannot push the layout. */
@@ -700,7 +746,7 @@
   cursor: pointer;
   font-family: inherit;
 }
-.sc-tools__icon { font-size: 9px; }
+.sc-tools__icon { font-size: var(--sc-fs-glyph); }
 .sc-tools__summary { font-variant-numeric: tabular-nums; }
 .sc-tools__list { list-style: none; margin: var(--sc-sp-8) 0 0; padding: 0; display: grid; gap: var(--sc-sp-10); }
 .sc-tools__item { padding-left: var(--sc-sp-10); border-left: 2px solid var(--sc-border); }
@@ -725,10 +771,15 @@
 }
 
 .sc-composer {
+  container-type: inline-size;
   display: flex;
   align-items: flex-end;
   gap: var(--sc-sp-8);
   padding: var(--sc-sp-12) var(--sc-sp-16);
+  /* The bottom inset keeps the send control clear of the iPhone home
+     indicator. max() rather than a plain add, so a desktop browser — where
+     the inset is 0 — keeps the designed 12px and does not collapse to none. */
+  padding-bottom: max(var(--sc-sp-12), env(safe-area-inset-bottom));
   border-top: 1px solid var(--sc-border);
   background: var(--sc-bg);
   position: sticky;
@@ -782,7 +833,7 @@
    never touches layout. */
 
 .sc-shimmer {
-  font-size: 13px;
+  font-size: var(--sc-fs-ui);
   line-height: 18px;
   font-weight: 500;
   color: var(--sc-text-muted);
@@ -842,7 +893,7 @@
 .sc-think__head--clickable { cursor: pointer; }
 
 .sc-think__label {
-  font-size: 13px;
+  font-size: var(--sc-fs-ui);
   line-height: 18px;
   font-weight: 500;
   /* softer than the verb, so "for Ns" sits behind it in the hierarchy */
@@ -891,7 +942,7 @@
   margin: 0;
   height: 40px;
   line-height: 20px;
-  font-size: 13px;
+  font-size: var(--sc-fs-ui);
   font-weight: 425;
   color: var(--sc-text-muted);
   letter-spacing: -0.005em;
@@ -939,7 +990,7 @@
   border: 1px solid var(--sc-border);
 }
 .sc-orb__label {
-  font-size: 11.5px;
+  font-size: var(--sc-fs-micro);
   font-weight: 425;
   line-height: 1;
   color: var(--sc-text-muted);
@@ -1260,7 +1311,7 @@
 .sc-code__icon { display: block; color: var(--sc-text-muted); flex: none; }
 .sc-code__lang {
   font-family: var(--sc-mono);
-  font-size: 12.5px;
+  font-size: var(--sc-fs-meta);
   line-height: 1;
   color: var(--sc-text);
   overflow: hidden;
@@ -1274,7 +1325,7 @@
   gap: 4px;
   flex: none;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--sc-fs-meta);
   color: var(--sc-text-muted);
   border: 0;
   background: none;
@@ -1290,7 +1341,7 @@
   position: relative;
   padding: 10px 0;
   font-family: var(--sc-mono);
-  font-size: 12.5px;
+  font-size: var(--sc-fs-meta);
   line-height: 20px;
   overflow-x: auto;
 }
@@ -1313,7 +1364,7 @@
   text-align: right;
   padding: 0 7px;
   color: var(--sc-text-muted);
-  font-size: 11px;
+  font-size: var(--sc-fs-micro);
 }
 .sc-code__line { white-space: pre; padding: 0 12px 0 8px; color: var(--sc-text); }
 
@@ -1321,7 +1372,7 @@
 
 .sc-todo {
   margin: 10px 0;
-  font-size: 13px;
+  font-size: var(--sc-fs-ui);
   color: var(--sc-text);
   background: var(--sc-surface);
   border: 1px solid var(--sc-border);
@@ -1339,7 +1390,7 @@
   cursor: pointer;
   color: var(--sc-text);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--sc-fs-ui);
   min-height: 22px;
 }
 .sc-todo__headicon { position: relative; width: 16px; height: 16px; flex: none; color: var(--sc-text-muted); }
@@ -1472,7 +1523,14 @@
 
 /* ── agent input ──────────────────────────────────────────────────────── */
 
-.sc-ai { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px; }
+.sc-ai {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sc-sp-8);
+  padding: var(--sc-sp-12) var(--sc-sp-16);
+  padding-bottom: max(var(--sc-sp-12), env(safe-area-inset-bottom));
+}
 .sc-ai[data-disabled] { opacity: 0.6; pointer-events: none; }
 
 .sc-ai__attachments { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1485,7 +1543,7 @@
   border-radius: 999px;
   background: var(--sc-surface-2);
   border: 1px solid var(--sc-border);
-  font-size: 12px;
+  font-size: var(--sc-fs-meta);
   animation: sc-fade-in 200ms ease both;
 }
 .sc-ai__chip-icon { display: inline-flex; color: var(--sc-text-muted); flex: none; }
@@ -1516,7 +1574,7 @@
   max-height: 220px;
   overflow-y: auto;
   padding: 12px 14px 4px;
-  font-size: 14px;
+  font-size: var(--sc-fs-body);
   line-height: 1.5;
   color: var(--sc-text);
   outline: none;
@@ -1540,7 +1598,7 @@
   background: color-mix(in srgb, var(--sc-accent) 14%, transparent);
   border: 1px solid color-mix(in srgb, var(--sc-accent) 38%, transparent);
   color: var(--sc-accent);
-  font-size: 12.5px;
+  font-size: var(--sc-fs-meta);
   vertical-align: baseline;
   user-select: none;
 }
@@ -1570,7 +1628,7 @@
   border-radius: var(--sc-radius);
   border: 1px solid var(--sc-border);
   background: var(--sc-bg);
-  box-shadow: 0 8px 24px color-mix(in srgb, #000 14%, transparent);
+  box-shadow: var(--sc-shadow-overlay);
 }
 .sc-ai__paletteitem {
   display: flex;
@@ -1587,8 +1645,8 @@
   cursor: pointer;
 }
 .sc-ai__paletteitem--on { background: var(--sc-surface-2); }
-.sc-ai__palettename { font-size: 13px; font-weight: 500; }
-.sc-ai__palettedesc { font-size: 11px; color: var(--sc-text-muted); }
+.sc-ai__palettename { font-size: var(--sc-fs-ui); font-weight: 500; }
+.sc-ai__palettedesc { font-size: var(--sc-fs-micro); color: var(--sc-text-muted); }
 
 .sc-ai__bar { display: flex; align-items: center; gap: 8px; padding: 6px 8px 8px 10px; }
 .sc-ai__left, .sc-ai__right { display: flex; align-items: center; gap: 6px; }
@@ -1620,7 +1678,7 @@
   border-radius: var(--sc-radius);
   border: 1px solid var(--sc-border);
   background: var(--sc-bg);
-  box-shadow: 0 8px 24px color-mix(in srgb, #000 14%, transparent);
+  box-shadow: var(--sc-shadow-overlay);
   animation: sc-fade-in 120ms ease both;
 }
 .sc-ai__menu--wide { min-width: 280px; }
@@ -1635,7 +1693,7 @@
   background: none;
   color: var(--sc-text);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--sc-fs-ui);
   text-align: left;
   cursor: pointer;
 }
@@ -1651,7 +1709,7 @@
   border-radius: var(--sc-radius);
   border: 1px solid var(--sc-border);
   background: var(--sc-bg);
-  box-shadow: 0 8px 24px color-mix(in srgb, #000 14%, transparent);
+  box-shadow: var(--sc-shadow-overlay);
 }
 
 .sc-ai__model {
@@ -1664,7 +1722,7 @@
   background: var(--sc-bg);
   color: var(--sc-text-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--sc-fs-meta);
   cursor: pointer;
 }
 .sc-ai__model:hover:not(:disabled) { color: var(--sc-text); background: var(--sc-surface-2); }
@@ -1684,10 +1742,10 @@
 }
 .sc-ai__modelitem:hover { background: var(--sc-surface-2); }
 .sc-ai__modelhead { display: flex; align-items: center; gap: 6px; }
-.sc-ai__modelname { font-size: 13px; font-weight: 500; }
+.sc-ai__modelname { font-size: var(--sc-fs-ui); font-weight: 500; }
 .sc-ai__modelcheck { margin-left: auto; color: var(--sc-accent); display: inline-flex; }
-.sc-ai__modeldesc { font-size: 11.5px; color: var(--sc-text-muted); line-height: 1.4; }
-.sc-ai__modelctx { font-size: 11px; color: var(--sc-text-muted); font-variant-numeric: tabular-nums; }
+.sc-ai__modeldesc { font-size: var(--sc-fs-micro); color: var(--sc-text-muted); line-height: 1.4; }
+.sc-ai__modelctx { font-size: var(--sc-fs-micro); color: var(--sc-text-muted); font-variant-numeric: tabular-nums; }
 
 .sc-ai__enhance {
   display: inline-flex;
@@ -1699,7 +1757,7 @@
   background: var(--sc-bg);
   color: var(--sc-text-muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--sc-fs-meta);
   cursor: pointer;
   animation: sc-fade-in 160ms ease both;
 }
@@ -1930,4 +1988,225 @@
   border-bottom: 1px solid color-mix(in srgb, var(--sc-warning) 35%, var(--sc-border));
   font-size: var(--sc-fs-meta);
   text-align: center;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   responsive
+   ──────────────────────────────────────────────────────────────────────────
+   Two sections, split by the rule in the file header: device traits ask
+   @media, width asks @container. One exception worth naming — a
+   position:fixed element's containing block IS the viewport, so the viewport
+   is its container and @media is the correct query for it (see .sc-toasts).
+
+   Everything width-driven lives here rather than beside its component, so
+   "what does this look like on a phone" is one block of reading.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── device: touch ────────────────────────────────────────────────────────
+   44px of hit area, not a 44px button. Inflating .sc-ai__icon to 44 would
+   thicken the composer bar and undo the density 4.3 settled on, so a
+   transparent ::after carries the target while the painted control keeps its
+   size. width:max(100%,44px) leaves already-wide controls alone instead of
+   shrinking them to a square. */
+@media (pointer: coarse) {
+  .sc-ai__icon,
+  .sc-ai__send,
+  .sc-ai__chip-x,
+  .sc-ai__pill-x,
+  .sc-ai__model,
+  .sc-ai__enhance,
+  .sc-code__copy,
+  .sc-jump { position: relative; }
+
+  .sc-ai__icon::after,
+  .sc-ai__send::after,
+  .sc-ai__chip-x::after,
+  .sc-ai__pill-x::after,
+  .sc-ai__model::after,
+  .sc-ai__enhance::after,
+  .sc-code__copy::after,
+  .sc-jump::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+  }
+
+  /* Neighbouring 28px controls 6px apart would have their 44px zones overlap
+     by ~10px, handing part of one target to the other. Widening the gap costs
+     4px of bar and removes most of that. */
+  .sc-ai__left,
+  .sc-ai__right { gap: var(--sc-sp-10); }
+
+  /* Menu rows are already wide; they only need height. */
+  .sc-ai__menuitem,
+  .sc-ai__modelitem,
+  .sc-ai__paletteitem { min-height: 44px; }
+}
+
+/* ── device: iOS focus zoom ───────────────────────────────────────────────
+   Safari zooms the page in when a focused field is under 16px, and does not
+   zoom back out. The threshold belongs to the browser, not to the layout: a
+   tablet at 768px is past the compact tier and zooms just the same. Keying
+   this on width was a category error — it is the pointer that predicts the
+   behaviour, exactly as the header's rule says.
+
+   16px is not a design size and gets no token: it is the number Safari stops
+   at, and naming it would imply it is ours to tune. */
+@media (pointer: coarse) {
+  .sc-ai__editor,
+  .sc-composer__input { font-size: 16px; }
+}
+
+/* ── device: no hover ─────────────────────────────────────────────────────
+   The to-do header swaps its status glyph for a chevron on hover. On a touch
+   device that swap is either unreachable or — worse — sticky, because a tap
+   can latch :hover until the next tap elsewhere, leaving the header showing a
+   chevron and hiding the progress pie for good.
+
+   The fix drops the swap rather than inverting it. The chevron is an
+   affordance hint; the pie is data. Trading data for a hint is the wrong way
+   round, and on touch the whole row is a button that visibly expands when
+   tapped, so the hint is redundant. */
+@media (hover: none) {
+  .sc-todo__head:hover .sc-todo__headlist,
+  .sc-todo__head:hover .sc-todo__pie,
+  .sc-todo__head:hover .sc-todo__headcheck { opacity: 1; }
+  .sc-todo__head:hover .sc-todo__chevron { opacity: 0; }
+}
+
+/* Keyboard users have no hover either. This is the same affordance reaching
+   the same place by a different route — it is not a touch rule, so it sits
+   outside the query above. */
+.sc-todo__head:focus-visible .sc-todo__headlist,
+.sc-todo__head:focus-visible .sc-todo__pie,
+.sc-todo__head:focus-visible .sc-todo__headcheck { opacity: 0; }
+.sc-todo__head:focus-visible .sc-todo__chevron { opacity: 1; }
+
+/* ── device: viewport-anchored overlays ───────────────────────────────────
+   position:fixed, so the viewport is the container and @media is right. */
+@media (max-width: 600px) {
+  .sc-toasts {
+    left: var(--sc-sp-12);
+    right: var(--sc-sp-12);
+    transform: none;
+    align-items: stretch;
+  }
+  .sc-toast { text-align: center; }
+}
+
+/* ── width: medium (container ≤ 900px) ────────────────────────────────────
+   Tablet portrait and split view. The thread is already single-column, so
+   this tier only pulls the bubble in from its desktop cap. */
+@container (max-width: 900px) {
+  .sc-bubble { max-width: min(84%, 620px); }
+}
+
+/* ── width: compact (container ≤ 600px) ───────────────────────────────────
+   Chrome shrinks, content does not. --sc-fs-body stays put and the composer
+   goes UP to 16px; what gives way is padding, gaps and meta rows. A phone is
+   read closer than a monitor but on less glass — shrinking the prose too
+   would charge the reader twice. */
+
+/* thread shell — queries .sc-threadwrap */
+@container (max-width: 600px) {
+  .sc-thread { padding: var(--sc-sp-12); }
+}
+
+/* thread contents — queries .sc-thread */
+@container (max-width: 600px) {
+  /* 76% of 360px is 274px: under thirteen CJK characters to a line. */
+  .sc-bubble { max-width: 88%; }
+  .sc-msg { margin-bottom: var(--sc-sp-16); }
+  .sc-daydivider { margin: var(--sc-sp-16) 0 var(--sc-sp-12); }
+
+  /* Cards keep 12px of air on each side. Bleeding them to the screen edge
+     saves 24px and costs the reading that they are objects inside a message
+     rather than full-width bands of page — the distinction all of section B
+     is built on. */
+  .sc-card { padding: var(--sc-sp-12); }
+
+  /* The empty state is the first screen a user meets, and on a phone the
+     keyboard eats half of it. Centred, the greeting lands under the fold and
+     the user sees blank space above an input. Top-aligned it survives. R1's
+     intent (the composer is the subject) is unchanged; centring was only how
+     that reads on a desktop. Size holds — this is prose, not chrome. */
+  .sc-empty { padding: var(--sc-sp-24) var(--sc-sp-12) var(--sc-sp-32); }
+
+  .sc-code__row { grid-template-columns: 26px 1fr; }
+  .sc-code__body::before { left: 26px; }
+  .sc-code__ln { padding: 0 var(--sc-sp-4); }
+  .sc-code__line { padding: 0 var(--sc-sp-8); }
+}
+
+/* card internals — queries .sc-card, so a card compacts on its own width
+   whether it sits in a narrow thread or standalone in a panel */
+@container (max-width: 600px) {
+  .sc-media { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+  .sc-funnel__row { grid-template-columns: minmax(64px, 90px) 1fr 40px; gap: var(--sc-sp-6); }
+  .sc-compare th[scope="row"] { max-width: 140px; }
+  .sc-kv__row { gap: var(--sc-sp-8); }
+  .sc-callout { gap: var(--sc-sp-8); }
+  .sc-choice { gap: var(--sc-sp-8); padding: var(--sc-sp-8) var(--sc-sp-10); }
+  .sc-choice__meta { gap: var(--sc-sp-8); }
+  .sc-gauge__scale { gap: var(--sc-sp-6); }
+  .sc-legend { gap: var(--sc-sp-8); }
+  /* Tighter cells fit one more column before the wrapper has to scroll. The
+     scroll itself stays: turning a table into stacked key/value pairs loses
+     the comparison that is the whole reason those kinds exist. */
+  .sc-table th, .sc-table td { padding: var(--sc-sp-6) var(--sc-sp-8); }
+  .sc-table--grid th, .sc-table--grid td { padding: var(--sc-sp-6) var(--sc-sp-8); }
+  .sc-stats { gap: var(--sc-sp-8); }
+}
+
+/* composer — queries .sc-ai */
+@container (max-width: 600px) {
+  /* "Claude Opus 4.5" would push the send button off the bar. */
+  .sc-ai__model > span {
+    max-width: 6em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Icon-only, but still named: hiding the label with display:none would
+     strip the button's accessible name, so it goes sr-only instead. The busy
+     state keeps its "Cancel" — that one is not decoration. */
+  .sc-ai__enhance:not(.sc-ai__enhance--busy) > span {
+    position: absolute;
+    width: 1px; height: 1px;
+    margin: -1px; padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* Menus are anchored to their trigger, so a fixed 190/280px can run off the
+     right edge on a narrow screen. cqw measures the composer, which is what
+     they actually have to fit inside — and stays correct when the composer is
+     a 380px sidebar in a wide window, which vw would not. */
+  .sc-ai__menu,
+  .sc-ai__menu--wide { min-width: 0; width: max-content; max-width: 78cqw; }
+
+  /* The submenu opened sideways: 190 + 170 = 360px, off-screen on any phone.
+     Compact turns it into an indented group inside the parent menu, so the
+     menu grows down instead of across. No DOM or state change — the same
+     markup reads as a nested list. */
+  .sc-ai__submenu {
+    position: static;
+    min-width: 0;
+    margin: var(--sc-sp-2) 0 var(--sc-sp-2) var(--sc-sp-12);
+    padding: 0 0 0 var(--sc-sp-8);
+    border: 0;
+    border-left: 1px solid var(--sc-border);
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+  }
+
+  .sc-ai__chip { max-width: 60cqw; }
 }

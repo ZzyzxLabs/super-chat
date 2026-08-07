@@ -740,3 +740,404 @@ D1／D2 於標準化尚未完成時就先做了，順序上是錯的（使用者
 
 補充 D3 的歸類理由：composer 已有 `border-top` 作為分隔，捲動陰影是在
 既有分隔之上再加一層視覺提示，屬於精緻化而非缺失的行為，因此歸設計。
+
+---
+
+# Phase 5 — RWD 適配（規劃 v0）
+
+2026-08-07。前提由使用者裁定：**agent service 也服務手機使用者，最低標
+是「在手機上能完整聊天」**。此前本專案從未有過 RWD 規劃——不是規劃了
+沒做，是規範與實作兩邊都不存在：UI-SPEC 全檔（Phase 1–4）沒出現過
+斷點、`packages/ui/src/styles.css` 1933 行的 `@media` 只有
+`prefers-color-scheme` 與 `prefers-reduced-motion` 兩種，寬度斷點是零。
+唯一的響應式規則在 playground 的 `globals.css:64/160`，那是 demo 站的
+自救，套用本 kit 的宿主拿不到。
+
+歸類：依 476 行「標準化 vs 新功能」的判準，RWD **兩邊都不是**。既有
+行為不是「有但沒規範」，而是「規則本身不存在」；也不是「需要先決定
+該不該存在的新功能」，因為使用者已經裁定它該存在。所以另起 Phase 5，
+不接在任何一條佇列後面。
+
+## 5.0 範圍分層
+
+不是所有東西都要上手機。分三層，並且**只有 P0 是承諾**：
+
+| 層 | 內容 | 標準 |
+|----|------|------|
+| **P0** | thread 讀訊息、composer 打字送出、停止、附件、模型選擇 | 360px 寬完整可用，無橫向捲動 |
+| **P1** | 20 種卡片在窄螢幕可讀 | 不爆版；資料密集型（table/comparison/code/diff）允許**卡片內**橫捲 |
+| **P2** | playground dev 面板 | 能看即可，維持現有 900/980 隱藏側欄的做法 |
+
+P2 刻意不投資：那是給開發者評估框架用的桌機工具，不是產品。把它做成
+手機版會排擠 P0 的預算，而它的使用者本來就坐在電腦前。
+
+## 5.1 策略：斷點制
+
+### 5.1.1 container query 還是 media query
+
+這是本章最重要的決策，因為選錯會讓整套規範答錯題。
+
+`@superchat/ui` 是**嵌入式套件**，宿主可能把 `<Thread>` 放進 1920px
+視窗裡的一個 380px 側欄。此時 media query 回報「桌機」，但元件實際
+只有 380px——它會用寬版規則把自己撐爆。container query 問的是「我有
+多寬」，那才是元件真正需要知道的事。
+
+但 container query 不能取代 media query：觸控目標大小、iOS 的輸入框
+縮放、safe-area、有沒有 hover，這些是**裝置屬性**，跟容器寬度無關。
+一個 380px 的桌機側欄不需要 44px 觸控目標，一個全螢幕的手機需要。
+
+**判準（規範）**：
+
+| 問題屬於 | 用 | 錨點 |
+|---------|-----|------|
+| 「我有多寬」——版面、欄數、塌行、內距 | container query | `.sc-thread`、`.sc-ai`、`.sc-card` |
+| 「我在什麼裝置上」——觸控、字級縮放、safe-area、hover | media query | `pointer: coarse`、`hover: none`、`prefers-*` |
+
+有一個例外，實作時才浮現：`position: fixed` 的元素，其 containing block
+就是視窗本身——視窗**就是**它的容器。所以 `.sc-toasts` 這類浮層走 media
+query 不是破例，是照同一條判準得到的答案。kit 裡目前僅此一處寬度 media
+query，測試把它釘住。
+
+任何一條新規則落筆前先過這張表。分不清的情況幾乎不存在；若真的出現，
+預設走 container query，因為它的錯誤模式（在寬容器上多留白）比 media
+query 的錯誤模式（在窄容器上爆版）便宜得多。
+
+**還有一件 container query 的硬性質，會咬人**：元素永遠不是自己的查詢
+容器，只是後代的。所以 `.sc-thread` 自己的 padding 量的是
+`.sc-threadwrap`（因此那層也要宣告 container），而 `.sc-card` 自己的
+padding 量的是它上面最近的容器。在 Thread 裡那是 `.sc-thread`，成立；
+但**宿主若在 Thread 之外渲染卡片，必須自己在外層宣告
+`container-type: inline-size`**，否則卡片再窄都會維持桌機內距。卡片
+內部（`.sc-funnel__row`、`.sc-media`…）不受影響，那些查的是卡片本身。
+這條 kit 無法代替宿主處理，只能寫進規範並在 styles.css 註明。
+
+### 5.1.2 斷點值：兩個，不是五個
+
+```
+compact : 600px   手機直立、窄側欄嵌入
+medium  : 900px   平板直立、分割視窗
+```
+
+理由：斷點的成本不在寫，在驗。每多一個斷點，每個元件就多一組要在
+瀏覽器上看過的組合。而 thread + composer 的版面只有兩種真正不同的
+形態——單欄緊湊、單欄寬鬆。第三個斷點會是為了對稱而存在，不是為了
+解決版面問題。
+
+沿用 4.1 的角色化命名（`compact` / `medium`），不用 `--sc-bp-600`：
+密度調整可以改動底下的 px 而不讓名字說謊。
+
+### 5.1.3 一個必須寫進規範的硬限制
+
+**CSS 自訂屬性不能用在 media / container query 的條件裡。**
+`@container (max-width: var(--sc-bp-compact))` 不合法，不會報錯，
+會靜默失效。這條不寫下來就一定有人踩。
+
+所以斷點值只能是字面量。token 的角色降級為**文件性宣告**——寫在
+`styles.css` 頂端的常數區塊，供人閱讀與 grep，不供 CSS 求值：
+
+```css
+/* 斷點常數（規範，非 CSS 變數——查詢條件不接受 var()）
+   compact: 600px  |  medium: 900px
+   全檔只准出現這兩個字面量；新增第三個值須先改本章。 */
+```
+
+「只准出現這兩個值」是可機器驗證的，見 5.4 第 1 層。規範能被測試
+執行，才不會退化成註解。
+
+### 5.1.4 覆寫方向：desktop-first 的寫法，mobile-first 的思維
+
+現況 1933 行全是桌機預設值。翻成 mobile-first 等於全檔重寫，風險
+遠大於收益。所以用 `max-width` 往下覆寫。
+
+但**思維必須是 mobile-first**：每條覆寫要能單獨讀成「窄螢幕的規則
+是什麼」，而不是「桌機規則在這裡有個例外」。落地做法是所有 compact
+規則集中在檔案末尾的一個區塊、依元件分組，不散在各元件定義旁邊。
+散著寫的結果是三個月後沒人答得出「手機上到底長怎樣」。
+
+## 5.2 版面規則（container query）
+
+`compact`（容器 ≤ 600px）的覆寫。未列出者維持桌機值——`auto-fit
+minmax()` 的那幾個（`.sc-stats`、`.sc-media`）本來就自己會塌，不動。
+
+| 元件 | 現況 | compact | 理由 |
+|------|------|---------|------|
+| `.sc-thread` padding | 20 | 12 | 左右各省 8px，在 360px 上是 4.5% 的內容寬度 |
+| `.sc-bubble` max-width | `min(76%, 620px)` | `88%` | 76% 於 360px 只剩 274px，一行放不到 13 個中文字 |
+| `.sc-msg` margin-bottom | 24 | 16 | 手機一屏訊息數比留白重要 |
+| `.sc-ai__bar` | 單行 flex | 維持單行 | 塌成兩行會吃掉一整列輸入區高度，不划算 |
+| `.sc-ai__model` 模型名 | 完整 | `max-width: 6em` + ellipsis | 「Claude Opus 4.5」會把 bar 撐破 |
+| `.sc-ai__enhance` | icon + 文字 | 只留 icon | 省 ~50px，且 `aria-label` 已有 |
+| `.sc-ai__menu` | `left: 0` + min-width 190 | 貼齊 composer 兩側 | 固定寬在 360px 上會溢出 |
+| `.sc-ai__submenu` | `left: calc(100% + 4px)` 側開 | `position: static`，成為父選單內的縮排群組 | 190+170=360px，側開必定出界 |
+| `.sc-media` | `minmax(160px, 1fr)` | `minmax(120px, 1fr)` | 讓 360px 仍能並排兩張 |
+| `.sc-funnel__row` | `minmax(90,150) 1fr 48px` | `minmax(64,90) 1fr 40px` | 標籤欄讓位給資料條 |
+| `.sc-code` gutter | 32px | 26px | 行號兩位數夠用 |
+| `.sc-think__body` max-height | 260 | 200 | 展開後不該吃掉整屏 |
+| `.sc-toasts` | `left:50% translateX(-50%)` | `left:12 right:12`、不位移 | 定寬置中在窄螢幕會貼邊 |
+
+資料密集型卡片（`table`、`comparison`、`code`、`diff`）維持
+`overflow-x: auto` 的**卡片內橫捲**，不塌成直式。把表格轉成
+key-value 堆疊會失去對照能力，而對照正是這幾種卡片存在的理由。
+規範是：**允許卡片內橫捲，禁止頁面橫捲**——兩者在驗收上是不同的
+斷言（見 5.4）。
+
+## 5.3 裝置規則（media query）
+
+### 5.3.1 觸控目標
+
+`@media (pointer: coarse)`：所有可點元素命中區 ≥ 44×44。
+
+做法是**擴大命中區，不是放大按鈕**——`.sc-ai__icon` 撐成 44px 會讓
+composer bar 整條變胖，破壞 4.3 定的密度。用透明偽元素外擴：
+
+```css
+.sc-ai__icon::after {
+  content: ""; position: absolute; inset: -8px;  /* 28 + 16 = 44 */
+}
+```
+
+適用：`.sc-ai__icon`(28)、`.sc-ai__send`(30)、`.sc-ai__chip-x`(padding 2)、
+`.sc-ai__pill-x`(padding 1)、`.sc-code__copy`、`.sc-think__head` 的 icon。
+偽元素外擴需要祖先 `position: relative`，逐一補。
+
+### 5.3.2 hover-only 是缺陷，不是降級
+
+`styles.css:1353-1356` 的 `.sc-todo__head:hover` 會切換內容
+（headlist/pie/headcheck 淡出、chevron 淡入）。觸控裝置沒有 hover，
+這個切換要嘛永不觸發、要嘛在點擊後卡住不還原。
+
+規範：**任何 hover 才出現的操作都必須有非 hover 的等價路徑。**
+`@media (hover: none)` 下 chevron 常駐顯示。這條比照原則 5
+（reduced-motion 是一等公民）的寫法——每加一個 hover 行為，同一個
+PR 要寫它的 `hover: none` 退化。
+
+### 5.3.3 iOS 輸入框縮放
+
+Safari 對 font-size < 16px 的輸入元素會在 focus 時自動放大整頁，
+**而且不會縮回**。這是手機上最刺眼的單一缺陷。
+
+現況兩個 composer 都中招：`.sc-composer__input` 走
+`--sc-fs-body`(15px)、`.sc-ai__editor` 硬編 14px。兩者一律 16px。
+
+**規範修正（實作後）**：這條原本寫在 compact 寬度層，是分類錯誤。
+第 2 層測試在 768px 平板抓到——過了 compact 門檻、仍然是觸控裝置、
+仍然是 Safari、照樣縮放。按 5.1.1 自己的判準，iOS 縮放是裝置特性，
+歸 `@media (pointer: coarse)`，與容器寬度無關。已改。
+
+16px 不給 token：它不是設計尺寸，是 Safari 停止縮放的門檻值，
+命名會暗示它可以調。
+
+### 5.3.4 視口與安全區
+
+- 禁用 `100vh`，一律 `100dvh`。行動瀏覽器工具列會吃掉高度，`100vh`
+  的底部永遠被切。現況 `globals.css:15/123` 兩處要遷移；全專案目前
+  沒有任何 `dvh`。
+- composer 底部 `padding-bottom: max(var(--sc-sp-12), env(safe-area-inset-bottom))`，
+  避開 iPhone 的 home indicator。
+- Next.js App Router 需在 `layout.tsx` 補 `export const viewport`，
+  含 `interactiveWidget: "resizes-content"`——虛擬鍵盤彈出時讓版面
+  重排而非蓋住 sticky composer。零 JS，優先於 VisualViewport API。
+
+### 5.3.5 順帶償還的技術債
+
+`styles.css` 有 22 處硬編 `font-size`，集中在 agent surfaces
+（785 行以後）。那批元件是在 D1 的 token 遷移**之後**才加的
+（commit 73ebca1），漏了遷移。其中 `11.5px`、`12.5px` 連 2.0.3 的
+字級表都不在——是憑手感加的值。
+
+標「遷移」，**與 Phase 5 一起做**，理由是 RWD 本來就要動這些值；
+分兩次改同一行是白工。遷移規則沿用 2.0.3：11.5→11(`--sc-fs-micro`)、
+12.5→12(`--sc-fs-meta`)、14→15(`--sc-fs-body`，composer 屬本文)。
+
+## 5.4 美學：窄螢幕不是桌機的縮小版
+
+核心立場：**縮的是 chrome，不是內容。**
+
+手機的閱讀距離比桌機近，但螢幕小。若連本文字級一起縮，就是雙重
+懲罰。所以 4.3「對話優先」的密度原則在窄螢幕**更強**，不是更弱：
+
+- 訊息本文 `--sc-fs-body` **不縮**（15px），composer 反而升到 16px。
+- 縮的是 padding、gap、meta 行、內距——那些是框，不是話。
+
+其餘四條：
+
+**卡片不要通欄貼邊。** compact 下仍保留左右各 12px 呼吸。卡片一旦
+貼齊螢幕兩側就不再讀作「訊息裡的物件」，而是「一段全寬區塊」，
+B 章建立的卡片識別度會消失。省下的 24px 不值這個代價。
+
+**border-first flat 在窄螢幕更划算。** 原則 2 維持不變。沒有陰影
+就沒有「浮起來的東西擋住內容」，而手機上被擋住的成本遠高於桌機。
+
+**accent 節制（4.4）維持。** 空間變小不是用顏色分區的理由——小螢幕
+上高彩度色塊的密度感知比桌機強，放寬只會更花。
+
+**空狀態要改，這是只有想過手機才會發現的問題。** R1 定的「大字問候
+置中 + composer 置中」在手機上會壞：鍵盤一彈出吃掉近半螢幕，置中的
+問候被擠出視野，使用者看到的是一片空白加一個輸入框。compact 下改
+**上緣對齊**。R1 的意圖（composer 是主角）不變，置中只是它在桌機上的
+實作方式。字級不動——草案原本寫「問候降一級字」，那與本節開頭
+「縮 chrome 不縮內容」自相矛盾，且 `.sc-empty` 自己的註解已寫明它是
+閱讀尺寸而非 UI 尺寸。以原則為準，改掉草案。
+
+**動效：composer 不做進出場動畫。** `--sc-dur-*` 全部沿用，但手機上
+鍵盤本身已經在動，再疊一層 composer 的位移會暈。
+
+## 5.5 測試策略
+
+現況要先講清楚：vitest `environment: "node"`，20+ 測試檔全是純邏輯，
+**沒有任何 DOM 測試能力**——沒有 jsdom、沒有 testing-library、沒有
+Playwright。過去 Phase 3/4 的「瀏覽器實測」是人工目視。
+
+也要先排除一條死路：**jsdom 對 RWD 無用**。它沒有排版引擎，
+`getBoundingClientRect()` 一律回傳 0，量不到寬度、測不出溢出。加了
+它只會製造「有測試」的錯覺。真正能驗版面的只有真瀏覽器。
+
+### 第 1 層：CSS 靜態約束（零新依賴，最划算，每批必過）
+
+用現有 vitest 讀 `styles.css` 字串做斷言。專案已有先例——
+`registry-sync.test.ts` 就是讀原始碼做一致性斷言，風格一致。
+
+| 斷言 | 擋掉的錯誤 |
+|------|-----------|
+| 查詢條件只出現 `600px` / `900px` | 有人隨手加 `768px` |
+| 全檔無 `100vh` | 行動瀏覽器底部被切 |
+| compact 區塊內 `.sc-ai__editor`、`.sc-composer__input` 的 font-size ≥ 16px | iOS focus 縮放回歸 |
+| 查詢條件不含 `var(` | 踩 5.1.3 的靜默失效 |
+| 全檔無 raw hex（補既有原則 3） | token 制度被繞過 |
+
+這層完全符合原則 1（零依賴），且執行速度以毫秒計，適合掛在每批的
+完成定義上。
+
+### 第 2 層：真瀏覽器版面測試（Playwright）
+
+成本比預期低——環境已預裝 Chromium 且 `PLAYWRIGHT_BROWSERS_PATH`
+已設好，不需下載瀏覽器。
+
+三組視窗：`360×640`（小手機下限）、`390×844`（主流 iPhone）、
+`768×1024`（平板直立），外加第四組 `1280×900`。
+
+第四組不是 RWD 的一層，是**回歸防線**。上面每一條規則都是加進一份原本
+在桌機寬度已經成立的樣式表，而「compact 值溢出到它不該生效的寬度」對
+一個只看手機的測試套件是隱形的。它斷言桌機保住 thread padding 20、
+composer 15px、側欄仍是側欄，以及**觸控命中區的偽元素不得出現**。
+
+這一組也順手示範了一件事：它最初寫成「桌機視窗 ⇒ 桌機氣泡」而失敗——
+`/run` 在 1280px 下讓掉 232px 側欄與 330px 事件欄，thread 實際只有
+678px，medium 層在那裡本來就是對的。用視窗寬度推論版面，正是這整套
+設計否定的思維，連寫測試的人都會不小心犯。氣泡層級的斷言因此改成
+**由實測容器寬度推算應套用哪一層**，四組視窗共用同一條規則。
+
+| 測項 | 斷言 |
+|------|------|
+| 無頁面橫捲 | `documentElement.scrollWidth <= innerWidth`——一條就能抓掉九成爆版 |
+| 卡片內橫捲仍允許 | 對 `.sc-table-wrap` 等白名單容器豁免上一條 |
+| **能聊天（P0 驗收）** | 輸入 → 送出 → 訊息出現在 thread；這就是使用者裁定的最低標 |
+| 觸控目標 | 逐一量 `boundingBox()`，斷言 ≥ 44 |
+| 選單不出界 | 開啟附件選單與子選單，斷言 rect 在視窗內 |
+
+**依賴放在 root 的 devDependencies，不進 `packages/ui`。** 原則 1
+講的是套件的 runtime 依賴——「drops into any app without imposing a
+build step」——測試工具不會被宿主安裝。這個區分要寫明，否則會被
+誤讀成違反零依賴。
+
+### 第 3 層：真機人工驗收
+
+前兩層跑在 Chromium 上（本環境唯一可用的引擎），而這一層存在的理由
+就是那件事：**引擎不同、行為不同的部分，自動化證明不了**。刻意不用
+`devices["iPhone 14"]` 這類描述檔——它們帶 `defaultBrowserType:
+"webkit"`，會去啟動一個不存在的瀏覽器；真正驅動 `pointer: coarse` 與
+`hover: none` 的是 `isMobile` + `hasTouch`，Chromium 都支援。
+
+| # | 項目 | 裝置 | 通過條件 |
+|---|------|------|---------|
+| 1 | 點入 composer | iOS Safari | 頁面不放大；放開後不需手動縮回 |
+| 2 | 鍵盤彈出 | iOS Safari | composer 浮在鍵盤上緣，不被蓋住、不被推出畫面 |
+| 3 | 鍵盤彈出時捲動 thread | iOS Safari | composer 維持貼底，不隨內容漂移 |
+| 4 | 底部留白 | iPhone（有 home indicator） | 送出鈕不與 indicator 重疊 |
+| 5 | 上下捲動 | iOS Safari | 動態工具列收合時版面不跳動（`100dvh` 的實測） |
+| 6 | 鍵盤彈出 | Android Chrome | `interactiveWidget: resizes-content` 生效，版面縮而非被蓋 |
+| 7 | 點附件選單 → 技能子選單 | 任一觸控機 | 子選單在父選單內縮排展開，不出界 |
+| 8 | 點 to-do 標頭兩次 | 任一觸控機 | 進度圓餅不消失、不卡在 chevron 狀態 |
+| 9 | 連點 composer 上各控制項 | 任一觸控機 | 不誤觸鄰鍵（44px 命中區的實測） |
+| 10 | 橫置 | 任一手機 | 無橫向捲動，composer 仍貼底 |
+
+第 1、2、5、6 項是這層真正無可取代的部分；其餘在第 2 層已有自動斷言，
+列在這裡是因為真手指與合成事件的差別本身值得看一次。
+
+### 完成定義
+
+每一批要過**第 1 層 + 第 2 層**才算 ✅，第 3 層在 M3 一次驗收。
+這比照 Phase 3/4 的「✅ 完成並瀏覽器驗證」標準，並把「瀏覽器驗證」
+從人工目視升級成可重跑的斷言。
+
+## 5.6 實施批次
+
+編號用 **M**（Mobile）。Phase 3 用 1–4、Phase 4 用 D1–D3、
+`R1–R5` 已被 2.A 的競品觀察佔用。另起字首是為了不讓任何人把這條
+佇列讀成前面某一條的續集——理由同 4.8。
+
+| 批次 | 內容 | 狀態 |
+|------|------|------|
+| **M1** | 地基與缺陷：斷點常數區塊、`100dvh` 遷移、safe-area、viewport export、iOS 16px、硬編 px 遷移（5.3.5）、觸控命中區、`hover: none` 退化（todo bug）、第 1 層測試 | ✅ 完成，12 項第 1 層斷言 |
+| **M2** | P0 版面：thread/bubble/msg 的 compact 值、composer bar 塌行規則、選單貼邊與 submenu 攤平、空狀態上緣對齊、第 2 層測試 | ✅ 完成並瀏覽器驗證 |
+| **M3** | P1 卡片逐一過窄螢幕 + P2 playground 面板 + 第 3 層真機清單 | ✅ 自動化部分完成；第 3 層清單待真機執行 |
+
+M1 全是「壞了要修」，與版面決策無關，可獨立驗收——所以排第一，
+不是因為它簡單，是因為它不依賴任何尚未定案的東西。M2 才是使用者
+要的「至少能聊天」。M3 是把 P1/P2 收乾淨。
+
+**M2 落筆前的未定案，已解決，而且比兩個候選方案都好**：原本在
+「改 drill-in（要動 `AgentInput.tsx` 狀態）」與「compact 下攤平成單層」
+之間二選一。實際做法是第三條路——compact 下把 `.sc-ai__submenu` 改成
+`position: static`，它就地變成父選單裡的一個縮排群組，選單往下長而不是
+往旁邊長。**DOM 與 state 完全不動**，資訊也沒少，純 CSS。原本評估
+「動元件邏輯」是必要成本，那個前提是錯的。
+
+## 5.7 實作後的修正紀錄
+
+規劃與實作不一致的地方，一律以實作為準並在上面各節就地改掉。這裡只記
+**改了什麼、為什麼**，因為每一條都是規劃當下看不出來、要跑過才知道的。
+
+| # | 規劃 | 實際 | 原因 |
+|---|------|------|------|
+| 1 | iOS 16px 放 compact 寬度層 | 移到 `@media (pointer: coarse)` | 768px 平板過了 compact 門檻仍會縮放。按 5.1.1 自己的判準本來就該歸裝置層，是分類錯誤 |
+| 2 | submenu 改 drill-in 或攤平 | `position: static` 變父選單內縮排群組 | 兩個候選都預設「要動元件狀態」，前提是錯的 |
+| 3 | 卡片 compact padding 自動成立 | 宿主須在 Thread 外自行宣告 container | 元素不是自己的容器；卡片內部沒事，卡片自己的 padding 需要祖先 |
+| 4 | 空狀態問候降一級字 | 字級不動 | 與同節「縮 chrome 不縮內容」矛盾 |
+| 5 | 900px 以下隱藏 dev 側欄（沿用現況） | 改成頂部橫向捲動 tab 條 | 隱藏等於手機上完全無法切換面板。P2 是「不投資」，不是「可以壞」 |
+| 6 | — | playground 的 980px 併入 900px | 兩斷點規範只管了 kit，app 自己飄出第三個值。測試已擴及 app |
+| 7 | — | `.dev__run` 由 `100dvh` 改 `100%` | nav 變頂部條之後，視窗高度不再等於面板高度 |
+
+第 1 與第 3 項是第 2 層測試抓出來的，不是讀 CSS 讀出來的——這正是
+5.5 主張「真瀏覽器不可省」的具體證據。第 5 項是寫測試時順手發現的：
+自動化斷言「面板不爆版」會通過，但「使用者到得了那個面板嗎」要人問。
+
+### 順帶償還的既有債
+
+不屬於 RWD，但改在同一批，因為動到同一批行：
+
+- 23 處硬編 `font-size` 遷移為 token（5.3.5），含兩個不在 2.0.3 字級表上
+  的 `11.5px` / `12.5px`。
+- 三處選單陰影各自重寫了 `--sc-shadow-overlay` 已定義的值，改用 token。
+  順帶修好暗色模式——原本 14% 黑在暗底上根本讀不出層次。
+- `.sc-btn--danger` 硬編 `#fff`。新增 `--sc-negative-contrast`，比照
+  `--sc-accent-contrast` 一起翻轉：暗色模式的 negative 是淺紅，白字在
+  上面是不可讀的那個選項。
+- 唯一保留的字面量 `font-size`：`.sc-chart__label`，它畫在 SVG user
+  space，那個數字是座標不是字級（比照 2.0.2 對 SVG 的豁免）。測試知道
+  這一行。
+
+### 現在跑得起來的東西
+
+```
+pnpm test        # 276 unit，含 13 項第 1 層 RWD 斷言
+pnpm test:rwd    # 64 項第 2 層，360 / 390 / 768 / 1280 四組視窗
+pnpm typecheck
+```
+
+第 2 層對 dev server 與 `next build` 的 production 產出都跑過，結果一致。
+
+第 2 層需要 Chromium。本環境已預裝但版本與 Playwright 預期的 build 不
+同，所以 `playwright.config.ts` 用 `executablePath` 指過去；設
+`PLAYWRIGHT_CHROMIUM_PATH` 可覆寫，不設則回到 Playwright 自己管理的
+下載，也就是一般 CI 的行為。
