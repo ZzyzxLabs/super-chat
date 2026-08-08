@@ -570,6 +570,73 @@ describe("runAgent", () => {
   });
 });
 
+describe("reduceRunEvent usage accounting", () => {
+  const U = (total: number) => ({ inputTokens: total - 10, outputTokens: 10, totalTokens: total });
+
+  // The regression. runAgent reports a step's cost three times — `usage`,
+  // `step-finish` (the same numbers) and `run-finish` (the running total) —
+  // and the reducer added all three, so every turn metered at exactly 3×.
+  it("counts a single step once, not three times", () => {
+    const events = [
+      { type: "run-start", runId: "run", mode: "stream" },
+      { type: "step-start", step: 0 },
+      { type: "usage", usage: U(100) },
+      { type: "step-finish", step: 0, finishReason: "stop", usage: U(100) },
+      { type: "run-finish", runId: "run", finishReason: "stop", usage: U(100), steps: 1 },
+    ] as RunEvent[];
+
+    const state = events.reduce(reduceRunEvent, initialRunState("run", "stream"));
+    expect(state.usage.totalTokens).toBe(100);
+    expect(state.usage.inputTokens).toBe(90);
+    expect(state.usage.outputTokens).toBe(10);
+  });
+
+  // Multi-step has to SUM across steps while still counting each one once —
+  // the bug scaled with step count, so a 4-step turn read as 12 steps' worth.
+  it("sums across steps without multiplying them", () => {
+    const step = (n: number, usage: ReturnType<typeof U>) =>
+      [
+        { type: "step-start", step: n },
+        { type: "usage", usage },
+        { type: "step-finish", step: n, finishReason: "tool-calls", usage },
+      ] as RunEvent[];
+
+    const events = [
+      ...step(0, U(100)),
+      ...step(1, U(60)),
+      // runAgent's own total, which is what run-finish always carries.
+      { type: "run-finish", runId: "run", finishReason: "stop", usage: U(160), steps: 2 },
+    ] as RunEvent[];
+
+    const state = events.reduce(reduceRunEvent, initialRunState("run", "stream"));
+    expect(state.usage.totalTokens).toBe(160);
+    expect(state.steps).toBe(2);
+  });
+
+  // run-finish REPLACES rather than merges, so a consumer that fed the reducer
+  // an incomplete event sequence still lands on runAgent's authoritative total.
+  it("lets run-finish correct a mid-run drift", () => {
+    const events = [
+      { type: "usage", usage: U(100) },
+      { type: "usage", usage: U(100) }, // a duplicate the caller should not have sent
+      { type: "run-finish", runId: "run", finishReason: "stop", usage: U(100), steps: 1 },
+    ] as RunEvent[];
+
+    const state = events.reduce(reduceRunEvent, initialRunState("run", "stream"));
+    expect(state.usage.totalTokens).toBe(100);
+  });
+
+  // The live number still has to move during a run, or the composer's token
+  // readout sits at zero until the turn ends.
+  it("still accumulates live, before any run-finish arrives", () => {
+    const state = ([
+      { type: "usage", usage: U(100) },
+      { type: "usage", usage: U(60) },
+    ] as RunEvent[]).reduce(reduceRunEvent, initialRunState("run", "stream"));
+    expect(state.usage.totalTokens).toBe(160);
+  });
+});
+
 describe("reduceRunEvent terminal states", () => {
   const finish = (finishReason: string) =>
     ({ type: "run-finish", runId: "run", finishReason, usage: {}, steps: 1 }) as RunEvent;

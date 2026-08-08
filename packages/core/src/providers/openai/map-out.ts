@@ -133,6 +133,11 @@ export function partsFromChat(r: ChatResponse): ContentPart[] {
   const msg = choice.message;
 
   if (msg.refusal) parts.push({ type: "text", text: msg.refusal });
+  // Before the answer, matching both the order it was produced in and the
+  // order streamChat emits it. Without this, a reasoning model showed its
+  // thinking in stream mode and silently lost it in sync mode — same
+  // provider, same model, different mode, different content.
+  if (msg.reasoning_content) parts.push({ type: "reasoning", text: msg.reasoning_content });
   if (msg.content) parts.push({ type: "text", text: msg.content });
 
   for (const call of msg.tool_calls ?? []) {

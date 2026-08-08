@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { streamChat } from "./stream.js";
+import { partsFromChat } from "./map-out.js";
+import type { ChatResponse } from "./wire.js";
 import type { StreamEvent } from "../types.js";
 
 /**
@@ -114,5 +116,72 @@ describe("streamChat tool calls", () => {
       ]),
     );
     expect(calls(events)[0]!.callId).toBe("call_late");
+  });
+});
+
+describe("streamChat reasoning", () => {
+  // `reasoning_content` is non-standard but is what the compatible servers
+  // emit for a thinking model. The pair with partsFromChat below is the point:
+  // both modes must surface it, or the same model says different things
+  // depending on a config flag.
+  it("surfaces reasoning_content as reasoning deltas", async () => {
+    const events = await collect(
+      sse([
+        chunk({ role: "assistant" }),
+        chunk({ reasoning_content: "weighing " }),
+        chunk({ reasoning_content: "the options" }),
+        chunk({ content: "Use HS256." }),
+        chunk({}, "stop"),
+      ]),
+    );
+    const reasoning = events
+      .filter((e): e is Extract<StreamEvent, { type: "reasoning-delta" }> => e.type === "reasoning-delta")
+      .map((e) => e.delta)
+      .join("");
+    expect(reasoning).toBe("weighing the options");
+  });
+});
+
+describe("Chat dialect: sync and stream agree", () => {
+  // The asymmetry this closes: reasoning_content was declared on the stream
+  // chunk and handled, but absent from the non-streamed response type and
+  // never read — so `mode: "sync"` dropped a thinking model's reasoning on the
+  // floor while `mode: "stream"` kept it.
+  it("keeps reasoning_content in the non-streamed response too", () => {
+    const res = {
+      id: "chatcmpl-1",
+      object: "chat.completion",
+      model: "test-model",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant" as const,
+            reasoning_content: "weighing the options",
+            content: "Use HS256.",
+          },
+          finish_reason: "stop",
+        },
+      ],
+    } satisfies ChatResponse;
+
+    const parts = partsFromChat(res);
+    expect(parts).toEqual([
+      { type: "reasoning", text: "weighing the options" },
+      { type: "text", text: "Use HS256." },
+    ]);
+  });
+
+  it("emits nothing extra when the server sends no reasoning", () => {
+    const res = {
+      id: "chatcmpl-2",
+      object: "chat.completion",
+      model: "test-model",
+      choices: [
+        { index: 0, message: { role: "assistant" as const, content: "Plain answer." }, finish_reason: "stop" },
+      ],
+    } satisfies ChatResponse;
+
+    expect(partsFromChat(res)).toEqual([{ type: "text", text: "Plain answer." }]);
   });
 });

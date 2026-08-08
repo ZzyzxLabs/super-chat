@@ -183,7 +183,19 @@ export type ChatResponse = {
   model: string;
   choices: {
     index: number;
-    message: { role: "assistant"; content?: string | null; tool_calls?: ChatToolCall[]; refusal?: string | null };
+    message: {
+      role: "assistant";
+      content?: string | null;
+      tool_calls?: ChatToolCall[];
+      refusal?: string | null;
+      /**
+       * Same non-standard field the streamed delta carries, and emitted by the
+       * same servers — LM Studio returns it on a plain POST too. Declaring it
+       * only on the stream chunk is why sync mode used to drop a reasoning
+       * model's thinking entirely.
+       */
+      reasoning_content?: string | null;
+    };
     finish_reason: string | null;
   }[];
   usage?: ChatUsage;

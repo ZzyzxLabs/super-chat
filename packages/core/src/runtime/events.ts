@@ -151,10 +151,18 @@ export function reduceRunEvent(state: RunState, event: RunEvent): RunState {
       return { ...state, job: { handle: event.handle, status: event.status } };
     case "message":
       return { ...state, parts: [...state.parts, ...event.parts] };
+    // ── usage: exactly one event accumulates ──────────────────────────────
+    // runAgent reports a step's cost three times: `usage` (live), `step-finish`
+    // (the same numbers again, for consumers that only watch step boundaries)
+    // and `run-finish` (the running total). Adding all three counted every
+    // turn 3×, which is not a rounding error — it read as context overflow on
+    // a model whose window it had not come close to.
     case "usage":
       return { ...state, usage: mergeUsage(state.usage, event.usage) };
     case "step-finish":
-      return { ...state, usage: mergeUsage(state.usage, event.usage) };
+      // Deliberately does NOT touch usage: the `usage` event above already
+      // added this step. `steps` is owned by step-start.
+      return state;
     case "run-finish":
       // A failed run stays failed: runAgent yields error → run-finish, and an
       // unconditional "done" here would mask the error from every consumer.
@@ -163,7 +171,11 @@ export function reduceRunEvent(state: RunState, event: RunEvent): RunState {
         ...state,
         status: event.finishReason === "error" ? "error" : "done",
         finishReason: event.finishReason,
-        usage: mergeUsage(state.usage, event.usage),
+        // REPLACE, not merge. This is runAgent's own total across every step,
+        // so it is the authoritative figure — and taking it wholesale also
+        // repairs any drift for a consumer that fed the reducer a step-finish
+        // without its paired usage event.
+        usage: event.usage,
         steps: event.steps,
       };
     case "error":
