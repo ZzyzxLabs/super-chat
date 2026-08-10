@@ -358,6 +358,124 @@ export const markdownCard: CardKindDefinition = {
   },
 };
 
+export const documentCard: CardKindDefinition = {
+  kind: "document",
+  // Written for the model, and deliberately about SIZE and REUSE rather than
+  // about formatting: the distinction the model has to get right is "this is a
+  // thing we will keep working on" versus "this is a long answer".
+  summary:
+    "A document the user will keep, read in a previewer and come back to. Use for something worth revising — a draft, a report, a set of notes — not for a long reply. Returns an id later turns use to re-read or edit it.",
+  estimateTokens: tokensOf,
+  schema: {
+    type: "object",
+    required: ["kind", "docId", "title", "markdown", "revision"],
+    properties: {
+      kind: { const: "document" },
+      docId: { type: "string" },
+      title: { type: "string" },
+      markdown: { type: "string" },
+      revision: { type: "number" },
+    },
+  },
+  validate(spec) {
+    const s = check.object(spec, "document");
+    if (failed(s)) return s;
+    const o = s as Record<string, unknown>;
+    if (typeof o["docId"] !== "string" || !o["docId"]) {
+      return { ok: false, error: "document.docId must be a non-empty string." };
+    }
+    if (typeof o["title"] !== "string") return { ok: false, error: "document.title must be a string." };
+    if (typeof o["markdown"] !== "string") return { ok: false, error: "document.markdown must be a string." };
+    // A missing revision would let a stale edit through as revision 0, which is
+    // exactly the failure the token exists to prevent — so it is required, not
+    // defaulted.
+    return typeof o["revision"] === "number"
+      ? ok
+      : { ok: false, error: "document.revision must be a number." };
+  },
+};
+
+export const editReviewCard: CardKindDefinition = {
+  kind: "editreview",
+  interactive: true,
+  summary:
+    "Propose changes to a document and let the user accept them hunk by hunk. The only way to change a document — nothing is written until this is answered.",
+  estimateTokens: tokensOf,
+  schema: {
+    type: "object",
+    required: ["kind", "docId", "title", "revision", "hunks"],
+    properties: {
+      kind: { const: "editreview" },
+      docId: { type: "string" },
+      title: { type: "string" },
+      revision: { type: "number" },
+      summary: { type: "string" },
+      hunks: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["index", "block", "removed", "added"],
+          properties: {
+            index: { type: "number" },
+            block: { type: "number" },
+            removed: { type: "array", items: { type: "string" } },
+            added: { type: "array", items: { type: "string" } },
+          },
+        },
+      },
+    },
+  },
+  validate(spec) {
+    const s = check.object(spec, "editreview");
+    if (failed(s)) return s;
+    const o = s as Record<string, unknown>;
+    if (typeof o["docId"] !== "string" || !o["docId"]) {
+      return { ok: false, error: "editreview.docId must be a non-empty string." };
+    }
+    if (typeof o["revision"] !== "number") {
+      return { ok: false, error: "editreview.revision must be a number." };
+    }
+    const hunks = o["hunks"];
+    if (!Array.isArray(hunks) || hunks.length === 0) {
+      // An empty review would render as an approval prompt for nothing, and a
+      // user who clicks Apply on it has approved a no-op they cannot see.
+      return { ok: false, error: "editreview.hunks must be a non-empty array." };
+    }
+    return ok;
+  },
+};
+
+export const emailCard: CardKindDefinition = {
+  kind: "email",
+  // NOT interactive, despite being editable. "Interactive" here means the run
+  // suspends until the user answers, and nothing waits on this: the draft is a
+  // deliverable the user takes away, not a question the model asked. Marking it
+  // interactive would serialise it against real decisions for no reason.
+  summary:
+    "A drafted message for the user to send themselves. Use when the outcome of the work is something that has to reach someone.",
+  estimateTokens: tokensOf,
+  schema: {
+    type: "object",
+    required: ["kind", "to", "subject", "body"],
+    properties: {
+      kind: { const: "email" },
+      to: { type: "array", items: { type: "string" } },
+      cc: { type: "array", items: { type: "string" } },
+      bcc: { type: "array", items: { type: "string" } },
+      subject: { type: "string" },
+      body: { type: "string" },
+    },
+  },
+  validate(spec) {
+    const s = check.object(spec, "email");
+    if (failed(s)) return s;
+    const o = s as Record<string, unknown>;
+    if (!Array.isArray(o["to"])) return { ok: false, error: "email.to must be an array." };
+    if (typeof o["subject"] !== "string") return { ok: false, error: "email.subject must be a string." };
+    return typeof o["body"] === "string" ? ok : { ok: false, error: "email.body must be a string." };
+  },
+};
+
 export const codeCard: CardKindDefinition = {
   kind: "code",
   summary: "A code block with language and optional filename.",
@@ -892,6 +1010,7 @@ export const BUILTIN_CARDS: CardKindDefinition[] = [
   checklistCard,
   // prose and evidence
   markdownCard,
+  documentCard,
   calloutCard,
   citationsCard,
   codeCard,
@@ -901,4 +1020,6 @@ export const BUILTIN_CARDS: CardKindDefinition[] = [
   choiceCard,
   formCard,
   confirmCard,
+  editReviewCard,
+  emailCard,
 ];

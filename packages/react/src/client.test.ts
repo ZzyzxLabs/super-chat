@@ -8,7 +8,9 @@ import {
   createMemoryJobStore,
   createMemoryThreadStore,
   createOpenAIProvider,
+  quotesOf,
   threadSnapshot,
+  QUOTES_METADATA_KEY,
   type Transport,
   type TransportRequest,
 } from "@zzyzxlabs/super-chat-core";
@@ -314,5 +316,84 @@ describe("attachments", () => {
     client.newThread();
     // An attached-but-unsent file must not silently ride into another thread.
     expect(client.store.get().attachments).toEqual([]);
+  });
+});
+
+describe("AgentClient + document quotes", () => {
+  const quote = {
+    docId: "doc_1",
+    title: "Q3 plan",
+    revision: 2,
+    blocks: [1, 1] as [number, number],
+    start: 0,
+    end: 20,
+    text: "The **liability** cap is 12 months.",
+  };
+
+  it("sends the quote as part of the user's own message", async () => {
+    // Not as a context layer. A quote is what the user said, so it must not be
+    // re-derived per turn (it would go stale) and must not be droppable under
+    // budget pressure (that loses part of their words, not some ambient detail).
+    let sent = "";
+    const provider = createOpenAIProvider({
+      transport: {
+        kind: "custom",
+        credentialSafe: true,
+        async fetch(req: TransportRequest): Promise<Response> {
+          sent = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+          return new Response(JSON.stringify(respondText("ok")), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      } as Transport,
+      dialect: "responses",
+    });
+    const client = makeClient([], { provider });
+
+    await client.send("tighten this", { quotes: [quote] });
+    await flush();
+
+    expect(sent).toContain("Quoted from");
+    // The SOURCE markdown reaches the model, asterisks and all.
+    expect(sent).toContain("**liability**");
+    expect(sent).toContain("tighten this");
+  });
+
+  it("keeps the structured quote on metadata, out of the provider payload", async () => {
+    let sent = "";
+    const provider = createOpenAIProvider({
+      transport: {
+        kind: "custom",
+        credentialSafe: true,
+        async fetch(req: TransportRequest): Promise<Response> {
+          sent = typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+          return new Response(JSON.stringify(respondText("ok")), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        },
+      } as Transport,
+      dialect: "responses",
+    });
+    const client = makeClient([], { provider });
+
+    await client.send("tighten this", { quotes: [quote] });
+    await flush();
+
+    const user = client.store.get().messages.find((m) => m.role === "user");
+    // Present for re-rendering the chip when history is replayed…
+    expect(quotesOf(user?.metadata)).toEqual([quote]);
+    // …and absent from the wire, which is what Message.metadata promises.
+    expect(sent).not.toContain("docId");
+    expect(sent).not.toContain(QUOTES_METADATA_KEY);
+  });
+
+  it("leaves an unquoted message untouched", async () => {
+    const client = makeClient([respondText("ok")]);
+    await client.send("plain question");
+    await flush();
+    const user = client.store.get().messages.find((m) => m.role === "user");
+    expect(user?.metadata).toBeUndefined();
   });
 });

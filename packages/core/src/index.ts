@@ -4,6 +4,14 @@
 export * from "./content/types.js";
 export * from "./content/parts.js";
 export { pathTo, childrenOf, siblingsOf, latestLeaf, linkLinear } from "./content/branching.js";
+export { splitBlocks, type MarkdownBlock, type MarkdownBlockKind } from "./content/blocks.js";
+export {
+  formatQuotes,
+  withQuotes,
+  quotesOf,
+  QUOTES_METADATA_KEY,
+  type DocumentQuoteRef,
+} from "./content/quotes.js";
 
 // errors
 export { AgentError, isAgentError, toAgentError, kindFromStatus, type AgentErrorKind } from "./errors.js";
@@ -53,6 +61,9 @@ export * from "./context/types.js";
 export { ContextBuilder, type ContextBuilderOptions } from "./context/builder.js";
 export { compactHistory, trimHistory, safeCutIndex, buildSummaryPrompt, type CompactionResult, type Summarizer } from "./context/compaction.js";
 
+// documents
+export * from "./documents/index.js";
+
 // cards
 export * from "./cards/types.js";
 export { stripCardPayload } from "./cards/types.js";
@@ -67,6 +78,9 @@ export {
   progressCard,
   mediaCard,
   markdownCard,
+  documentCard,
+  editReviewCard,
+  emailCard,
   codeCard,
   diffCard,
   comparisonCard,

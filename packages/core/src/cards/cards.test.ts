@@ -62,7 +62,16 @@ describe("CardRegistry", () => {
   });
 
   it("marks exactly the decision-requiring kinds as interactive", () => {
-    expect(cards.list().filter((k) => k.interactive).map((k) => k.kind).sort()).toEqual(["choice", "confirm", "form"]);
+    // "Interactive" means the run SUSPENDS until the user answers. The bar is
+    // that something is waiting — not that the card has controls in it. An
+    // email draft is editable and is not on this list, because nothing blocks
+    // on it; an edit review is, because no document changes until it comes back.
+    expect(cards.list().filter((k) => k.interactive).map((k) => k.kind).sort()).toEqual([
+      "choice",
+      "confirm",
+      "editreview",
+      "form",
+    ]);
   });
 
   it("registers validator and renderer key together so they cannot drift", () => {

@@ -4,7 +4,7 @@
  * into any app without imposing a build step or a config merge. Override the
  * tokens to theme it; every rule below reads from them.
  *
- * Consumers import this from source ("@superchat/ui/styles.css" → src/styles.css),
+ * Consumers import this from source ("@zzyzxlabs/super-chat-ui/styles.css" → src/styles.css),
  * not from dist: the bundler cleans dist on every rebuild, and a consuming dev
  * server that compiles during that window fails on a missing stylesheet. CSS
  * needs no compilation, so there is nothing to gain by routing it through dist.
@@ -818,6 +818,81 @@
 }
 .sc-composer__input:focus-visible { outline: 2px solid var(--sc-accent); outline-offset: -1px; }
 
+/* Quoted document spans, staged in the composer. Accent-bordered because a
+   quote is the one thing in the composer that came from somewhere else — the
+   user needs to see at a glance what is riding along with their message. */
+.sc-quotes { list-style: none; margin: 0 0 var(--sc-sp-8); padding: 0; display: grid; gap: var(--sc-sp-6); }
+.sc-quote {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sc-sp-8);
+  padding: var(--sc-sp-4) var(--sc-sp-8);
+  border-radius: var(--sc-radius-sm);
+  border: 1px solid var(--sc-border);
+  border-left: 2px solid var(--sc-accent);
+  background: var(--sc-surface);
+  font-size: var(--sc-fs-meta);
+}
+.sc-quote__doc { flex: none; color: var(--sc-accent); font-weight: 500; }
+/* One line, clipped: a long quote must never grow the composer, which is the
+   same rule the thinking bar's peek follows. */
+.sc-quote__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--sc-text-muted);
+}
+.sc-quote__remove {
+  flex: none;
+  border: 0;
+  background: none;
+  color: var(--sc-text-muted);
+  font: inherit;
+  font-size: var(--sc-fs-micro);
+  cursor: pointer;
+  padding: 0 var(--sc-sp-2);
+}
+.sc-quote__remove:hover { color: var(--sc-text); }
+
+/* ── edit review ──────────────────────────────────────────────────────────
+   The diff IS the approval, so it is built to be read line by line rather than
+   skimmed: monospace, one change per row, and a sign in front of every line so
+   the meaning survives without colour. */
+
+.sc-editreview__rev { color: var(--sc-text-muted); font-weight: 400; font-size: var(--sc-fs-micro); }
+.sc-hunks { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sc-sp-10); }
+.sc-hunk { border: 1px solid var(--sc-border); border-radius: var(--sc-radius-sm); overflow: hidden; }
+/* Deselected hunks stay legible rather than disappearing — the user has to be
+   able to re-read what they are declining. */
+.sc-hunk--off { opacity: 0.55; }
+.sc-hunk__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sc-sp-8);
+  padding: var(--sc-sp-6) var(--sc-sp-8);
+  background: var(--sc-surface);
+  border-bottom: 1px solid var(--sc-border);
+  cursor: pointer;
+}
+.sc-hunk__where { font-size: var(--sc-fs-micro); color: var(--sc-text-muted); }
+.sc-hunk__body { padding: var(--sc-sp-6) 0; font-size: var(--sc-fs-meta); line-height: 1.5; overflow-x: auto; }
+.sc-hunk__line { display: flex; gap: var(--sc-sp-8); padding: 0 var(--sc-sp-8); white-space: pre-wrap; word-break: break-word; }
+.sc-hunk__sign { flex: none; width: 10px; text-align: center; color: var(--sc-text-muted); user-select: none; }
+.sc-hunk__text { min-width: 0; }
+.sc-hunk__line--del { background: color-mix(in srgb, var(--sc-negative) 13%, transparent); }
+.sc-hunk__line--add { background: color-mix(in srgb, var(--sc-positive) 13%, transparent); }
+.sc-hunk__note { padding: var(--sc-sp-2) var(--sc-sp-8); font-size: var(--sc-fs-micro); color: var(--sc-text-muted); }
+
+/* ── email draft ──────────────────────────────────────────────────────────── */
+
+.sc-email__fields { display: grid; gap: var(--sc-sp-6); margin-bottom: var(--sc-sp-8); }
+.sc-email__row { display: flex; align-items: center; gap: var(--sc-sp-8); }
+.sc-email__label { flex: none; width: 56px; font-size: var(--sc-fs-meta); color: var(--sc-text-muted); }
+.sc-email__body { width: 100%; resize: vertical; font-family: inherit; line-height: var(--sc-lh-prose); }
+.sc-email__warn { margin: var(--sc-sp-8) 0 0; padding: var(--sc-sp-8) var(--sc-sp-10); border-radius: var(--sc-radius-sm); }
+
 /* ── panel / inspector ────────────────────────────────────────────────────── */
 
 .sc-panel { padding: var(--sc-sp-16); font-size: var(--sc-fs-ui); font-family: var(--sc-sans); }
@@ -1384,6 +1459,91 @@
 }
 .sc-code__line { white-space: pre; padding: 0 var(--sc-sp-12) 0 var(--sc-sp-8); color: var(--sc-text); }
 .sc-code__more { margin: var(--sc-sp-8) 0 0 var(--sc-sp-8); }
+
+/* ── document artifact ────────────────────────────────────────────────────
+   A previewer, not an editor: no toolbar and no caret here, by design
+   (UI-SPEC 6.4). Body text keeps --sc-fs-body — a document is the one thing
+   on screen the user is actually reading. */
+
+.sc-doc { display: flex; flex-direction: column; gap: var(--sc-sp-8); }
+.sc-doc__head { display: flex; align-items: center; gap: var(--sc-sp-8); }
+.sc-doc__title { font-weight: 600; font-size: var(--sc-fs-ui); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc-doc__rev { color: var(--sc-text-muted); font-size: var(--sc-fs-micro); flex: none; }
+.sc-doc__expand {
+  margin-left: auto;
+  flex: none;
+  padding: var(--sc-sp-4) var(--sc-sp-8);
+  border-radius: var(--sc-radius-sm);
+  border: 1px solid var(--sc-border);
+  background: var(--sc-bg);
+  color: var(--sc-text-muted);
+  font: inherit;
+  font-size: var(--sc-fs-meta);
+  cursor: pointer;
+}
+.sc-doc__expand:hover { color: var(--sc-text); background: var(--sc-surface-2); }
+
+/* Inline, the document is a preview: capped so one artifact cannot push the
+   rest of the conversation off screen. Opening it removes the cap. */
+.sc-doc__body { max-height: 320px; overflow-y: auto; font-size: var(--sc-fs-body); }
+.sc-doc--open .sc-doc__body { max-height: none; }
+.sc-doc__body ::selection { background: color-mix(in srgb, var(--sc-accent) 26%, transparent); }
+
+/* Left behind in the flow while the surface is open, so the transcript does
+   not jump by the card's height and lose the user's scroll position. */
+.sc-doc--placeholder { opacity: 0.5; }
+
+.sc-doc__quotebar {
+  display: flex;
+  align-items: center;
+  gap: var(--sc-sp-8);
+  padding: var(--sc-sp-6) var(--sc-sp-8);
+  border-radius: var(--sc-radius-sm);
+  border: 1px solid color-mix(in srgb, var(--sc-accent) 40%, var(--sc-border));
+  background: color-mix(in srgb, var(--sc-accent) 8%, var(--sc-bg));
+}
+.sc-doc__quotetext {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--sc-fs-meta);
+  color: var(--sc-text-muted);
+}
+
+.sc-doc__quotedismiss {
+  flex: none;
+  border: 0;
+  background: none;
+  color: var(--sc-text-muted);
+  font: inherit;
+  font-size: var(--sc-fs-micro);
+  cursor: pointer;
+  padding: 0 var(--sc-sp-2);
+}
+.sc-doc__quotedismiss:hover { color: var(--sc-text); }
+
+.sc-doc__scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--sc-z-modal);
+  background: color-mix(in srgb, var(--sc-text) 38%, transparent);
+}
+.sc-doc__surface {
+  position: fixed;
+  z-index: var(--sc-z-modal);
+  top: var(--sc-sp-32);
+  bottom: var(--sc-sp-32);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, calc(100% - var(--sc-sp-48)));
+  overflow-y: auto;
+  border-radius: var(--sc-radius);
+  background: var(--sc-bg);
+  box-shadow: var(--sc-shadow-overlay);
+}
+.sc-doc__surface .sc-doc { margin: 0; border: 0; }
 
 /* ── to-do list ───────────────────────────────────────────────────────── */
 
@@ -2033,6 +2193,8 @@
   .sc-ai__model,
   .sc-ai__enhance,
   .sc-code__copy,
+  .sc-quote__remove,
+  .sc-doc__quotedismiss,
   .sc-jump { position: relative; }
 
   .sc-ai__icon::after,
@@ -2042,6 +2204,8 @@
   .sc-ai__model::after,
   .sc-ai__enhance::after,
   .sc-code__copy::after,
+  .sc-quote__remove::after,
+  .sc-doc__quotedismiss::after,
   .sc-jump::after {
     content: "";
     position: absolute;
@@ -2104,7 +2268,10 @@
 .sc-todo__head:focus-visible .sc-todo__chevron { opacity: 1; }
 
 /* ── device: viewport-anchored overlays ───────────────────────────────────
-   position:fixed, so the viewport is the container and @media is right. */
+   position:fixed, so the viewport is the container and @media is right. Both
+   overlays share one block rather than taking two: they are the same question
+   asked about the same box, and splitting them would put a second width media
+   query in a file whose own test asserts there is exactly one. */
 @media (max-width: 600px) {
   .sc-toasts {
     left: var(--sc-sp-12);
@@ -2113,6 +2280,20 @@
     align-items: stretch;
   }
   .sc-toast { text-align: center; }
+
+  /* A centred panel needs side margins a phone does not have, so an opened
+     document becomes a sheet: full width, anchored to the bottom, leaving a
+     strip of the conversation visible above it as the way back. */
+  .sc-doc__surface {
+    top: var(--sc-sp-48);
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: auto;
+    transform: none;
+    border-radius: var(--sc-radius) var(--sc-radius) 0 0;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
 }
 
 /* ── width: medium (container ≤ 900px) ────────────────────────────────────
@@ -2176,6 +2357,9 @@
   /* Tighter cells fit one more column before the wrapper has to scroll. The
      scroll itself stays: turning a table into stacked key/value pairs loses
      the comparison that is the whole reason those kinds exist. */
+  .sc-email__row { flex-direction: column; align-items: stretch; gap: var(--sc-sp-2); }
+  .sc-email__label { width: auto; }
+  .sc-hunk__body { font-size: var(--sc-fs-micro); }
   .sc-table th, .sc-table td { padding: var(--sc-sp-6) var(--sc-sp-8); }
   .sc-table--grid th, .sc-table--grid td { padding: var(--sc-sp-6) var(--sc-sp-8); }
   .sc-stats { gap: var(--sc-sp-8); }
