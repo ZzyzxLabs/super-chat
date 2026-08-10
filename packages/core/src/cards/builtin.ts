@@ -358,6 +358,43 @@ export const markdownCard: CardKindDefinition = {
   },
 };
 
+export const documentCard: CardKindDefinition = {
+  kind: "document",
+  // Written for the model, and deliberately about SIZE and REUSE rather than
+  // about formatting: the distinction the model has to get right is "this is a
+  // thing we will keep working on" versus "this is a long answer".
+  summary:
+    "A document the user will keep, read in a previewer and come back to. Use for something worth revising — a draft, a report, a set of notes — not for a long reply. Returns an id later turns use to re-read or edit it.",
+  estimateTokens: tokensOf,
+  schema: {
+    type: "object",
+    required: ["kind", "docId", "title", "markdown", "revision"],
+    properties: {
+      kind: { const: "document" },
+      docId: { type: "string" },
+      title: { type: "string" },
+      markdown: { type: "string" },
+      revision: { type: "number" },
+    },
+  },
+  validate(spec) {
+    const s = check.object(spec, "document");
+    if (failed(s)) return s;
+    const o = s as Record<string, unknown>;
+    if (typeof o["docId"] !== "string" || !o["docId"]) {
+      return { ok: false, error: "document.docId must be a non-empty string." };
+    }
+    if (typeof o["title"] !== "string") return { ok: false, error: "document.title must be a string." };
+    if (typeof o["markdown"] !== "string") return { ok: false, error: "document.markdown must be a string." };
+    // A missing revision would let a stale edit through as revision 0, which is
+    // exactly the failure the token exists to prevent — so it is required, not
+    // defaulted.
+    return typeof o["revision"] === "number"
+      ? ok
+      : { ok: false, error: "document.revision must be a number." };
+  },
+};
+
 export const codeCard: CardKindDefinition = {
   kind: "code",
   summary: "A code block with language and optional filename.",
@@ -892,6 +929,7 @@ export const BUILTIN_CARDS: CardKindDefinition[] = [
   checklistCard,
   // prose and evidence
   markdownCard,
+  documentCard,
   calloutCard,
   citationsCard,
   codeCard,

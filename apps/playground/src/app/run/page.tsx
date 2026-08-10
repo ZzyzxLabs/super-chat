@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentClient, AgentProvider, useAgentClient, useAgentState, useAttachments, useJobs, useThread, useThreadList } from "@zzyzxlabs/super-chat-react";
-import { BUILTIN_RENDERERS, CardRendererProvider, ContextInspector, Composer, Thread } from "@zzyzxlabs/super-chat-ui";
+import { BUILTIN_RENDERERS, CardRendererProvider, ContextInspector, Composer, DocumentQuoteProvider, Thread } from "@zzyzxlabs/super-chat-ui";
 import type { RunEvent, RunMode, StoredFile } from "@zzyzxlabs/super-chat-core";
 import {
   MODELS,
@@ -158,6 +158,7 @@ export default function RunPanel() {
   return (
     <AgentProvider client={client}>
       <CardRendererProvider renderers={BUILTIN_RENDERERS}>
+        <DocumentQuoteProvider>
         <div className="dev__run">
           <div className="dev__runmain">
             <div className="dev__runbar">
@@ -236,6 +237,7 @@ export default function RunPanel() {
             <ContextInspector />
           </aside>
         </div>
+        </DocumentQuoteProvider>
       </CardRendererProvider>
     </AgentProvider>
   );

@@ -20,6 +20,7 @@ import {
   TimelineCardView,
 } from "./Basic.js";
 import { ChartCardView } from "./Chart.js";
+import { DocumentCardView } from "./Document.js";
 import {
   CalloutCardView,
   ChecklistCardView,
@@ -57,6 +58,7 @@ export const BUILTIN_RENDERERS: CardRendererMap = {
   ...register("progress", ProgressCardView),
   ...register("checklist", ChecklistCardView),
   ...register("markdown", MarkdownCardView),
+  ...register("document", DocumentCardView),
   ...register("callout", CalloutCardView),
   ...register("citations", CitationsCardView),
   ...register("code", CodeCardView),

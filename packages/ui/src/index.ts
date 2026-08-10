@@ -31,12 +31,14 @@ export {
 } from "./cards/General.js";
 export { ChoiceCardView, FormCardView, ConfirmCardView } from "./cards/Interactive.js";
 export { BUILTIN_RENDERERS } from "./cards/index.js";
+export { DocumentCardView, type DocumentQuote, type DocumentCardViewProps } from "./cards/Document.js";
 
 export { Thread, Composer, MessageView, LiveTurn } from "./Thread.js";
 export { ContextInspector } from "./ContextInspector.js";
 export { formatValue, formatDelta, toneClass, deltaTone } from "./format.js";
 export { threadToMarkdown, downloadThread } from "./export.js";
 export { ToastProvider, ConnectionBanner, useToast, type Toast } from "./Toast.js";
+export { DocumentQuoteProvider, useDocumentQuotes, type QuoteBus } from "./quotes.js";
 
 export {
   Orb,

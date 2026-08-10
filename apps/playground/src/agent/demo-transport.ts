@@ -104,6 +104,51 @@ const SCRIPTS: { match: RegExp; steps: Step[] }[] = [
       },
     ],
   },
+  // ── document artifact ────────────────────────────────────────────────────
+  // The P0 loop in one script: the agent produces something the user keeps,
+  // reads in a previewer, and can point at to ask the next question.
+  {
+    match: /draft|write up|document|artifact|寫一份|草稿|文件/i,
+    steps: [
+      {
+        kind: "tool",
+        name: "visualize",
+        args: {
+          kind: "document",
+          spec: {
+            kind: "document",
+            docId: "doc_demo_1",
+            title: "Vendor review",
+            revision: 1,
+            markdown: [
+              "# Vendor review",
+              "",
+              "Two shortlisted suppliers, scored against the criteria agreed in March.",
+              "",
+              "## Findings",
+              "",
+              "The **cheaper** option fails the SSO requirement outright. Closing that",
+              "gap later costs more than the difference in list price, so it is not a",
+              "saving.",
+              "",
+              "- Coverage: 18 of 22 requirements met",
+              "- Blocking gap: no SSO on non-admin seats",
+              "- Exit clause: 90 days, uncapped",
+              "",
+              "## Recommendation",
+              "",
+              "Proceed with the second supplier and hold 10% of year one against the",
+              "outstanding audit.",
+            ].join("\n"),
+          },
+        },
+      },
+      {
+        kind: "text",
+        text: "Drafted it as a document rather than a reply — it is something you will come back to. Select any part of it to ask about that section specifically.",
+      },
+    ],
+  },
   {
     match: /gdpr|compliance|soc ?2|readiness|合規/i,
     steps: [

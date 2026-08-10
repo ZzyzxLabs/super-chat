@@ -34,6 +34,10 @@ import {
   siblingsOf,
   threadSnapshot,
   userMessage,
+  withQuotes,
+  formatQuotes,
+  QUOTES_METADATA_KEY,
+  type DocumentQuoteRef,
 } from "@zzyzxlabs/super-chat-core";
 import { Store } from "./store.js";
 
@@ -190,12 +194,34 @@ export class AgentClient {
     return status === "running" || status === "awaiting-user";
   }
 
-  /** Append a user message (plus any staged attachments) and run a turn. */
-  async send(input: string | ContentPart[], opts: { forceSkillIds?: string[] } = {}): Promise<void> {
+  /**
+   * Append a user message (plus any staged attachments) and run a turn.
+   *
+   * `quotes` are spans the user highlighted in a document artifact. They are
+   * flattened into the message's own text rather than injected as context, and
+   * the reasoning is in content/quotes.ts: a quote is part of what the user
+   * SAID, so it must not go stale between turns and must not be droppable
+   * under budget pressure. The structured form rides on `metadata`, which never
+   * reaches a provider, so the chips can be re-rendered from history.
+   */
+  async send(
+    input: string | ContentPart[],
+    opts: { forceSkillIds?: string[]; quotes?: readonly DocumentQuoteRef[] } = {},
+  ): Promise<void> {
     if (this.isRunning) throw new Error("A run is already in progress. Call stop() first.");
     const staged = this.store.get().attachments;
-    const parts: ContentPart[] = typeof input === "string" ? [{ type: "text", text: input }] : [...input];
-    const message = userMessage(staged.length ? [...parts, ...staged] : input);
+    const quotes = opts.quotes ?? [];
+    const quoted: string | ContentPart[] =
+      quotes.length === 0
+        ? input
+        : typeof input === "string"
+          ? withQuotes(input, quotes)
+          : [{ type: "text", text: formatQuotes(quotes) } as ContentPart, ...input];
+    const parts: ContentPart[] = typeof quoted === "string" ? [{ type: "text", text: quoted }] : [...quoted];
+    const base = userMessage(staged.length ? [...parts, ...staged] : quoted);
+    const message: Message = quotes.length
+      ? { ...base, metadata: { ...base.metadata, [QUOTES_METADATA_KEY]: quotes } }
+      : base;
     this.appendMessage(message, undefined, { attachments: [] });
     // Persist the user turn before running — a reload mid-run keeps it.
     this.persist();

@@ -30,6 +30,7 @@ import {
 } from "@zzyzxlabs/super-chat-react";
 import { CardRenderer } from "./renderer-registry.js";
 import { renderMarkdown } from "./markdown.js";
+import { useDocumentQuotes } from "./quotes.js";
 import {
   applyPick,
   findTrigger,
@@ -713,6 +714,8 @@ export function Composer({
   onAttachFile,
 }: ComposerProps) {
   const { send, stop, isRunning, stopping, messages } = useThread();
+  const quoteBus = useDocumentQuotes();
+  const quotes = quoteBus?.quotes ?? [];
   const { skills } = useSkills();
   const { all: allTools } = useTools();
   const staged = useAttachments();
@@ -794,8 +797,10 @@ export function Composer({
 
   const submit = () => {
     const text = value.trim();
-    // Attachments alone are a valid send — "summarize this file" is the text-less case.
-    if ((!text && !attachments.length) || isRunning || overLimit) return;
+    // Attachments alone are a valid send — "summarize this file" is the text-less
+    // case — and so is a quote alone: pointing at a paragraph and hitting send
+    // is a complete request ("what about this?").
+    if ((!text && !attachments.length && !quotes.length) || isRunning || overLimit) return;
     // Host-staged parts are already on the client and get appended by send();
     // inlining them here too would send every file twice.
     const parts: ContentPart[] = [
@@ -804,7 +809,12 @@ export function Composer({
     ];
     setValue("");
     setAttachments([]);
-    void send(parts);
+    // Cleared before the run, not after: a quote left in the composer would be
+    // re-sent with the next message, which is the stale-context bug that keeping
+    // quotes off app-state was meant to avoid in the first place.
+    const sending = quotes;
+    quoteBus?.clear();
+    void send(parts, sending.length ? { quotes: sending } : undefined);
     // Auto-grow only expands the box; clearing the value must collapse it
     // back to the CSS base height instead of leaving a tall empty textarea.
     const el = inputRef.current;
@@ -868,6 +878,24 @@ export function Composer({
     >
       {trigger && suggestions.length ? (
         <SuggestMenu items={suggestions} active={activeIdx} onPick={pick} />
+      ) : null}
+      {quotes.length ? (
+        <ul className="sc-quotes" aria-label="Quoted from a document">
+          {quotes.map((q, i) => (
+            <li key={`${q.docId}:${q.start}:${q.end}`} className="sc-quote">
+              <span className="sc-quote__doc">{q.title}</span>
+              <span className="sc-quote__text">{q.text.trim().replace(/\s+/g, " ")}</span>
+              <button
+                type="button"
+                className="sc-quote__remove"
+                aria-label={`Remove quote from ${q.title}`}
+                onClick={() => quoteBus?.remove(i)}
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
       ) : null}
       {attachments.length ? (
         <ul className="sc-attachments">

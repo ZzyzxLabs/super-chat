@@ -4,6 +4,13 @@
 export * from "./content/types.js";
 export * from "./content/parts.js";
 export { pathTo, childrenOf, siblingsOf, latestLeaf, linkLinear } from "./content/branching.js";
+export {
+  formatQuotes,
+  withQuotes,
+  quotesOf,
+  QUOTES_METADATA_KEY,
+  type DocumentQuoteRef,
+} from "./content/quotes.js";
 
 // errors
 export { AgentError, isAgentError, toAgentError, kindFromStatus, type AgentErrorKind } from "./errors.js";
@@ -67,6 +74,7 @@ export {
   progressCard,
   mediaCard,
   markdownCard,
+  documentCard,
   codeCard,
   diffCard,
   comparisonCard,

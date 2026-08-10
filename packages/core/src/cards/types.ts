@@ -140,6 +140,27 @@ export type MediaCard = {
 export type MarkdownCard = { kind: "markdown"; title?: string; body: string };
 
 /**
+ * A document artifact — long-form Markdown the agent authored and the user
+ * reads in a previewer rather than inline in the transcript.
+ *
+ * `docId` is the stable handle every later turn addresses: the body here is for
+ * display only, and stripCardPayload removes it from what the model sees after
+ * the turn that produced it. A model that wants to re-read the document calls
+ * the read tool with this id — which is the point, because a document large
+ * enough to deserve a previewer is too large to re-send every turn.
+ *
+ * `revision` is the optimistic-concurrency token. An edit carrying a stale one
+ * is refused rather than applied to text that has since moved.
+ */
+export type DocumentCard = {
+  kind: "document";
+  docId: string;
+  title: string;
+  markdown: string;
+  revision: number;
+};
+
+/**
  * A matrix of options against criteria.
  *
  * The most domain-portable card there is: legal clause-vs-clause, vendor
@@ -304,6 +325,7 @@ export type BuiltinCard =
   | ProgressCard
   | MediaCard
   | MarkdownCard
+  | DocumentCard
   | CodeCard
   | DiffCard
   | ComparisonCard
