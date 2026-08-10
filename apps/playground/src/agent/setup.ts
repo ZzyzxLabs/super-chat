@@ -25,6 +25,9 @@ import {
   createRetrievalSource,
   type Provider,
   type Transport,
+  createDocumentTools,
+  createEmailDraftTool,
+  createLocalDocumentStore,
 } from "@zzyzxlabs/super-chat-core";
 import { createDemoTransport } from "./demo-transport";
 import { DOMAIN_TOOLS } from "./tools";
@@ -38,6 +41,7 @@ export const cards = new CardRegistry(BUILTIN_CARDS);
 export const skills = new SkillRegistry(SKILLS, { maxMatched: 3 });
 // Declared before the tool registry singleton below — populate references it.
 export const memoryStore = createLocalMemoryStore("superchat:playground:memory");
+export const documentStore = createLocalDocumentStore("superchat:playground:documents");
 
 /**
  * Preset assignment. Note that `createAlert` is the only tool in `executor` —
@@ -58,6 +62,18 @@ function populateToolRegistry(registry: ToolRegistry): void {
   // Memory's write half. `observer`, because remembering a stated preference
   // is a read-tier act — it changes nothing outside the conversation's memory.
   registry.register(createRememberTool(memoryStore), ["observer"]);
+
+  // Documents. Reading is an observer act; creating and editing change
+  // something the user keeps, so they sit behind `executor` — and editDocument
+  // additionally cannot write without an approved diff, which is a second gate
+  // rather than a substitute for the first.
+  const [createDoc, readDoc, editDoc, undoDoc] = createDocumentTools({ store: documentStore });
+  registry.register(readDoc!, ["observer"]);
+  registry.registerAll([createDoc!, editDoc!, undoDoc!], ["executor"]);
+
+  // Drafting an email is the `draft` tier by definition: it produces something
+  // the user signs and sends. There is no send path here and no credential.
+  registry.register(createEmailDraftTool(), ["draft", "executor"]);
 
   // Domain tools get NO preset: they are private by default and surface only
   // when the skill that documents them matches. A legal question should not put

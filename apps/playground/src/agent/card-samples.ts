@@ -212,6 +212,49 @@ export const CARD_SAMPLES: Record<string, CardSpec> = {
     ].join("\n"),
   },
 
+  editreview: {
+    kind: "editreview",
+    docId: "doc_vendor_review",
+    title: "Vendor review",
+    revision: 3,
+    summary: "Name the supplier, and soften the recommendation to match the audit caveat.",
+    hunks: [
+      {
+        index: 0,
+        block: 3,
+        removed: ["The **cheaper** option fails the SSO requirement outright."],
+        added: ["Supplier A fails the SSO requirement outright."],
+      },
+      {
+        index: 1,
+        block: 7,
+        removed: ["Proceed with the second supplier and hold 10% of year one against the", "outstanding audit."],
+        added: [
+          "Proceed with Supplier B, subject to the audit closing, and hold 10% of",
+          "year one against it.",
+        ],
+      },
+    ],
+  },
+
+  email: {
+    kind: "email",
+    to: ["counsel@example.com"],
+    cc: ["procurement@example.com"],
+    subject: "Vendor review — redline for your read",
+    body: [
+      "Hi,",
+      "",
+      "Attached is the vendor review with the SSO gap called out and the",
+      "recommendation caveated on the audit. Two things worth your eye:",
+      "",
+      "1. The exit clause is 90 days, uncapped.",
+      "2. We are holding 10% of year one.",
+      "",
+      "Thanks",
+    ].join("\n"),
+  },
+
   callout: {
     kind: "callout",
     tone: "warning",

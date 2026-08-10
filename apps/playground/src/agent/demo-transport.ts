@@ -104,6 +104,68 @@ const SCRIPTS: { match: RegExp; steps: Step[] }[] = [
       },
     ],
   },
+  // ── document edit ────────────────────────────────────────────────────────
+  // An interactive card SUSPENDS the run, which is the whole point: nothing is
+  // written until the answer comes back. So this script ends at the review —
+  // there is no "and then" until the user has decided.
+  {
+    match: /tighten|redline|revise|edit the|rewrite|修改|改一下/i,
+    steps: [
+      {
+        kind: "tool",
+        name: "visualize",
+        args: {
+          kind: "editreview",
+          spec: {
+            kind: "editreview",
+            docId: "doc_demo_1",
+            title: "Vendor review",
+            revision: 1,
+            summary: "Name the supplier, and caveat the recommendation on the audit.",
+            hunks: [
+              {
+                index: 0,
+                block: 3,
+                removed: ["The **cheaper** option fails the SSO requirement outright. Closing that"],
+                added: ["Supplier A fails the SSO requirement outright. Closing that"],
+              },
+              {
+                index: 1,
+                block: 7,
+                removed: ["Proceed with the second supplier and hold 10% of year one against the"],
+                added: ["Proceed with Supplier B, subject to the audit, and hold 10% of year one against the"],
+              },
+            ],
+          },
+        },
+      },
+    ],
+  },
+
+  // ── outbound ─────────────────────────────────────────────────────────────
+  {
+    match: /email|mail|寄給|寄一封|covering note|send it to/i,
+    steps: [
+      {
+        kind: "tool",
+        name: "visualize",
+        args: {
+          kind: "email",
+          spec: {
+            kind: "email",
+            to: ["counsel@example.com"],
+            subject: "Vendor review — redline for your read",
+            body: "Hi,\n\nThe vendor review is attached, with the SSO gap called out and the recommendation caveated on the audit.\n\nThanks",
+          },
+        },
+      },
+      {
+        kind: "text",
+        text: "Drafted the covering note. Nothing is sent until you send it — download the .eml or open it in your mail client.",
+      },
+    ],
+  },
+
   // ── document artifact ────────────────────────────────────────────────────
   // The P0 loop in one script: the agent produces something the user keeps,
   // reads in a previewer, and can point at to ask the next question.

@@ -1368,9 +1368,9 @@ bar 會蓋住浮動按鈕，`selectionchange` 的時序也與桌機不同。這�
 | **N1** | `markdown.ts` 保留區塊位移 + `renderMarkdownWithAnchors`；escape 移進區塊內 | ✅ 完成，8 項第 1 層斷言 |
 | **N2** | `document` card kind + `DocumentCardView` previewer（渲染／展開／compact sheet） | ✅ 完成並瀏覽器驗證 |
 | **N3** | 選取 → composer chip → user message 的 text part + metadata | ✅ 完成並瀏覽器驗證 |
-| **N4** | 文件協定：host-run `createDocument` / `readDocument`、錨定編輯、`revision` | 未做 |
-| **N5** | 互動式 diff card：逐 hunk 接受、`confirm`、版本與 undo | 未做 |
-| **N6** | compose card + mailto + `.eml` + 宿主 send 槽位 | 未做 |
+| **N4** | 文件協定：`DocumentStore`（宿主擁有）、`createDocument` / `readDocument`、錨定編輯、`revision` | ✅ 完成，29 項第 1 層斷言 |
+| **N5** | 互動式 diff card：逐 hunk 接受、`confirm`、版本與 undo | ✅ 完成並瀏覽器驗證 |
+| **N6** | compose card + mailto + `.eml` + 宿主 send 槽位 | ✅ 完成並瀏覽器驗證 |
 
 N1–N3 合起來就是 P0，**在完全沒有編輯功能時已可交付**。N6 只依賴 N4 的
 文件模型，可與 N5 並行。
@@ -1437,3 +1437,66 @@ pnpm typecheck
   區塊的長文件，不該讓其餘四十段都失去這個捷徑。
 - `BUILTIN_RENDERERS` 在 main 改用 `register()` 輔助函式；`document`
   依同一形式註冊，位置仍緊鄰 `markdown`。
+
+
+## 6.11 N4–N6 實作紀錄
+
+編輯迴圈完成：產文件 → 讀大綱 → 定點改 → 逐 hunk 核准 → 產出對外文件。
+
+### 「拒絕」是這批最重要的程式碼
+
+`applyEdits` 的一半篇幅在拒絕。找不到 → `not-found`（叫模型重讀）、找到
+兩次 → `ambiguous`（叫它加長錨點或指定 block）。**兩者都不猜**。
+
+這條規則的價值不在乾淨，在於失敗模式：第一個匹配優先會把改動放到沒人要
+求的位置，然後把它**當成刻意的結果放進 diff 給使用者核准** —— 而 diff 讀
+起來完全正常，使用者就按了同意。拒絕會被模型看到並重試；猜錯不會。
+
+同理，編輯的位移全部對**原文**解析、由後往前套用，所以前一個編輯改變長度
+不會挪動後一個。兩個編輯範圍重疊視為矛盾而非合併，也是拒絕。
+
+### 三個「本來會很誘人」的簡化，都沒做
+
+| 誘惑 | 為什麼不做 |
+|------|-----------|
+| 讓模型回傳整份文件 | 成本正比於「大小 × 次數」、會順手改沒要求的段落，而且**整份都變了就沒有可審的 diff** |
+| 用文字 diff 算 hunk | 算出來的區塊**不能各自套用**，而「逐條接受」正是要問的問題。改成「一個編輯 = 一個 hunk」，因為編輯本身就自帶錨點 |
+| undo 算反向編輯 | 反向編輯**會算錯**，而且正好在文件已經前進時算錯。改成存整份舊版、undo 是 checkout；而且 undo 鑄**新的** revision，讓針對舊版提出的 in-flight 編輯被拒而不是誤套 |
+
+### 一個被測試糾正的分類
+
+`email` 卡片最初標成 `interactive: true`，因為它有輸入框。錯了：這裡的
+interactive 意思是「**run 會掛起等使用者回答**」。email 草稿沒有任何東西
+在等它 —— 模型沒有提問，它產出了一個東西。標成 interactive 只會讓它跟真正
+的決定排在同一條序列裡。`editreview` 才是真的：文件在答案回來前不會變。
+
+`cards.test.ts` 那條「哪些 kind 是 interactive」的守門測試因此擋下了它，
+現在那條測試也寫明了判準是「有東西在等」而不是「卡片上有控制項」。
+
+### 對外產物：`.eml` 是主要出口
+
+規劃寫「mailto 是便利捷徑」，實作把它落實成介面順序：**下載 `.eml` 是
+primary 按鈕**，mailto 是次要連結，而且 body 一超過 2000 字元就在使用者
+按下去**之前**警告 —— 那個失敗在每個信件軟體裡都是靜默的，信寄出去少了
+結尾而沒有任何提示。
+
+`.eml` 刻意不寫 `Date` 與 `Message-ID`：草稿還沒寄，蓋上寄送時間是個小
+謊，而有些客戶端會把它當事實顯示。
+
+沒有宿主提供 `onSend` 就**不顯示送出鈕**。框架不持有信件憑證，理由同
+Transport 的「adapter 從不持有憑證」。
+
+### 一個結構調整
+
+`splitBlocks` 從 `packages/ui` 移到 `packages/core/src/content/blocks.ts`。
+不是整理，是正確性：previewer 把 DOM 選取換算成 block 索引，編輯協定再把
+同一個索引換算回可以改寫的文字 —— **兩份實作會漂移，而漂移是靜默的**：
+引用指向 block 4、編輯落在 block 5，兩邊看起來都正常，直到有人讀結果。
+
+### 現在跑得起來的東西
+
+```
+pnpm test        # 338 unit
+pnpm test:rwd    # 120 項第 2 層，含 14 項文件測試 × 4 組視窗
+pnpm typecheck
+```

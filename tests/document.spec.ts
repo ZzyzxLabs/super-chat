@@ -188,3 +188,100 @@ test("opening a document does not push the page sideways", async ({ page }, test
   await page.keyboard.press("Escape");
   await expect(page.locator(".sc-doc__surface")).toHaveCount(0);
 });
+
+async function ask(page: Page, prompt: string, appears: string) {
+  await settle(page, "/run");
+  const input = page.locator(".sc-composer__input");
+  await expect(input).toBeVisible();
+  await input.fill(prompt);
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.locator(appears)).toBeVisible({ timeout: 30_000 });
+}
+
+/**
+ * Propose edits. Deliberately does NOT wait for the run to finish: an edit
+ * review is interactive, so the run stays suspended until it is answered. That
+ * is the guarantee the feature rests on — nothing is written while the question
+ * is still open — and a helper that waited for idle would hang on it.
+ */
+const proposeEdits = (page: Page) => ask(page, "tighten the vendor review", ".sc-editreview");
+
+/** Draft the covering note. Separate turn, because the review blocks its own. */
+const draftEmail = (page: Page) => ask(page, "email it to counsel", ".sc-email");
+
+test("an edit arrives as a diff, selected by default, with signs not just colour", async ({ page }) => {
+  await proposeEdits(page);
+
+  const review = page.locator(".sc-editreview");
+  await expect(review.locator(".sc-hunk")).toHaveCount(2);
+  // Everything starts accepted: the model proposed these because it was asked
+  // to, so opting out is the exception rather than the price of admission.
+  await expect(review.locator('input[type="checkbox"]:checked')).toHaveCount(2);
+  await expect(review.getByText("Apply all changes")).toBeVisible();
+
+  // Red and green are the classic failure case, so every line is signed too.
+  await expect(review.locator(".sc-hunk__line--del").first()).toContainText("−");
+  await expect(review.locator(".sc-hunk__line--add").first()).toContainText("+");
+});
+
+test("hunks can be accepted individually", async ({ page }) => {
+  await proposeEdits(page);
+  const review = page.locator(".sc-editreview");
+
+  await review.locator('input[type="checkbox"]').first().uncheck();
+  await expect(review.locator(".sc-hunk--off")).toHaveCount(1);
+  // The button states what will actually happen, rather than staying "Apply".
+  await expect(review.getByRole("button", { name: "Apply 1 of 2" })).toBeVisible();
+
+  // A deselected hunk stays readable — the user has to be able to re-read what
+  // they are declining.
+  await expect(review.locator(".sc-hunk--off .sc-hunk__text").first()).toBeVisible();
+});
+
+test("rejecting everything is a decision the card records", async ({ page }) => {
+  await proposeEdits(page);
+  const review = page.locator(".sc-editreview");
+
+  for (const box of await review.locator('input[type="checkbox"]').all()) await box.uncheck();
+  // With nothing selected, Apply is not a meaningful action; Reject all is.
+  await expect(review.getByRole("button", { name: /^Apply/ })).toBeDisabled();
+  await expect(review.getByRole("button", { name: "Reject all" })).toBeEnabled();
+});
+
+test("the email draft offers .eml first and flags a truncating mailto", async ({ page }) => {
+  await draftEmail(page);
+  const email = page.locator(".sc-email");
+  await expect(email).toBeVisible();
+
+  // .eml is the primary exit because it is the one with no limits.
+  await expect(email.getByRole("button", { name: "Download .eml" })).toBeVisible();
+
+  const href = await email.getByRole("link", { name: "Open in mail client" }).getAttribute("href");
+  expect(href).toMatch(/^mailto:counsel%40example\.com/);
+  expect(href).toContain("%0D%0A");
+
+  // No send button without a host handler: the framework holds no credential,
+  // so offering to send would be a promise it cannot keep.
+  await expect(email.getByRole("button", { name: "Send", exact: true })).toHaveCount(0);
+});
+
+test("the email draft is editable and the mailto follows the edits", async ({ page }) => {
+  await draftEmail(page);
+  const email = page.locator(".sc-email");
+
+  await email.locator("input").first().fill("someone-else@example.com");
+  const href = await email.getByRole("link", { name: "Open in mail client" }).getAttribute("href");
+  expect(href).toContain("someone-else%40example.com");
+});
+
+test("a long body warns before the user clicks, not after", async ({ page }) => {
+  await draftEmail(page);
+  const email = page.locator(".sc-email");
+  await expect(email.locator(".sc-email__warn")).toHaveCount(0);
+
+  // Past the mailto ceiling clients truncate silently — the letter goes out
+  // missing its end and nothing says so.
+  await email.locator("textarea").fill("x".repeat(2200));
+  await expect(email.locator(".sc-email__warn")).toBeVisible();
+  await expect(email.locator(".sc-email__warn")).toContainText(".eml");
+});

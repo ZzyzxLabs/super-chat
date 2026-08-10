@@ -19,14 +19,7 @@
 // silently point at the wrong text — which is why markdown.test.ts asserts the
 // offsets round-trip rather than trusting the output to look right.
 
-export type MarkdownBlockKind = "fence" | "text";
-
-/** A top-level block, addressed by its half-open span in the SOURCE string. */
-export type MarkdownBlock = {
-  start: number;
-  end: number;
-  kind: MarkdownBlockKind;
-};
+import { splitBlocks, type MarkdownBlock } from "@zzyzxlabs/super-chat-core";
 
 export type AnchoredMarkdown = {
   html: string;
@@ -34,69 +27,12 @@ export type AnchoredMarkdown = {
   blocks: MarkdownBlock[];
 };
 
-type Line = { text: string; start: number; end: number };
-
-function scanLines(src: string): Line[] {
-  const out: Line[] = [];
-  let start = 0;
-  for (let i = 0; i <= src.length; i += 1) {
-    if (i === src.length || src[i] === "\n") {
-      out.push({ text: src.slice(start, i), start, end: i });
-      start = i + 1;
-    }
-  }
-  return out;
-}
-
-const isFence = (text: string) => text.startsWith("```");
-
 // Cheap pre-check carried over from main: with none of these characters
 // present, no heading, emphasis, code, link or list rule below could match, so
 // the whole regex chain is skippable. Applied per BLOCK rather than per
 // document — one fenced snippet in an otherwise plain artifact should not cost
 // the other forty paragraphs their shortcut.
 const MARKDOWN_SIGNIFICANT = /[`*_#[\]>-]/;
-
-/**
- * Top-level blocks in source order, with their spans.
- *
- * Blank lines separate blocks and belong to none of them, so a span always
- * slices back to exactly the block's own text. Fences are scanned as a unit
- * before the blank-line rule gets a say — a blank line inside a code block is
- * part of the code, not a block boundary.
- */
-export function splitBlocks(src: string): MarkdownBlock[] {
-  const lines = scanLines(src);
-  const blocks: MarkdownBlock[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i]!;
-    if (line.text.trim() === "") {
-      i += 1;
-      continue;
-    }
-
-    if (isFence(line.text)) {
-      let j = i + 1;
-      while (j < lines.length && !isFence(lines[j]!.text)) j += 1;
-      // An unterminated fence runs to the end of the source rather than
-      // swallowing the rest as prose — a half-streamed code block is a normal
-      // state to render, not a malformed document.
-      const closing = j < lines.length ? lines[j]! : lines[lines.length - 1]!;
-      blocks.push({ start: line.start, end: closing.end, kind: "fence" });
-      i = j + 1;
-      continue;
-    }
-
-    let j = i;
-    while (j < lines.length && lines[j]!.text.trim() !== "" && !isFence(lines[j]!.text)) j += 1;
-    blocks.push({ start: line.start, end: lines[j - 1]!.end, kind: "text" });
-    i = j;
-  }
-
-  return blocks;
-}
 
 // Quotes are escaped because link URLs are interpolated into href="…" — an
 // unescaped quote in a URL would close the attribute and open a new one

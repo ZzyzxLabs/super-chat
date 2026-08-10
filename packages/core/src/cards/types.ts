@@ -326,6 +326,8 @@ export type BuiltinCard =
   | MediaCard
   | MarkdownCard
   | DocumentCard
+  | EditReviewCard
+  | EmailCard
   | CodeCard
   | DiffCard
   | ComparisonCard
@@ -340,6 +342,53 @@ export type BuiltinCard =
   | ConfirmCard;
 
 export type BuiltinCardKind = BuiltinCard["kind"];
+
+/**
+ * The approval surface for a proposed document edit.
+ *
+ * Interactive, because in in-chat editing the diff IS the approval: there is no
+ * other moment at which the user gets to see what is about to happen. Hunks are
+ * accepted individually rather than all-or-nothing — partial acceptance is what
+ * makes the exchange read as collaboration instead of take-it-or-leave-it, and
+ * an edit is already the smallest independently applicable unit because it
+ * carries its own anchor.
+ */
+export type EditReviewCard = {
+  kind: "editreview";
+  docId: string;
+  title: string;
+  /** Revision the edits were computed against; a stale one is refused. */
+  revision: number;
+  /** One line on why, in the model's words. */
+  summary?: string;
+  hunks: {
+    index: number;
+    block: number;
+    removed: string[];
+    added: string[];
+  }[];
+};
+
+/**
+ * A drafted email, before it is anyone's outbox.
+ *
+ * Always a draft the user completes — which is exactly the `draft` preset tier
+ * ("produces something the USER must approve/sign. No side effects"). The
+ * framework never holds a mail credential, for the same reason a Transport
+ * never holds an API key.
+ *
+ * Editable but not interactive: nothing waits on it. The run does not suspend,
+ * because the model asked no question — it produced a thing.
+ */
+export type EmailCard = {
+  kind: "email";
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject: string;
+  /** Plain text. Markdown here would be a lie: mailto cannot carry it. */
+  body: string;
+};
 
 /** A host-registered card is any `{kind}` object; built-ins are the typed subset. */
 export type CardSpec = BuiltinCard | ({ kind: string } & Record<string, unknown>);

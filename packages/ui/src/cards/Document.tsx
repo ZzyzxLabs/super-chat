@@ -18,7 +18,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DocumentCard } from "@zzyzxlabs/super-chat-core";
-import { renderMarkdownWithAnchors, type MarkdownBlock } from "../markdown.js";
+import type { MarkdownBlock } from "@zzyzxlabs/super-chat-core";
+import { renderMarkdownWithAnchors } from "../markdown.js";
 import type { CardRendererProps } from "../renderer-registry.js";
 import { useDocumentQuotes } from "../quotes.js";
 import { CardActions } from "./CardActions.js";

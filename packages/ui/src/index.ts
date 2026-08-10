@@ -32,6 +32,8 @@ export {
 export { ChoiceCardView, FormCardView, ConfirmCardView } from "./cards/Interactive.js";
 export { BUILTIN_RENDERERS } from "./cards/index.js";
 export { DocumentCardView, type DocumentQuote, type DocumentCardViewProps } from "./cards/Document.js";
+export { EditReviewCardView } from "./cards/EditReview.js";
+export { EmailCardView, type EmailCardViewProps } from "./cards/Email.js";
 
 export { Thread, Composer, MessageView, LiveTurn } from "./Thread.js";
 export { ContextInspector } from "./ContextInspector.js";

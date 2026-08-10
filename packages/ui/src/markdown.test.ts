@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { renderMarkdown, renderMarkdownWithAnchors, splitBlocks } from "./markdown.js";
+import { splitBlocks } from "@zzyzxlabs/super-chat-core";
+import { renderMarkdown, renderMarkdownWithAnchors } from "./markdown.js";
 
 describe("renderMarkdown", () => {
   it("escapes HTML so model output cannot inject markup", () => {
