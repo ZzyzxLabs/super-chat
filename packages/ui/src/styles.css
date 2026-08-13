@@ -709,9 +709,13 @@
    that, doubling the gap between blocks. Word wrapping still applies. */
 .sc-msg__text { font-size: var(--sc-fs-body); line-height: var(--sc-lh-prose); word-break: break-word; }
 
-.sc-prose h2, .sc-prose h3, .sc-prose h4 { margin: var(--sc-sp-16) 0 var(--sc-sp-6); font-size: var(--sc-fs-body); }
+.sc-prose h2, .sc-prose h3, .sc-prose h4,
+.sc-prose h5, .sc-prose h6 { margin: var(--sc-sp-16) 0 var(--sc-sp-6); font-size: var(--sc-fs-body); }
 .sc-prose p { margin: 0 0 var(--sc-sp-8); }
-.sc-prose ul { margin: 0 0 var(--sc-sp-8); padding-left: var(--sc-sp-20); }
+.sc-prose ul, .sc-prose ol { margin: 0 0 var(--sc-sp-8); padding-left: var(--sc-sp-20); }
+/* A nested list is inside its parent's <li>, so its own bottom margin would
+   add to the item's line spacing rather than to the gap after the list. */
+.sc-prose li > ul, .sc-prose li > ol { margin-bottom: 0; }
 .sc-prose code { font-family: var(--sc-mono); font-size: 0.88em; background: var(--sc-surface-2); padding: var(--sc-sp-2) var(--sc-sp-4); border-radius: var(--sc-radius-xs); }
 .sc-prose pre {
   margin: var(--sc-sp-6) 0 var(--sc-sp-8);
@@ -726,6 +730,44 @@
 }
 .sc-prose pre code { background: none; padding: 0; border-radius: 0; font-size: 1em; }
 .sc-prose a { color: var(--sc-accent); }
+
+/* Document constructs. These arrived with the document previewer: a report is
+   the first thing anyone writes that has a table in it, and until the renderer
+   grew one these came out as literal pipes and angle brackets. */
+.sc-prose blockquote {
+  margin: 0 0 var(--sc-sp-8);
+  padding: var(--sc-sp-2) 0 var(--sc-sp-2) var(--sc-sp-12);
+  /* border-first, like every other level in the kit — a tinted background here
+     would compete with cards for the same "this is a surface" signal. */
+  border-left: 2px solid var(--sc-border);
+  color: var(--sc-text-muted);
+}
+.sc-prose blockquote > :last-child { margin-bottom: 0; }
+.sc-prose hr { margin: var(--sc-sp-16) 0; border: 0; border-top: 1px solid var(--sc-border); }
+.sc-prose del { text-decoration: line-through; color: var(--sc-text-muted); }
+
+/* The table scrolls inside its own box. A wide table is the single most common
+   way an embedded transcript ends up with a horizontal scrollbar on the PAGE,
+   and at 360px almost any table is wide. */
+.sc-prose .sc-md-table {
+  display: block;
+  overflow-x: auto;
+  width: 100%;
+  margin: 0 0 var(--sc-sp-8);
+  border-collapse: collapse;
+  font-size: var(--sc-fs-meta);
+}
+.sc-prose .sc-md-table th,
+.sc-prose .sc-md-table td {
+  padding: var(--sc-sp-6) var(--sc-sp-10);
+  border-bottom: 1px solid var(--sc-border);
+  text-align: left;
+}
+.sc-prose .sc-md-table th { color: var(--sc-text-muted); font-weight: 600; white-space: nowrap; }
+.sc-prose .sc-md-table tbody tr:last-child td { border-bottom: 0; }
+.sc-prose .sc-md-left { text-align: left; }
+.sc-prose .sc-md-center { text-align: center; }
+.sc-prose .sc-md-right { text-align: right; }
 
 /* thinking bar — collapsed by default, but shows the latest reasoning line
    inline while it streams, so "is it thinking about the right thing" is
