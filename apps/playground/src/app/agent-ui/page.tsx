@@ -15,6 +15,7 @@ import {
   MORPH_VARIANTS,
   ORB_TASKS,
   Orb,
+  PlanProgress,
   RING_VARIANTS,
   StreamingText,
   Thinking,
@@ -253,6 +254,26 @@ export default function AgentUiPanel() {
         </p>
         <div style={{ marginTop: 12, maxWidth: 420 }}>
           <TodoList items={todos} />
+        </div>
+      </section>
+
+      <section className="dev__section">
+        <h2 className="dev__section-title">Plan progress</h2>
+        <p className="dev__section-note">
+          The run's plan, with live status — run-scoped rather than per-turn, so it belongs outside the transcript in
+          a rail or header. It ships no position and no width and fills whatever box the host gives it; what it owns
+          is density, folding to a single bar whose segmented meter keeps carrying progress. Collapse it to see.
+        </p>
+        <div style={{ marginTop: 12, maxWidth: 420 }}>
+          <PlanProgress
+            steps={[
+              { label: "Locate the auth middleware", detail: "src/server/auth/verify.ts", status: "done" },
+              { label: "Trace where the signing secret is loaded from", detail: "3 call sites", status: "done" },
+              { label: "Pin the algorithm to HS256", detail: "reject 'none' and weak ciphers", status: "active" },
+              { label: "Run the regression suite", status: "pending" },
+              { label: "Open the pull request", status: "pending" },
+            ]}
+          />
         </div>
       </section>
 
