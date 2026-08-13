@@ -20,10 +20,12 @@ const PANELS = [
   { path: "/", name: "overview" },
   { path: "/cards", name: "agent cards" },
   { path: "/agent-ui", name: "agent surfaces" },
+  { path: "/dev-ani", name: "animations" },
   { path: "/skills", name: "skills" },
   { path: "/tools", name: "tools" },
   { path: "/requests", name: "wire requests" },
   { path: "/app-state", name: "app state" },
+  { path: "/documents", name: "documents" },
   { path: "/run", name: "run" },
 ];
 
@@ -274,10 +276,15 @@ test("P2 — every panel stays reachable on a phone", async ({ page }) => {
   await settle(page, "/");
 
   const links = page.locator(".dev__nav a");
-  await expect(links).toHaveCount(8);
+  // Not an exact count: the number of panels is not what this test is about,
+  // and pinning it means every new panel arrives as a failure in a responsive
+  // test that has nothing to say about it. What matters is that the strip is
+  // really there and every link in it can be reached.
+  const count = await links.count();
+  expect(count, "the nav strip should list the panels").toBeGreaterThanOrEqual(8);
+  for (let i = 0; i < count; i += 1) await expect(links.nth(i)).toBeVisible();
 
   const first = links.first();
-  await expect(first).toBeVisible();
   const box = await first.boundingBox();
   expect(box!.height, "nav links need a touch-sized row").toBeGreaterThanOrEqual(30);
 

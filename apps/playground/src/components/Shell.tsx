@@ -9,12 +9,14 @@ import type { ReactNode } from "react";
 // the source — which is what they actually want from a demo.
 const PANELS = [
   { href: "/", label: "Overview", hint: "What's in the box" },
-  { href: "/cards", label: "Agent cards", hint: "20 kinds + their specs" },
+  { href: "/cards", label: "Agent cards", hint: "23 kinds + their specs" },
   { href: "/agent-ui", label: "Agent surfaces", hint: "Thinking, orbs, composer" },
+  { href: "/dev-ani", label: "Animations", hint: "Every motion, catalogued & replayable" },
   { href: "/skills", label: "Skills", hint: "Modes, matching, live scoring" },
   { href: "/tools", label: "Tools & presets", hint: "Schemas, capability gating" },
   { href: "/requests", label: "Wire requests", hint: "Responses vs Chat Completions" },
   { href: "/app-state", label: "App state", hint: "Agent reads & drives your UI" },
+  { href: "/documents", label: "Documents", hint: "Previewer, quotes, edit refusals" },
   { href: "/run", label: "Run & events", hint: "Live chat + event stream" },
 ];
 

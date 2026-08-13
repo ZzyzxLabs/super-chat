@@ -6,8 +6,20 @@ const RESOURCES = [
   {
     href: "/cards",
     title: "Agent cards",
-    body: "20 built-in card kinds the agent can choose from — tables, comparisons, funnels, gauges, citations, checklists, trees, and three interactive kinds that pause the run for an answer. Each shown with the spec that produced it.",
+    body: `${BUILTIN_CARDS.length} built-in card kinds the agent can choose from — tables, comparisons, funnels, gauges, citations, checklists, trees, documents, and the interactive kinds that pause the run for an answer. Each shown with the spec that produced it.`,
     tag: "@zzyzxlabs/super-chat-core + /ui",
+  },
+  {
+    href: "/agent-ui",
+    title: "Agent surfaces",
+    body: "The chrome around a turn: thinking that streams and collapses, status orbs, code blocks, to-do lists and the composer. The parts of an agent UI that are not cards.",
+    tag: "@zzyzxlabs/super-chat-ui",
+  },
+  {
+    href: "/dev-ani",
+    title: "Animations",
+    body: "Every motion primitive in the stylesheet, grouped by the job it does — loading, streaming, entrance, status — instead of by component. Named, timed, and replayable on demand.",
+    tag: "styles.css",
   },
   {
     href: "/skills",
@@ -28,6 +40,18 @@ const RESOURCES = [
     tag: "providers/openai",
   },
   {
+    href: "/app-state",
+    title: "App state",
+    body: "The agent reading and driving the host's own UI — a board it can see every turn and act on, through the same context-source and preset machinery everything else uses.",
+    tag: "createAppStateSource()",
+  },
+  {
+    href: "/documents",
+    title: "Documents",
+    body: "The sixth seam: an artifact the user keeps, a previewer they can quote from, and an edit protocol whose more important half is refusing. Drive the refusals yourself — no model needed.",
+    tag: "documents/",
+  },
+  {
     href: "/run",
     title: "Run & events",
     body: "A live agent turn with the raw RunEvent stream beside it. Tool calls, card emission, human-in-the-loop suspension and context assembly, as they happen.",
@@ -41,7 +65,8 @@ const FACTS = [
   ["Transport", "Pluggable. Server-proxy by default; BYOK-direct and scripted-demo also ship."],
   ["Context", "Rebuilt every turn under a token budget, with an inspectable trace."],
   ["Card kinds", `${BUILTIN_CARDS.length} built in, ${BUILTIN_CARDS.filter((c) => c.interactive).length} of them interactive.`],
-  ["Tests", "105, including the full runtime driven against a mocked transport."],
+  ["Documents", "A sixth persistence seam, with an edit protocol that refuses an ambiguous anchor rather than guessing."],
+  ["Tests", "367 unit, plus a browser suite across four viewports."],
 ];
 
 export default function OverviewPanel() {
