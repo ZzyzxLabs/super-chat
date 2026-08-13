@@ -28,6 +28,13 @@ export { Thinking, ThinkingState, type ThinkingProps } from "./Thinking.js";
 export { StreamingText, Caret, type StreamingTextProps } from "./StreamingText.js";
 export { CodeBlock, type CodeBlockProps } from "./CodeBlock.js";
 export { TodoList, type TodoListProps, type TodoItem, type TodoStatus } from "./TodoList.js";
+export { RollingCount } from "./RollingCount.js";
+export {
+  PlanProgress,
+  type PlanProgressProps,
+  type PlanStep,
+  type PlanStepStatus,
+} from "./PlanProgress.js";
 export {
   AgentInput,
   type AgentInputProps,

@@ -1732,6 +1732,303 @@
   background: conic-gradient(currentColor var(--sc-todo-pie, 0%), transparent 0);
 }
 
+/* ── plan progress ────────────────────────────────────────────────────────
+   Run-scoped ambient state, so it is styled to FILL its box and never to
+   place itself: no position, no width, no margin-inline. A framework that
+   ships "right sidebar" in the component has decided the host's layout for
+   it. What the component does own is density — collapsed, the list folds and
+   the segmented meter is left carrying progress on its own.
+
+   The motion is one idea, a thread advancing downward, told five ways:
+
+     spine fill    scaleY from the top as each step settles
+     drip          a light trickling down the ACTIVE step's spine only
+     check draw    stroke-dashoffset retracting on a pathLength="1" path
+     strike wipe   clip-path revealing a line-through overlay left to right
+     halo          two rings leaving the active node, half a cycle apart
+
+   Every one is transform, opacity or clip-path, so none of them read back
+   layout. The three that mark a state CHANGE (fill, draw, wipe) are
+   transitions rather than keyframes, which means they fire only when the
+   status actually flips and stay silent on mount — a list that arrives
+   already half-finished should not replay its own history. */
+
+.sc-plan {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sc-sp-8);
+  padding: var(--sc-sp-10) var(--sc-sp-12) var(--sc-sp-12);
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-radius);
+  background: var(--sc-surface);
+  color: var(--sc-text);
+  font-family: var(--sc-sans);
+  animation: sc-fade-in var(--sc-dur-3) var(--sc-ease-out) both;
+}
+
+.sc-plan__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sc-sp-8);
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: var(--sc-fs-ui);
+  text-align: left;
+  cursor: pointer;
+  min-height: 20px;
+}
+.sc-plan__head:disabled { cursor: default; }
+
+/* Collapsed, this slot holds the active step's label instead of the title, so
+   it has to be able to give way rather than push the count off the row. */
+.sc-plan__title {
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sc-plan__count { margin-left: auto; color: var(--sc-text-muted); font-variant-numeric: tabular-nums; }
+.sc-plan__chevron {
+  flex: none;
+  color: var(--sc-text-muted);
+  transition: transform var(--sc-dur-3) var(--sc-ease-out);
+  /* the path is an up caret; collapsed points down */
+  transform: rotate(180deg);
+}
+.sc-plan__head[aria-expanded="true"] .sc-plan__chevron { transform: rotate(0deg); }
+
+/* ── meter ─────────────────────────────────────────────────────────────
+   One segment per step, so it reads as "which" and not only "how far" — a
+   single bar at 60% cannot say that step 4 failed. Lives outside the
+   collapsible: folded, it is the only thing left carrying progress. */
+.sc-plan__meter { display: flex; gap: var(--sc-sp-2); }
+.sc-plan__seg {
+  position: relative;
+  flex: 1;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--sc-surface-2);
+  overflow: hidden;
+}
+.sc-plan__seg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--sc-accent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform var(--sc-dur-3) var(--sc-ease-out);
+  /* Staggered so a run that lands several steps at once fills left to right
+     instead of flashing the whole bar. */
+  transition-delay: calc(var(--sc-i, 0) * 40ms);
+}
+.sc-plan__seg[data-status="done"]::before { transform: scaleX(1); }
+.sc-plan__seg[data-status="skipped"]::before { transform: scaleX(1); background: var(--sc-text-muted); }
+.sc-plan__seg[data-status="failed"]::before { transform: scaleX(1); background: var(--sc-negative); }
+/* The running segment is full width but unfilled — a travelling highlight, so
+   "in progress" is distinguishable from "done" without reading the label. */
+.sc-plan__seg[data-status="active"]::before {
+  transform: scaleX(1);
+  background-image: linear-gradient(90deg, transparent, var(--sc-accent), transparent);
+  background-color: color-mix(in srgb, var(--sc-accent) 22%, transparent);
+  background-size: 55% 100%;
+  background-repeat: no-repeat;
+  animation: sc-plan-flow 1.6s linear infinite;
+}
+@keyframes sc-plan-flow {
+  from { background-position: -80% 0; }
+  to { background-position: 180% 0; }
+}
+
+/* ── list ──────────────────────────────────────────────────────────────── */
+
+.sc-plan__collapsible {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transition: grid-template-rows var(--sc-dur-3) var(--sc-ease-in-out), opacity 200ms ease;
+}
+.sc-plan__collapsible--closed { grid-template-rows: 0fr; opacity: 0; pointer-events: none; }
+.sc-plan__inner { min-height: 0; overflow: hidden; }
+
+.sc-plan__list { list-style: none; margin: 0; padding: var(--sc-sp-4) 0 0; display: grid; }
+
+/* No row gap: the spine has to cross it, and a gap is not something a child
+   can span. The vertical rhythm comes from the body's own padding instead,
+   which the rail — a sibling grid item — stretches across. */
+.sc-plan__step {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  column-gap: var(--sc-sp-10);
+  align-items: start;
+}
+
+.sc-plan__rail { display: flex; flex-direction: column; align-items: center; height: 100%; }
+
+.sc-plan__node {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1.5px solid var(--sc-border);
+  background: var(--sc-bg);
+  color: var(--sc-accent-contrast);
+  transition: background-color 260ms ease, border-color 260ms ease;
+}
+.sc-plan__step[data-status="active"] .sc-plan__node { border-color: var(--sc-accent); }
+.sc-plan__step[data-status="done"] .sc-plan__node { background: var(--sc-accent); border-color: var(--sc-accent); }
+.sc-plan__step[data-status="failed"] .sc-plan__node {
+  background: var(--sc-negative);
+  border-color: var(--sc-negative);
+  color: var(--sc-negative-contrast);
+}
+.sc-plan__step[data-status="skipped"] .sc-plan__node { border-style: dashed; color: var(--sc-text-muted); }
+
+.sc-plan__glyph { width: 12px; height: 12px; overflow: visible; }
+/* pathLength="1" normalises the geometry, so one dash covers the whole path
+   whatever the viewBox is and the offset never has to be re-measured. */
+.sc-plan__draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  /* delayed behind the node fill, so the disc lands and THEN the mark is
+     written on it — reversed, the check appears to be erased */
+  transition: stroke-dashoffset 420ms var(--sc-ease-out) 90ms;
+}
+.sc-plan__step[data-status="done"] .sc-plan__draw,
+.sc-plan__step[data-status="failed"] .sc-plan__draw,
+.sc-plan__step[data-status="skipped"] .sc-plan__draw { stroke-dashoffset: 0; }
+
+/* Two rings, half a cycle apart, so the pulse is continuous rather than
+   beating. They are siblings (halo + node::after) rather than nested: a ring
+   inside a scaling ring would compound the transforms. */
+.sc-plan__halo,
+.sc-plan__node::after {
+  content: "";
+  position: absolute;
+  inset: -1.5px;
+  border-radius: 50%;
+  border: 1.5px solid var(--sc-accent);
+  opacity: 0;
+  pointer-events: none;
+}
+.sc-plan__step[data-status="active"] .sc-plan__halo,
+.sc-plan__step[data-status="active"] .sc-plan__node::after {
+  animation: sc-plan-halo 2.1s var(--sc-ease-out) infinite;
+}
+.sc-plan__step[data-status="active"] .sc-plan__node::after { animation-delay: -1.05s; }
+@keyframes sc-plan-halo {
+  0% { transform: scale(1); opacity: 0.5; }
+  70%, 100% { transform: scale(2.15); opacity: 0; }
+}
+
+/* ── spine ─────────────────────────────────────────────────────────────
+   flex:1 inside a full-height rail, so it always reaches the next node
+   whatever the label wrapped to. */
+.sc-plan__spine {
+  position: relative;
+  flex: 1;
+  width: 2px;
+  min-height: var(--sc-sp-12);
+  margin: var(--sc-sp-4) 0;
+  border-radius: 999px;
+  background: var(--sc-border);
+  overflow: hidden;
+}
+.sc-plan__spine::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--sc-accent);
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform 520ms var(--sc-ease-out);
+}
+.sc-plan__step[data-status="done"] .sc-plan__spine::before { transform: scaleY(1); }
+.sc-plan__step[data-status="skipped"] .sc-plan__spine::before { transform: scaleY(1); background: var(--sc-text-muted); }
+
+/* The drip. Only on the active step, and the one motion here that is purely
+   ambient — it says "this is where the work is" to someone who looked away
+   and came back. Percentage geometry, so it scales with however tall the
+   label made the spine. */
+.sc-plan__spine::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -40%;
+  height: 40%;
+  border-radius: 999px;
+  background: linear-gradient(to bottom, transparent, var(--sc-accent), transparent);
+  opacity: 0;
+}
+.sc-plan__step[data-status="active"] .sc-plan__spine::after {
+  animation: sc-plan-drip 1.45s var(--sc-ease-in-out) infinite;
+}
+@keyframes sc-plan-drip {
+  0% { top: -40%; opacity: 0; }
+  25%, 72% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}
+
+/* ── step body ─────────────────────────────────────────────────────────── */
+
+.sc-plan__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sc-sp-2);
+  min-width: 0;
+  padding-bottom: var(--sc-sp-16);
+}
+/* A thread continuing past the last node implies work that is not there. */
+.sc-plan__step[data-last] .sc-plan__body { padding-bottom: 0; }
+
+.sc-plan__label {
+  position: relative;
+  display: block;
+  font-size: var(--sc-fs-ui);
+  line-height: var(--sc-lh-ui);
+  color: var(--sc-text-muted);
+  transition: color 320ms ease;
+}
+.sc-plan__step[data-status="active"] .sc-plan__label { color: var(--sc-text); font-weight: 500; }
+.sc-plan__step[data-status="failed"] .sc-plan__label { color: var(--sc-negative); }
+
+/* The strike is an overlay COPY of the label, clipped left to right. Three
+   things this buys over the obvious approaches: it wipes rather than fades
+   (which text-decoration-color alone cannot do), it strikes every line of a
+   wrapped label (which one absolutely-positioned bar cannot), and if the
+   overlay fails to paint at all the real label underneath is untouched — the
+   same failure reasoning as the to-do shimmer. */
+.sc-plan__label::after {
+  content: attr(data-label);
+  position: absolute;
+  inset: 0;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-decoration: line-through;
+  text-decoration-color: var(--sc-text-muted);
+  text-decoration-thickness: 1px;
+  clip-path: inset(0 100% 0 0);
+  transition: clip-path 520ms var(--sc-ease-out);
+  pointer-events: none;
+}
+.sc-plan__step[data-status="done"] .sc-plan__label::after,
+.sc-plan__step[data-status="skipped"] .sc-plan__label::after { clip-path: inset(0 0 0 0); }
+
+.sc-plan__detail { font-size: var(--sc-fs-meta); line-height: var(--sc-lh-ui); color: var(--sc-text-muted); }
+/* A finished step's detail is history: still readable, no longer competing. */
+.sc-plan__step[data-status="done"] .sc-plan__detail,
+.sc-plan__step[data-status="skipped"] .sc-plan__detail { opacity: 0.6; }
+
 /* ── data table (bordered grid variant) ───────────────────────────────── */
 
 .sc-table--grid { border-collapse: separate; border-spacing: 0; border: 1px solid var(--sc-border); border-radius: var(--sc-radius); overflow: hidden; background: var(--sc-bg); }
@@ -2029,6 +2326,34 @@
   .sc-todo__icon,
   .sc-todo__label,
   .sc-roll__inner { transition: none; }
+
+  /* The plan's resting frames. Every state it can be in still has to be
+     readable from the still image: the spine stays filled to the last settled
+     step, the check stays drawn, the strike stays struck. What goes is only
+     the travel — the two ambient loops (halo, drip) have no resting frame
+     worth pinning because their whole content is motion, so they simply never
+     start, and the accent ring on the active node carries "here" instead. */
+  .sc-plan,
+  .sc-plan__halo,
+  .sc-plan__node::after,
+  .sc-plan__spine::after,
+  .sc-plan__seg[data-status="active"]::before { animation: none; }
+
+  .sc-plan__chevron,
+  .sc-plan__collapsible,
+  .sc-plan__node,
+  .sc-plan__label,
+  .sc-plan__draw,
+  .sc-plan__seg::before,
+  .sc-plan__spine::before { transition: none; }
+
+  /* Without its sweep the gradient would sit frozen mid-bar, reading as a
+     half-finished step rather than a running one. Solid, dimmed against the
+     completed segments, says the same thing standing still. */
+  .sc-plan__seg[data-status="active"]::before {
+    background-image: none;
+    background-color: color-mix(in srgb, var(--sc-accent) 55%, transparent);
+  }
 
   .sc-orb__cell,
   .sc-orb__shape,
@@ -2454,4 +2779,13 @@
   }
 
   .sc-ai__chip { max-width: 60cqw; }
+}
+
+/* plan — queries .sc-plan, so it compacts on its own width. This is the case
+   the container/media split exists for: the plan's natural home is a narrow
+   rail inside a wide window, where a media query would answer confidently and
+   wrongly. */
+@container (max-width: 600px) {
+  .sc-plan__step { column-gap: var(--sc-sp-8); }
+  .sc-plan__body { padding-bottom: var(--sc-sp-12); }
 }
