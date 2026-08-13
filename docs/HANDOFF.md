@@ -19,14 +19,15 @@ apps/playground   Next.js dev panels. runs with NO API key.
 
 ```bash
 pnpm install && pnpm build && pnpm dev     # → http://localhost:3210
-pnpm test                                  # 276 tests, ~5s
-pnpm test:rwd                              # 64 browser checks, 4 viewports
+pnpm test                                  # 367 tests, ~3s
+pnpm test:rwd                              # 140 browser checks, 4 viewports
 ```
 
-The playground is **not a product**. It is six panels, one per capability, aimed
-at a developer evaluating the framework: `/cards` `/skills` `/tools` `/requests`
-`/run`. That framing was an explicit instruction — don't quietly turn it back
-into an app.
+The playground is **not a product**. It is one panel per capability, aimed at a
+developer evaluating the framework: `/cards` `/agent-ui` `/skills` `/tools`
+`/requests` `/app-state` `/documents` `/run`. That framing was an explicit
+instruction — don't quietly turn it back into an app. A new capability gets a
+panel; it does not get a feature in an app that happens to live here.
 
 **Naming**: resolved. The framework was called `agentloom` and is now **superchat**,
 matching the repo — CSS prefix `sc-`, storage keys `superchat:*`. Nothing in the
@@ -75,6 +76,28 @@ request, or prompt caching never hits.
 **Presets are allowlists.** A newly registered tool is invisible until someone
 puts it in one. Do not "improve" this into a denylist.
 
+**A document is a sixth persistence seam, deliberately not an app-state
+binding.** The other five all mismatch: `FileStore` holds immutable provider
+refs and a document changes; `ThreadStore` is trimmed by compaction and a
+document outlives its thread; `MemoryStore` has no notion of position, so
+nothing to address; `Retriever` is read-only; and `app-state`'s own header rules
+out "diffing, CRDT, bidirectional sync". That last exclusion is right for UI
+state and wrong for documents, because **for a document the diff IS the
+product** — it is what the user approves. Don't merge the two into a "general
+state seam" later; the reasoning is written down in
+`packages/core/src/documents/types.ts` for exactly that reason.
+
+**Block indices are anchors, and `splitBlocks` is their only definition.** A
+quote resolves a DOM selection to a block index; an edit resolves that same
+index back to text it may rewrite. Both call
+`packages/core/src/content/blocks.ts`, which is why it lives in core rather than
+beside the renderer. Changing how it splits changes what every existing anchor
+points at, and the damage is silent — a quote pointing at block 4 and an edit
+landing in block 5 both look correct until someone reads the result. The
+markdown renderer must keep classifying blocks on the RAW source too: escaping
+before recording offsets shifts every span by the growth of `&` → `&amp;`, and
+the page still renders perfectly while every anchor is wrong.
+
 **Cards register validator + renderer together.** `BUILTIN_CARDS` (core) and
 `BUILTIN_RENDERERS` (ui) are asserted equal by
 `packages/ui/src/cards/registry-sync.test.ts`. This exists because the reference
@@ -120,6 +143,21 @@ has a regression test now; the test names spell out the failure.
 7. **SSE decoder state was module-level**, so two concurrent streams would
    interleave into garbage. Per-instance now.
 
+8. **Showing the quote bar destroyed the selection it was about.** Passing a
+   fresh `{__html}` object to `dangerouslySetInnerHTML` on every render makes
+   React re-apply `innerHTML` even when the string is identical; that rebuilds
+   every child node, and a selection living in those nodes collapses with them.
+   The `Range` was right, the offsets were right, every unit test passed —
+   nothing outside a real browser could see it. `inner` in
+   `packages/ui/src/cards/Document.tsx` is memoised for IDENTITY, not for cost.
+
+9. **A fence was anything starting with ```` ``` ````.** So a four-backtick
+   block closed on the three-backtick one inside it and shattered into four
+   blocks with the code stranded as prose, and a `~~~` fence was not recognised
+   at all — which left the next ``` in the document opening one that ran to the
+   end. Both mis-place every anchor after them while the page still renders
+   plausibly. Fences now match on character and length.
+
 ---
 
 ## Things that will bite you
@@ -164,7 +202,7 @@ generic, but each kind's one-line `summary` said things like "portfolio totals",
 schemas. Industry vocabulary there skews every agent built on the kit toward that
 industry. If you add a card kind, write its summary with no domain nouns in it.
 
-The 20 kinds are grouped in `cards/builtin.ts` by what they *do*: structured data,
+The 23 kinds are grouped in `cards/builtin.ts` by what they *do*: structured data,
 quantitative shape, sequence and state, prose and evidence, interactive. The
 demo agent covers contract review, marketing analytics and market data through
 one registry — keep it that way; it is the proof that the machinery is neutral.
@@ -204,18 +242,60 @@ knowing before touching the stylesheet:
   wrapper, or those cards keep desktop padding at any width. Card internals
   are fine either way.
 
-`pnpm test:rwd` runs the browser layer (64 checks across 360/390/768/1280 —
+`pnpm test:rwd` runs the browser layer (140 checks across 360/390/768/1280 —
 the last a desktop regression guard, not a tier). It
 needs Chromium; see the note in `playwright.config.ts` about pointing at a
 preinstalled binary.
+
+**Documents landed after that** (UI-SPEC Phase 6, batches N1–N6): an artifact
+the user keeps, a previewer they can quote from, an edit protocol that lands
+only through a diff they approved hunk by hunk, and `.eml` as the way out. Five
+things to know before touching it:
+
+- **The refusals are the feature.** Half of `applyEdits` rejects: a `find` that
+  matches nothing means the model is quoting text that is not there, and one
+  that matches twice means it has not said which. First-match-wins is the
+  tempting fallback and the dangerous one — it puts a change somewhere nobody
+  asked for and then presents it for approval as though it were intended. The
+  diff reads fine, so the user says yes.
+- **Undo is a checkout, never an inverse edit**, and it mints a *new* revision
+  rather than rolling the number back, so an edit proposed against the undone
+  text is refused instead of silently applied to text that no longer exists.
+- **A quote belongs to the user's message, not to app-state.** app-state is
+  re-read every turn (history would replay the wrong span), goes stale on the
+  next selection, and is droppable under budget pressure — and dropping a
+  paragraph the user deliberately highlighted loses part of what they *said*.
+  It flattens into the message text; the structured form rides on `metadata`,
+  which never reaches a provider. No adapter changes.
+- **The previewer renders and selects. It is not an editor.** No toolbar, no
+  caret, no `contentEditable`. That boundary is what keeps it a component rather
+  than the visual builder this document rules out. If a host wants typing, what
+  the framework hands them is Markdown plus anchors.
+- **`listDocuments` is what makes the rest reachable.** A docId otherwise lives
+  only in the transcript, which compaction trims and a new thread never had.
 
 What is genuinely open:
 
 1. **A third provider (Gemini).** Two adapters proved the normalized content
    model holds; a third is now routine rather than risky.
-2. **Nobody has driven the app-state panel against a live model.** The demo
-   transport is scripted, so the board actions are exercised by tests and by
-   hand — not by an actual model deciding to call them.
+2. **Nobody has driven the app-state or documents panels against a live model.**
+   The demo transport is scripted, so the board actions and the document tools
+   are exercised by tests and by hand — not by an actual model deciding to call
+   them. For documents specifically, whether the outline is a good enough map to
+   steer by is a question only a real model answers.
+3. **`undoDocument` walks one step and then ping-pongs.** It always restores
+   `history[0]`, and undoing pushes the current body onto that history — so the
+   second undo is a redo. It needs a cursor, or an explicit `toRevision`.
+4. **`editDocument` reuses the body it read before the approval await.** The
+   comment above it claims otherwise. The store's revision check is a real
+   backstop, but it throws rather than returning a rejection the model can act
+   on, so a concurrent edit surfaces as an error instead of a retry.
+5. **A quote records the revision it came from and nothing compares it.** The
+   drift the field exists to detect is not detected yet.
+6. **Layer 3 (real device) is still unrun**, and nobody has looked at the
+   document surfaces with human eyes. iOS's native selection UI fighting the
+   quote affordance is the known high-risk item — the classic "fine on desktop,
+   unusable on a phone" shape.
 
 
 Deliberately *not* done, and worth leaving alone unless asked: multi-agent

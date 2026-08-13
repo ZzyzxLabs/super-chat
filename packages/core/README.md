@@ -17,11 +17,13 @@ design decisions.
 | `context` | derives a token-budgeted context from named sources every turn |
 | `skills` | trigger + cost units that inject prompt text and unlock tools |
 | `tools` | capability registry with explicit preset allowlists |
-| `cards` | validator + schema for the 20 built-in agent-card kinds |
+| `cards` | validator + schema for the 23 built-in agent-card kinds |
 | `runtime` | the agent loop, tool execution, background job polling |
 | `memory`, `retrieval` | pluggable long-term memory and cited-evidence retrieval seams |
 | `mcp` | Streamable HTTP MCP client and tool import |
 | `app-state` | lets the agent read/operate host application state |
+| `documents` | the document seam: store, anchored edit protocol, `.eml` exit |
+| `content/blocks` | the block split every document anchor is defined against |
 
 ## Install
 

@@ -22,7 +22,7 @@ apps/playground    Next.js dev panels — one per capability, no API key needed 
 ## Why this exists
 
 Open WebUI, LibreChat, LobeChat and AnythingLLM are excellent *products*. When you
-need an agent surface inside your own product, you end up rebuilding the same four
+need an agent surface inside your own product, you end up rebuilding the same five
 subsystems anyway — and each one has a failure mode that only shows up in
 production:
 
@@ -32,12 +32,13 @@ production:
 | **Context assembly** | History grows, silently starves the system prompt, and the model "forgets" its rules. Reads like a prompt problem; isn't. |
 | **Capability scoping** | Tools accumulate. The day you add a destructive one, it is already live on every key you ever minted. |
 | **Agent cards** | A hand-maintained parser/renderer dispatch chain drifts, and a card silently degrades to a "ran ✓" chip. |
+| **Documents** | The agent rewrites the wrong paragraph, the diff looks plausible, and the user approves it. |
 
-superchat takes a position on all four.
+superchat takes a position on all five.
 
 ---
 
-## The four subsystems
+## The five subsystems
 
 ### 1. Request crafting — hand-rolled, both dialects, async first-class
 
@@ -131,7 +132,7 @@ Two ways a card appears: a domain tool attaches one to its result, or the agent
 calls `visualize` and **chooses** a presentation. The second is what makes it
 visually flexible rather than limited to whatever someone pre-built.
 
-20 built-in kinds, chosen to span what agents actually need to express rather
+23 built-in kinds, chosen to span what agents actually need to express rather
 than one industry's habits:
 
 | group | kinds |
@@ -140,7 +141,8 @@ than one industry's habits:
 | quantitative shape | `chart` `funnel` `gauge` |
 | sequence and state | `timeline` `progress` `checklist` |
 | prose and evidence | `markdown` `callout` `citations` `code` `diff` `media` |
-| **interactive** | `choice` `form` `confirm` |
+| artifacts | `document` `email` |
+| **interactive** | `choice` `form` `confirm` `editreview` |
 
 `comparison` is the most portable of them — legal clause-vs-clause, vendor
 selection, pricing tiers, candidate evaluation all reduce to options × criteria.
@@ -174,6 +176,65 @@ Three rules the design enforces:
 
 Card payloads are stripped from history before the next request — the model
 already read the tool's `output`; re-sending 2,000 chart points is double billing.
+
+---
+
+### 5. Documents — the diff is the product
+
+A document is the sixth thing this framework persists, and none of the other
+five fits: `FileStore` holds immutable provider refs and a document changes,
+`ThreadStore` is trimmed by compaction and a document outlives its thread,
+`MemoryStore` has no notion of position so there is nothing to address,
+`Retriever` is read-only, and the app-state seam explicitly rules out diffing.
+
+That last exclusion is right for UI state and wrong here, which is the whole
+reason this is its own module: **for a document the diff is the product**,
+because the diff is what the user approves.
+
+The loop closes. The agent produces something the user keeps; they read it in a
+previewer; they select part of it to ask about that part; changes land only
+through a diff they accepted hunk by hunk; the result leaves as an `.eml`.
+
+```ts
+const tools = createDocumentTools({ store });   // list, create, read, edit, undo
+```
+
+Storage stays yours — `DocumentStore` mirrors `ThreadStore` and `FileStore`, and
+memory and localStorage reference implementations ship. What the framework owns
+is the protocol and the approval surface, the same line Transport draws when it
+refuses to hold a credential.
+
+**Half of `applyEdits` is refusal, and that half is the point.** An anchor that
+matches nothing means the model is quoting text that is not there; one that
+matches twice means it has not said which. Neither is guessed at:
+
+```ts
+applyEdits(doc, [{ find: "Contoso", replace: "Contoso Ltd" }])
+// → { ok: false, reason: "ambiguous",
+//     message: "That text appears 3 times. Include more surrounding text, or name the block." }
+```
+
+First-match-wins is the tempting fallback and the dangerous one. It puts a
+change somewhere nobody asked for and then presents it for approval as though it
+were intended — and the diff reads fine, so the user says yes. A rejection the
+model can see is a retry; a wrong guess is a wrong document.
+
+Three more decisions worth knowing:
+
+- **Undo is a checkout of a stored body, never a computed inverse**, and it
+  mints a *new* revision rather than rolling the number back — so an edit
+  proposed against the undone text is refused, not silently applied to text that
+  no longer exists.
+- **A quote is part of the user's message, not app-state.** app-state is re-read
+  every turn, goes stale on the next selection, and is droppable under budget
+  pressure — and dropping a paragraph the user deliberately highlighted loses
+  part of what they *said*.
+- **The previewer renders and selects. It is not an editor.** No toolbar, no
+  caret, no `contentEditable`. If you want typing, what you get from the
+  framework is Markdown plus anchors, and the product decision stays yours.
+
+`/documents` in the playground drives all of it with no model — including the
+refusals, which a scripted demo never triggers.
 
 ---
 
@@ -244,10 +305,13 @@ real adapter, runtime, tools and context builder do the actual work.
 | panel | what it shows |
 | --- | --- |
 | `/` | Overview — what's in the box |
-| `/cards` | All 20 card kinds, each beside the spec that produced it |
+| `/cards` | All 23 card kinds, each beside the spec that produced it |
+| `/agent-ui` | The chrome around a turn: thinking, orbs, code, to-dos, composer |
 | `/skills` | Live match scoring, and the context a query assembles |
 | `/tools` | Schemas, preset gating, the exposed set changing as you toggle |
 | `/requests` | One request rendered into both dialects, side by side |
+| `/app-state` | The agent reading and driving the host's own UI |
+| `/documents` | The previewer, quoting, and the edit refusals — driven by hand |
 | `/run` | A live turn with the raw event stream and context trace beside it |
 
 The demo agent covers **contract review, marketing analytics and market data**
@@ -281,16 +345,26 @@ switcher), MCP tool import (hand-rolled Streamable HTTP client, elicitation via
 interactive form cards, `createMcpSkill` for the relevance half), memory seam
 (`MemoryStore` + context source + `remember` tool), retrieval seam (`Retriever`
 + cited-evidence context source + lexical reference impl), skills, context
-assembly, tools + presets, 20 card kinds, React bindings, UI kit, dev panels.
+assembly, tools + presets, 23 card kinds, React bindings, UI kit, dev panels.
 
 Also built: an **app-state seam** (the agent reads and operates host
 application state through the same context-source and tool machinery), a REST
-`ThreadStore` alongside the memory and localStorage ones, and **provider-native
+`ThreadStore` alongside the memory and localStorage ones, **provider-native
 tool passthrough** (web search, code interpreter — declared per provider, their
-activity surfaced in the transcript).
+activity surfaced in the transcript), **responsive support** (two
+container-query tiers for width, media queries for device traits — a phone can
+hold a conversation end to end), and the **document seam** (artifacts, a
+quotable previewer, an anchored edit protocol with hunk-by-hunk approval, and
+`.eml` as the way out).
 
 **Not built yet:** a Gemini adapter, and voice / image generation (out of scope
 for a framework — they belong to the host's own product surface).
+
+**Known gaps**, kept here rather than in a tracker so they are read: `undo`
+walks one step back and then ping-pongs between two revisions; a document quote
+records the revision it came from and nothing yet compares it; and nobody has
+driven the document tools against a live model or looked at the document
+surfaces on a real phone. `docs/HANDOFF.md` has the detail.
 
 Prior art read closely: Open WebUI's tools/functions/knowledge split, LibreChat's
 multi-provider handling, and the Sup Wallet agent in `zzyzx-full-repo` — whose
