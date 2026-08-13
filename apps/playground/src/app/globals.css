@@ -220,3 +220,26 @@ html, body {
 .dev__score { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .dev__scorebar { flex: 1; height: 4px; border-radius: 999px; background: var(--sc-surface-2); overflow: hidden; max-width: 130px; }
 .dev__scorefill { height: 100%; background: var(--sc-accent); }
+
+/* animation catalog (/dev-ani) — one tile per motion, name + timing in the foot */
+.dev__anigrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.dev__ani {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--sc-border);
+  border-radius: var(--sc-radius);
+  background: var(--sc-surface);
+}
+.dev__ani-demo { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 44px; }
+.dev__ani-foot { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.dev__ani-name { font-size: 11px; font-weight: 600; }
+.dev__ani-timing { font-size: 10px; color: var(--sc-text-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* The plan is shown at two widths at once, to make the container query the
+   point: the narrow copy compacts on its own measurement, not the window's. */
+.dev__planrow { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 18px; align-items: start; }
+@media (max-width: 900px) {
+  .dev__planrow { grid-template-columns: minmax(0, 1fr); }
+}
