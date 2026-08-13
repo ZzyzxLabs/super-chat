@@ -63,13 +63,25 @@ function populateToolRegistry(registry: ToolRegistry): void {
   // is a read-tier act — it changes nothing outside the conversation's memory.
   registry.register(createRememberTool(memoryStore), ["observer"]);
 
-  // Documents. Reading is an observer act; creating and editing change
-  // something the user keeps, so they sit behind `executor` — and editDocument
-  // additionally cannot write without an approved diff, which is a second gate
-  // rather than a substitute for the first.
-  const [createDoc, readDoc, editDoc, undoDoc] = createDocumentTools({ store: documentStore });
-  registry.register(readDoc!, ["observer"]);
-  registry.registerAll([createDoc!, editDoc!, undoDoc!], ["executor"]);
+  // Documents. Listing and reading are observer acts; creating and editing
+  // change something the user keeps, so they sit behind `executor` — and
+  // editDocument additionally cannot write without an approved diff, which is a
+  // second gate rather than a substitute for the first.
+  //
+  // Looked up by NAME rather than destructured positionally: the tier a tool
+  // gets is a security decision, and binding it to an array index means adding
+  // a tool at the front silently hands the wrong one the executor tier.
+  const documentTools = new Map(createDocumentTools({ store: documentStore }).map((t) => [t.name, t]));
+  const documentTool = (name: string) => {
+    const tool = documentTools.get(name);
+    if (!tool) throw new Error(`createDocumentTools no longer returns ${name}.`);
+    return tool;
+  };
+  registry.registerAll([documentTool("listDocuments"), documentTool("readDocument")], ["observer"]);
+  registry.registerAll(
+    [documentTool("createDocument"), documentTool("editDocument"), documentTool("undoDocument")],
+    ["executor"],
+  );
 
   // Drafting an email is the `draft` tier by definition: it produces something
   // the user signs and sends. There is no send path here and no credential.

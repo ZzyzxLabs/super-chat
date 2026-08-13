@@ -285,3 +285,67 @@ test("a long body warns before the user clicks, not after", async ({ page }) => 
   await expect(email.locator(".sc-email__warn")).toBeVisible();
   await expect(email.locator(".sc-email__warn")).toContainText(".eml");
 });
+
+// ── The documents panel ──────────────────────────────────────────────────────
+//
+// The panel drives the seam with no model, which makes it the only place a
+// browser test can reach the REFUSALS — the half of the edit protocol that
+// matters most and that a scripted demo transport never triggers.
+
+test("the panel renders the constructs a report is actually made of", async ({ page }) => {
+  await settle(page, "/documents");
+  const body = page.locator(".sc-doc__body").first();
+
+  // Each of these came out as literal punctuation until the renderer grew past
+  // what a chat bubble needs.
+  await expect(body.locator("table")).toHaveCount(1);
+  await expect(body.locator("blockquote")).toHaveCount(1);
+  await expect(body.locator("ol > li")).toHaveCount(2);
+  await expect(body.locator("pre code")).toHaveCount(1);
+  await expect(body).not.toContainText("|---");
+});
+
+test("a wide table scrolls inside its own box, never the page", async ({ page }) => {
+  await settle(page, "/documents");
+
+  // The hard RWD limit (UI-SPEC 5.1.3): nothing may make the page scroll
+  // sideways. A table is the most common way that happens, and at 360px almost
+  // any table is wider than the column it sits in.
+  const overflow = await page.evaluate(() => {
+    const de = document.documentElement;
+    const table = document.querySelector<HTMLElement>(".sc-doc__body table")!;
+    return {
+      page: de.scrollWidth > de.clientWidth,
+      containedX: getComputedStyle(table).overflowX,
+    };
+  });
+  expect(overflow.page).toBe(false);
+  expect(overflow.containedX).toBe("auto");
+});
+
+test("an ambiguous anchor is refused with its reason, and nothing is written", async ({ page }) => {
+  await settle(page, "/documents");
+  await expect(page.locator(".sc-doc__rev").first()).toHaveText("v1");
+
+  await page.getByRole("button", { name: "Anchor that matches twice" }).click();
+
+  const refusal = page.locator(".sc-callout--negative");
+  await expect(refusal).toBeVisible();
+  await expect(refusal).toContainText("ambiguous");
+  // The point of the refusal: no diff was offered, so there is nothing to
+  // approve, so the document cannot have moved.
+  await expect(page.locator(".sc-editreview")).toHaveCount(0);
+  await expect(page.locator(".sc-doc__rev").first()).toHaveText("v1");
+});
+
+test("accepting a hunk rewrites the document and bumps the revision", async ({ page }) => {
+  await settle(page, "/documents");
+  const body = page.locator(".sc-doc__body").first();
+  await expect(body).toContainText("Recommendation");
+
+  await page.getByRole("button", { name: "Rename a heading" }).click();
+  await page.getByRole("button", { name: /^Apply/ }).click();
+
+  await expect(body).toContainText("What we recommend");
+  await expect(page.locator(".sc-doc__rev").first()).toHaveText("v2");
+});
