@@ -20,6 +20,8 @@
 // the approval surface — the same division Transport draws when it refuses to
 // hold a credential.
 
+import type { MarkdownBlockKind } from "../content/blocks.js";
+
 export type DocumentSnapshot = {
   id: string;
   title: string;
@@ -61,8 +63,8 @@ export type DocumentStore = {
 /** One navigable entry in a document's outline. */
 export type DocumentOutlineEntry = {
   block: number;
-  kind: "fence" | "text";
-  /** 1–3 for a heading block; absent otherwise. */
+  kind: MarkdownBlockKind;
+  /** 1–6 for a heading block; absent otherwise. */
   level?: number;
   /** First line, trimmed — enough to steer by without paying for the body. */
   preview: string;

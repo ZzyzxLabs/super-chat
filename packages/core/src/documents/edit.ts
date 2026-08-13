@@ -14,7 +14,7 @@ import type {
 } from "./types.js";
 
 const headingLevel = (line: string): number | undefined => {
-  const m = /^(#{1,3})\s/.exec(line);
+  const m = /^ {0,3}(#{1,6})\s/.exec(line);
   return m ? m[1]!.length : undefined;
 };
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyEdits, hunksOf, outlineOf, searchBlocks, spanOf } from "./edit.js";
 import { buildEml, buildMailto, emlFilename, MAILTO_SAFE_LENGTH } from "./email.js";
 import { createMemoryDocumentStore } from "./store.js";
+import { createDocumentTools } from "./tools.js";
 import type { EmailCard } from "../cards/types.js";
 
 const DOC = [
@@ -217,6 +218,67 @@ describe("DocumentStore", () => {
   });
 });
 
+// A docId only ever reaches the model inside a tool result, which lives in the
+// transcript — and the transcript is trimmed by compaction and absent from a
+// new thread. Without an index the store keeps the document and the agent
+// cannot name it, which is the "outlives its thread" claim failing in the one
+// place it was made for.
+describe("listDocuments", () => {
+  const toolNamed = (name: string, opts: Parameters<typeof createDocumentTools>[0]) => {
+    const tool = createDocumentTools(opts).find((t) => t.name === name);
+    if (!tool) throw new Error(`no ${name}`);
+    return tool;
+  };
+  const run = async (tool: ReturnType<typeof toolNamed>, input: Record<string, unknown>) => {
+    // `execute` is optional on ToolDefinition — an absent one means the host
+    // runs the tool. These have theirs, and asserting it is part of the test.
+    if (!tool.execute) throw new Error(`${tool.name} has no execute`);
+    const result = (await tool.execute(input, {} as never)) as { output: Record<string, unknown> };
+    return result.output;
+  };
+
+  it("names every document, newest first, without any of their bodies", async () => {
+    const store = createMemoryDocumentStore();
+    await store.create({ title: "Older", markdown: "# A\n\nbody of the older one" });
+    await store.create({ title: "Newer", markdown: "# B\n\nbody" });
+
+    const out = await run(toolNamed("listDocuments", { store }), {});
+    const docs = out["documents"] as { title: string; blocks: number }[];
+    expect(docs.map((d) => d.title)).toEqual(["Newer", "Older"]);
+    expect(docs[0]!.blocks).toBe(2);
+    expect(JSON.stringify(out)).not.toContain("body of the older one");
+  });
+
+  it("filters on the title, case-insensitively", async () => {
+    const store = createMemoryDocumentStore();
+    await store.create({ title: "Vendor review", markdown: "x" });
+    await store.create({ title: "Launch note", markdown: "y" });
+
+    const out = await run(toolNamed("listDocuments", { store }), { query: "VENDOR" });
+    expect((out["documents"] as unknown[]).length).toBe(1);
+  });
+
+  // Reported, not silent — for the same reason a truncated span is. A model
+  // that believes it has seen every document tells the user theirs is gone.
+  it("says so when it has more documents than it listed", async () => {
+    const store = createMemoryDocumentStore();
+    for (let i = 0; i < 5; i += 1) await store.create({ title: `Doc ${i}`, markdown: "x" });
+
+    const out = await run(toolNamed("listDocuments", { store, maxListed: 2 }), {});
+    expect((out["documents"] as unknown[]).length).toBe(2);
+    expect(out["total"]).toBe(5);
+    expect(out["truncated"]).toBe(true);
+  });
+
+  // The playground grants tiers by name for this reason; the order here is not
+  // a contract, but the SET is, and a tool quietly disappearing from it would
+  // otherwise only show up as an agent that cannot find anything.
+  it("ships the whole document loop", () => {
+    const names = createDocumentTools({ store: createMemoryDocumentStore() }).map((t) => t.name).sort();
+    expect(names).toEqual(["createDocument", "editDocument", "listDocuments", "readDocument", "undoDocument"]);
+  });
+});
+
 describe("email exits", () => {
   const email: EmailCard = {
     kind: "email",
@@ -267,6 +329,54 @@ describe("email exits", () => {
   it("encodes a non-ASCII subject as an RFC 2047 word", () => {
     const eml = buildEml({ ...email, subject: "報價單" });
     expect(eml).toMatch(/Subject: =\?UTF-8\?B\?/);
+  });
+
+  // 998 octets is a MUST, not a style note: past it a strict parser is entitled
+  // to refuse the message. One long unwrapped paragraph reaches it easily, and
+  // one long unwrapped paragraph is what a model writes by default.
+  it("carries a paragraph past the 998-octet line limit instead of emitting an illegal line", () => {
+    const eml = buildEml({ ...email, body: `Dear counsel, ${"the clause is unenforceable. ".repeat(80)}` });
+    expect(eml).toContain("Content-Transfer-Encoding: quoted-printable");
+    for (const line of eml.split("\r\n")) expect(line.length).toBeLessThanOrEqual(998);
+  });
+
+  it("leaves a short body as plain 8bit rather than encoding what does not need it", () => {
+    const eml = buildEml(email);
+    expect(eml).toContain("Content-Transfer-Encoding: 8bit");
+    expect(eml).toContain("The redline is attached.");
+  });
+
+  // Soft breaks are what make quoted-printable lossless: the receiver rejoins
+  // them, so the letter that arrives is the letter that was written.
+  it("uses soft breaks that decode back to the original text", () => {
+    const body = `Dear counsel, ${"the clause is unenforceable. ".repeat(80)}`;
+    const eml = buildEml({ ...email, body });
+    const encoded = eml.split("\r\n\r\n").slice(1).join("\r\n\r\n");
+    const decoded = encoded
+      .replace(/=\r\n/g, "")
+      .replace(/=([0-9A-F]{2})/g, (_all, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+    expect(decoded).toBe(body);
+  });
+
+  it("splits a long non-ASCII subject into encoded-words that each fit in 75 chars", () => {
+    const eml = buildEml({ ...email, subject: "報價單與合約條款的完整檢視，含續約通知期與資安要求".repeat(3) });
+    const words = eml.match(/=\?UTF-8\?B\?[^?]+\?=/g) ?? [];
+    expect(words.length).toBeGreaterThan(1);
+    for (const w of words) expect(w.length).toBeLessThanOrEqual(75);
+    // Every word decodes on its own — a split through a UTF-8 sequence would
+    // put a replacement character in the middle of the subject.
+    const joined = words.map((w) => Buffer.from(w.slice(10, -2), "base64").toString("utf8")).join("");
+    expect(joined).not.toContain("�");
+  });
+
+  it("folds a long recipient list at the commas, with continuation lines indented", () => {
+    const many = Array.from({ length: 8 }, (_, i) => `person${i}@a-fairly-long-domain.example.com`);
+    const eml = buildEml({ ...email, to: many });
+    const header = eml.split("\r\n").slice(0, eml.split("\r\n").findIndex((l) => l.startsWith("Cc:")));
+    expect(header.length).toBeGreaterThan(1);
+    for (const line of header.slice(1)) expect(line.startsWith(" ")).toBe(true);
+    // Unfolding restores the list exactly.
+    expect(header.join("").replace(/\s+/g, " ")).toBe(`To: ${many.join(", ")}`);
   });
 
   it("makes a filesystem-safe filename from the subject", () => {

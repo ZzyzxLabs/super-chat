@@ -18,6 +18,18 @@ const MAX_HISTORY = 20;
 let counter = 0;
 const mintId = () => `doc_${Date.now().toString(36)}${(counter += 1).toString(36)}`;
 
+/**
+ * Newest first, with insertion order as the tie-break.
+ *
+ * `updatedAt` is a millisecond clock and two documents created in the same tick
+ * tie on it — which a plain sort resolves as insertion order, i.e. oldest
+ * first, i.e. exactly backwards. Both stores hold their documents in insertion
+ * order, so reversing before a stable sort puts the later one ahead of the
+ * earlier one whenever the timestamps cannot separate them.
+ */
+const byRecency = (docs: DocumentSnapshot[]): DocumentSnapshot[] =>
+  [...docs].reverse().sort((a, b) => b.updatedAt - a.updatedAt);
+
 const staleError = (id: string, expected: number, actual: number) =>
   new AgentError(
     "invalid-request",
@@ -30,7 +42,7 @@ export function createMemoryDocumentStore(): DocumentStore {
 
   return {
     async list() {
-      return [...docs.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+      return byRecency([...docs.values()]);
     },
     async get(id) {
       return docs.get(id);
@@ -101,7 +113,7 @@ export function createLocalDocumentStore(key = "superchat:documents"): DocumentS
 
   return {
     async list() {
-      return Object.values(read().docs).sort((a, b) => b.updatedAt - a.updatedAt);
+      return byRecency(Object.values(read().docs));
     },
     async get(id) {
       return read().docs[id];

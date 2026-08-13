@@ -19,6 +19,15 @@ export type DocumentToolsOptions = {
   store: DocumentStore;
   /** Cap on what a single read returns, so one call cannot flood context. */
   maxSpanChars?: number;
+  /**
+   * Cap on how many documents `listDocuments` names at once.
+   *
+   * The list is the cheapest thing here per entry and the easiest to let grow
+   * without noticing: a host that has accumulated four hundred documents would
+   * otherwise spend a page of context on the index before the model has read a
+   * word of any of them.
+   */
+  maxListed?: number;
 };
 
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
@@ -91,9 +100,52 @@ const EDIT_SCHEMA: JSONSchema = {
  * `editDocument` is `side: "confirm"` and does its own asking: it computes the
  * change, shows it as an edit review, and writes only what came back accepted.
  * There is no path that writes without that answer.
+ *
+ * `listDocuments` is what makes the rest of them reachable. A docId arrives in
+ * a tool result and then lives only in the transcript — which compaction trims,
+ * and which a new thread never had. Without an index, "a document outlives its
+ * thread" is true of the store and false of the agent: the document survives
+ * and nothing can name it. It returns titles and sizes, never bodies, so
+ * carrying it costs a line per document.
  */
 export function createDocumentTools(opts: DocumentToolsOptions): ToolDefinition[] {
-  const { store, maxSpanChars = 6000 } = opts;
+  const { store, maxSpanChars = 6000, maxListed = 50 } = opts;
+
+  const listDocuments: ToolDefinition = {
+    name: "listDocuments",
+    description:
+      "List the documents that exist, newest first — id, title and size, never the body. Use it when the user refers to something they worked on before and you do not have its id.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Optional filter on the title, case-insensitive." },
+      },
+    },
+    side: "read",
+    async execute(input) {
+      const i = (input ?? {}) as Record<string, unknown>;
+      const needle = str(i["query"]).trim().toLowerCase();
+      const all = await store.list();
+      const matched = needle ? all.filter((d) => d.title.toLowerCase().includes(needle)) : all;
+      return {
+        output: {
+          documents: matched.slice(0, maxListed).map((d) => ({
+            docId: d.id,
+            title: d.title,
+            revision: d.revision,
+            blocks: outlineOf(d.markdown).length,
+            chars: d.markdown.length,
+            updatedAt: d.updatedAt,
+          })),
+          // Reported rather than silent, for the same reason a truncated span
+          // is: a model that believes it has seen every document will tell the
+          // user theirs does not exist.
+          total: matched.length,
+          truncated: matched.length > maxListed,
+        },
+      };
+    },
+  };
 
   const createDocument: ToolDefinition = {
     name: "createDocument",
@@ -258,7 +310,7 @@ export function createDocumentTools(opts: DocumentToolsOptions): ToolDefinition[
     },
   };
 
-  return [createDocument, readDocument, editDocument, undoDocument];
+  return [listDocuments, createDocument, readDocument, editDocument, undoDocument];
 }
 
 const EMAIL_SCHEMA: JSONSchema = {
