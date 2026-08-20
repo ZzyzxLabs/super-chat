@@ -160,6 +160,30 @@ describe("createProxyHandler", () => {
     expect((init.headers as Record<string, string>)["authorization"]).toBeUndefined();
   });
 
+  it("attaches a server-held session as a named cookie", async () => {
+    // Not every upstream takes a bearer token. An internal service that only
+    // knows session cookies is reachable the same way, with the session held
+    // server-side like any other credential.
+    const upstream = okUpstream();
+    await createProxyHandler({
+      providers: {
+        intranet: {
+          baseUrl: "https://intranet.example",
+          apiKey: "server-session",
+          authStyle: "cookie",
+          cookieName: "session",
+          allowPaths: ["GET /api/records/*/document"],
+        },
+      },
+      fetchImpl: upstream as never,
+    })(envelope({ provider: "intranet", path: "/api/records/rec-1/document", method: "GET" }));
+
+    const [url, init] = upstream.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("https://intranet.example/api/records/rec-1/document");
+    expect((init.headers as Record<string, string>).cookie).toBe("session=server-session");
+    expect((init.headers as Record<string, string>).authorization).toBeUndefined();
+  });
+
   it("round-trips a request built by ProxyTransport", async () => {
     // The two halves must agree on the envelope shape; this is the contract test.
     const upstream = okUpstream();

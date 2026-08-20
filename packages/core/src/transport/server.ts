@@ -17,11 +17,14 @@ export type ProxyProviderConfig = {
   baseUrl: string;
   apiKey: string | (() => string | Promise<string>);
   /**
-   * How the key rides on the upstream request. "bearer" (default) sends
-   * `Authorization: Bearer <key>`; "x-api-key" sends the `x-api-key` header
-   * (Anthropic's Messages API).
+   * How the credential rides on the upstream request. "bearer" (default)
+   * sends `Authorization: Bearer <key>`; "x-api-key" sends the `x-api-key`
+   * header (Anthropic's Messages API); "cookie" sends it as the value of the
+   * named cookie in `cookieName`.
    */
-  authStyle?: "bearer" | "x-api-key";
+  authStyle?: "bearer" | "x-api-key" | "cookie";
+  /** Required when authStyle is "cookie"; kept server-side with apiKey. */
+  cookieName?: string;
   // Allowed provider paths. A single `*` matches one segment; a double `*`
   // matches the remaining path. An entry may carry a method prefix
   // ("POST /files") to allow only that method — without one, any method
@@ -159,7 +162,17 @@ export function createProxyHandler(config: ProxyHandlerConfig) {
     // server) rather than `Bearer ` garbage.
     if (apiKey) {
       if (provider.authStyle === "x-api-key") headers["x-api-key"] = apiKey;
-      else headers["authorization"] = `Bearer ${apiKey}`;
+      else if (provider.authStyle === "cookie") {
+        if (!provider.cookieName || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(provider.cookieName)) {
+          return json({ error: { message: `Provider "${envelope.provider}" has an invalid cookie configuration.` } }, 500);
+        }
+        // The inbound Cookie header is stripped above. This is the operator's
+        // session only, and CR/LF would otherwise turn it into header injection.
+        if (/[\r\n]/.test(apiKey)) {
+          return json({ error: { message: `Provider "${envelope.provider}" has an invalid credential.` } }, 500);
+        }
+        headers.cookie = `${provider.cookieName}=${apiKey}`;
+      } else headers["authorization"] = `Bearer ${apiKey}`;
     }
     for (const [k, v] of Object.entries(provider.headers ?? {})) headers[k.toLowerCase()] = v;
     if (envelope.stream) headers["accept"] = "text/event-stream";
