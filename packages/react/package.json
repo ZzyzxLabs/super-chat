@@ -2,6 +2,11 @@
   "name": "@zzyzxlabs/super-chat-react",
   "version": "0.1.0",
   "description": "React bindings for superchat: thread state, run control, card actions, and context inspection.",
+  "license": "Apache-2.0",
+  "author": "ZzyzxLabs",
+  "homepage": "https://github.com/ZzyzxLabs/super-chat/tree/main/packages/react#readme",
+  "bugs": { "url": "https://github.com/ZzyzxLabs/super-chat/issues" },
+  "keywords": ["agent", "llm", "ai", "react", "hooks", "chat", "streaming", "framework"],
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -12,17 +17,18 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": ["dist", "LICENSE", "NOTICE"],
   "repository": {
     "type": "git",
     "url": "https://github.com/ZzyzxLabs/super-chat.git",
     "directory": "packages/react"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "access": "public"
   },
   "scripts": {
     "build": "tsup",
+    "prepublishOnly": "pnpm run build",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {

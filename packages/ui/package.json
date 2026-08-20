@@ -2,6 +2,11 @@
   "name": "@zzyzxlabs/super-chat-ui",
   "version": "0.1.0",
   "description": "Card renderers and chat primitives for superchat. Bring your own styling; ships a self-contained CSS baseline.",
+  "license": "Apache-2.0",
+  "author": "ZzyzxLabs",
+  "homepage": "https://github.com/ZzyzxLabs/super-chat/tree/main/packages/ui#readme",
+  "bugs": { "url": "https://github.com/ZzyzxLabs/super-chat/issues" },
+  "keywords": ["agent", "llm", "ai", "react", "chat-ui", "components", "cards", "framework"],
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -13,17 +18,18 @@
     },
     "./styles.css": "./src/styles.css"
   },
-  "files": ["dist", "src/styles.css"],
+  "files": ["dist", "src/styles.css", "LICENSE", "NOTICE"],
   "repository": {
     "type": "git",
     "url": "https://github.com/ZzyzxLabs/super-chat.git",
     "directory": "packages/ui"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "access": "public"
   },
   "scripts": {
     "build": "tsup",
+    "prepublishOnly": "pnpm run build",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
