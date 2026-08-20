@@ -9,7 +9,6 @@
 // inverse edit can, and does, precisely when the document has moved on.
 
 import { AgentError } from "../errors.js";
-import { getItemWithLegacy } from "../runtime/storage.js";
 import type { DocumentSnapshot, DocumentStore } from "./types.js";
 
 /** Bounded so a long editing session cannot fill a storage quota. */
@@ -92,7 +91,7 @@ export function createLocalDocumentStore(key = "superchat:documents"): DocumentS
 
   const read = (): Persisted => {
     try {
-      const raw = getItemWithLegacy(key);
+      const raw = globalThis.localStorage?.getItem(key) ?? null;
       const parsed = raw ? (JSON.parse(raw) as unknown) : null;
       if (typeof parsed !== "object" || parsed === null) return { docs: {}, past: {} };
       const p = parsed as Partial<Persisted>;

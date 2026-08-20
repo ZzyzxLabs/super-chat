@@ -16,7 +16,6 @@
 // preferences, standing facts, corrections.
 
 import { estimateTokens } from "../tokens/estimate.js";
-import { getItemWithLegacy } from "../runtime/storage.js";
 import type { ContextSource } from "../context/types.js";
 import type { ToolDefinition } from "../tools/types.js";
 
@@ -74,7 +73,7 @@ export function createLocalMemoryStore(storageKey = "superchat:memory", opts: { 
   const cap = opts.maxEntries ?? DEFAULT_STORE_CAP;
   const read = (): Record<string, MemoryEntry> => {
     try {
-      const raw = getItemWithLegacy(storageKey);
+      const raw = globalThis.localStorage?.getItem(storageKey) ?? null;
       const parsed = raw ? (JSON.parse(raw) as unknown) : {};
       return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, MemoryEntry>) : {};
     } catch {

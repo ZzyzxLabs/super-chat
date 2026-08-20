@@ -12,7 +12,6 @@
 
 import { AgentError } from "../errors.js";
 import type { JobHandle, JobSnapshot, JobStatus, Provider } from "../providers/types.js";
-import { getItemWithLegacy } from "./storage.js";
 
 /**
  * Await a background job to a terminal state.
@@ -133,7 +132,7 @@ export function createLocalJobStore(prefix = "superchat:jobs"): JobStore {
 
   const readIndex = (): string[] => {
     try {
-      const raw = getItemWithLegacy(indexKey);
+      const raw = globalThis.localStorage?.getItem(indexKey) ?? null;
       const parsed = raw ? (JSON.parse(raw) as unknown) : [];
       return Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : [];
     } catch {
@@ -149,7 +148,7 @@ export function createLocalJobStore(prefix = "superchat:jobs"): JobStore {
   };
   const readJob = (id: string): StoredJob | undefined => {
     try {
-      const raw = getItemWithLegacy(jobKey(id));
+      const raw = globalThis.localStorage?.getItem(jobKey(id)) ?? null;
       return raw ? (JSON.parse(raw) as StoredJob) : undefined;
     } catch {
       return undefined;

@@ -10,7 +10,6 @@
 // entry degrades to "upload again", never a crash.
 
 import type { ProviderFileRef } from "../providers/types.js";
-import { getItemWithLegacy } from "./storage.js";
 
 export type StoredFile = {
   ref: ProviderFileRef;
@@ -52,7 +51,7 @@ export function createMemoryFileStore(): FileStore {
 export function createLocalFileStore(key = "superchat:files"): FileStore {
   const read = (): Record<string, StoredFile> => {
     try {
-      const raw = getItemWithLegacy(key);
+      const raw = globalThis.localStorage?.getItem(key) ?? null;
       const parsed = raw ? (JSON.parse(raw) as unknown) : {};
       return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, StoredFile>) : {};
     } catch {

@@ -17,7 +17,6 @@
 
 import { linkLinear } from "../content/branching.js";
 import type { Message } from "../content/types.js";
-import { getItemWithLegacy } from "./storage.js";
 
 export type ThreadMeta = {
   id: string;
@@ -168,7 +167,7 @@ export function createLocalThreadStore(prefix = "superchat:threads"): ThreadStor
 
   const readIndex = (): ThreadMeta[] => {
     try {
-      const raw = getItemWithLegacy(indexKey);
+      const raw = globalThis.localStorage?.getItem(indexKey) ?? null;
       const parsed = raw ? (JSON.parse(raw) as unknown) : [];
       return Array.isArray(parsed) ? (parsed as ThreadMeta[]).filter((m) => typeof m?.id === "string") : [];
     } catch {
@@ -191,7 +190,7 @@ export function createLocalThreadStore(prefix = "superchat:threads"): ThreadStor
 
     async load(id) {
       try {
-        const raw = getItemWithLegacy(threadKey(id));
+        const raw = globalThis.localStorage?.getItem(threadKey(id)) ?? null;
         if (!raw) return undefined;
         return migrate(JSON.parse(raw) as StoredThread);
       } catch {
