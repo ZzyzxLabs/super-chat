@@ -325,7 +325,7 @@ the transport selector to **Server proxy**, or pick **BYOK direct** and paste a 
 pnpm test
 ```
 
-237 tests. The runtime suite drives the real OpenAI and Anthropic adapters
+359 tests. The runtime suite drives the real OpenAI and Anthropic adapters
 against mocked transports, so the tool loop, card suspension, thinking replay,
 background polling and concurrent proxy streaming are all exercised with no key
 and no network.
@@ -366,8 +366,5 @@ records the revision it came from and nothing yet compares it; and nobody has
 driven the document tools against a live model or looked at the document
 surfaces on a real phone. `docs/HANDOFF.md` has the detail.
 
-Prior art read closely: Open WebUI's tools/functions/knowledge split, LibreChat's
-multi-provider handling, and the Sup Wallet agent in `zzyzx-full-repo` — whose
-provider-resolve indirection, preset allowlists and alias-matched skills are the
-direct ancestors of three subsystems here, and whose card-dispatch chain (and the
-warning comment above it) motivated the registry design in the fourth.
+Prior art read closely: Open WebUI's tools/functions/knowledge split, and
+LibreChat's multi-provider handling.

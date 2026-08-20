@@ -19,8 +19,8 @@ apps/playground   Next.js dev panels. runs with NO API key.
 
 ```bash
 pnpm install && pnpm build && pnpm dev     # → http://localhost:3210
-pnpm test                                  # 367 tests, ~3s
-pnpm test:rwd                              # 140 browser checks, 4 viewports
+pnpm test                                  # 359 tests, ~4s
+pnpm test:rwd                              # 152 browser checks, 4 viewports
 ```
 
 The playground is **not a product**. It is one panel per capability, aimed at a
@@ -29,24 +29,26 @@ developer evaluating the framework: `/cards` `/agent-ui` `/skills` `/tools`
 instruction — don't quietly turn it back into an app. A new capability gets a
 panel; it does not get a feature in an app that happens to live here.
 
-**Naming**: resolved. The framework was called `agentloom` and is now **superchat**,
-matching the repo — CSS prefix `sc-`, storage keys `superchat:*`. Nothing in the
-tree answers to the old name except `runtime/storage.ts`, which is a deliberate
-shim: every read of a `superchat:` localStorage key falls back once to its
-`agentloom:` twin and promotes the value, so a browser that used the pre-rename
-build keeps its threads, memories, uploaded file refs and job handles. That file
-is removable — delete it and its four call sites when the old keys stop being
-worth carrying.
+**Naming**: the framework is **superchat**, matching the repo — CSS prefix
+`sc-`, storage keys `superchat:*`. Keep both consistent when you add a surface:
+a stray prefix is how a theme override silently stops applying.
 
 **Publish scope**: the three publishable packages (`core`, `react`, `ui`) are
-scoped `@zzyzxlabs/super-chat-*` to publish to GitHub Packages under the
-ZzyzxLabs org — GitHub Packages requires the npm scope to equal the owning
-org/user, which `@superchat/*` never matched. `apps/playground` stays
-`@superchat/playground`: it's `private: true` and never published, so the
-GitHub Packages scope rule doesn't apply to it, and there's no reason to touch
-its name. "superchat" the *project* is still called superchat everywhere else
-(README, CSS prefix, storage keys) — only the three registry-facing package
-names changed.
+scoped `@zzyzxlabs/super-chat-*` and publish to the **public npm registry**
+under the ZzyzxLabs org. `apps/playground` stays `@superchat/playground`: it's
+`private: true` and never published. "superchat" the *project* is still called
+superchat everywhere else (README, CSS prefix, storage keys) — only the three
+registry-facing package names carry the scope.
+
+**Publish with `pnpm`, never `npm`.** `react` and `ui` depend on `core` through
+`workspace:*`, and it is *pnpm* that rewrites that to a real version at pack
+time. `npm publish` ships the literal `workspace:*` and every install of those
+two packages fails. `pnpm -r publish` also walks the workspace in dependency
+order and skips `private: true`, so it is the only command that needs to exist:
+
+```bash
+pnpm -r publish --access public
+```
 
 ---
 
@@ -306,16 +308,19 @@ value is that it is a library with sharp edges in the right places.
 
 ## Reference material
 
-The Sup Wallet agent at `G:/GitHub/zzyzx-full-repo/Protocols/sup-wallet/apps/web/src/lib/agent/`
-is the closest prior art and worth rereading if you are changing the registry,
-skills, or card dispatch. What was taken from it: provider-resolve as a single
-source of truth, explicit preset allowlists, alias-matched retrievable skills,
-`CardBoundary` isolation, and the rule that actionable cards must never be
-collapsed ("a hidden deposit form is an unreachable deposit form").
-
-What was deliberately *not* taken: its card dispatch is a hand-maintained
-if-chain, and its own comments record the cost. That motivated the registry
-design here.
-
-Also read, for landscape rather than code: Open WebUI's tools/functions/knowledge
+Read for landscape rather than code: Open WebUI's tools/functions/knowledge
 split, and LibreChat's multi-provider handling.
+
+Five rules carried in from earlier production work. Reread them before changing
+the registry, skills, or card dispatch — each one is load-bearing:
+
+- provider-resolve is a single source of truth, never re-derived per call site;
+- presets are explicit allowlists, never blocklists;
+- skills are alias-matched and retrievable, not one system-prompt blob;
+- `CardBoundary` isolates a failing renderer, so one bad card cannot take the
+  whole thread down with it;
+- actionable cards are never collapsed — a hidden form is an unreachable form.
+
+The card *registry* exists because of the obvious alternative's failure mode: a
+hand-maintained if-chain dispatching on card kind drifts as kinds are added,
+until one silently degrades to a "ran ✓" chip and nobody notices for a month.
