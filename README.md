@@ -6,16 +6,35 @@ gives the agent a **flexible visual vocabulary** to answer with.
 
 Not a chat app. The thing chat apps leave to you.
 
-> **Picking this up cold?** Read **[docs/HANDOFF.md](docs/HANDOFF.md)** first —
-> load-bearing decisions, bugs already fixed, and what will bite you. The full
-> design-token and responsive spec lives in **[docs/UI-SPEC.md](docs/UI-SPEC.md)**.
+```bash
+npm install @zzyzxlabs/super-chat-core @zzyzxlabs/super-chat-react @zzyzxlabs/super-chat-ui
+```
 
+```ts
+import "@zzyzxlabs/super-chat-ui/styles.css";
 ```
-@zzyzxlabs/super-chat-core    provider-agnostic engine — no React, isomorphic       (packages/core/README.md)
-@zzyzxlabs/super-chat-react   thread state, run control, card actions               (packages/react/README.md)
-@zzyzxlabs/super-chat-ui      card renderers, chat primitives, context inspector    (packages/ui/README.md)
-apps/playground    Next.js dev panels — one per capability, no API key needed (apps/playground/README.md)
-```
+
+`core` is isomorphic and depends on neither React nor an LLM SDK — a server,
+CLI or worker installs it alone.
+
+| package | what it is |
+| --- | --- |
+| [`@zzyzxlabs/super-chat-core`](packages/core/README.md) | provider-agnostic engine — no React, isomorphic |
+| [`@zzyzxlabs/super-chat-react`](packages/react/README.md) | thread state, run control, card actions |
+| [`@zzyzxlabs/super-chat-ui`](packages/ui/README.md) | card renderers, chat primitives, context inspector |
+| [`apps/playground`](apps/playground/README.md) | Next.js dev panels — one per capability, **no API key needed** |
+
+**Try it without a key first.** The playground runs the real adapter, runtime,
+tools and context builder against a scripted transport — so what you are looking
+at is the framework, not a mock of it. See [Run it](#run-it).
+
+## Documentation
+
+| | |
+| --- | --- |
+| [docs/guide](docs/guide/README.md) | How to build with it — install, proxy route, first turn, context assembly |
+| [docs/HANDOFF.md](docs/HANDOFF.md) | Changing superchat itself: load-bearing decisions, and what will bite you |
+| [docs/UI-SPEC.md](docs/UI-SPEC.md) | Design tokens, breakpoints, theming — the spec `packages/ui` implements |
 
 ---
 
