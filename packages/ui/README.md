@@ -17,6 +17,9 @@ theming and the full component spec live in
 - `ContextInspector.tsx` — renders a context-build trace (what was included/truncated/dropped and why).
 - `markdown.ts`, `format.ts`, `export.ts` — supporting utilities for message rendering and card export.
 - `styles.css` — the token baseline. Import it from source (`@zzyzxlabs/super-chat-ui/styles.css`), not from `dist`.
+- `mobile-agent` — framework-neutral action, model-selection and Orb motion
+  contracts for native ports. It has no DOM, React Native or animation-library
+  dependency; see [MOBILE-AGENT.md](MOBILE-AGENT.md).
 
 ## Install
 
@@ -26,6 +29,15 @@ pnpm add @zzyzxlabs/super-chat-core @zzyzxlabs/super-chat-react @zzyzxlabs/super
 
 ```ts
 import "@zzyzxlabs/super-chat-ui/styles.css";
+```
+
+Native hosts should import only the portable contract entry:
+
+```ts
+import {
+  SUPERCHAT_MOBILE_AGENT_ACTIONS,
+  SUPERCHAT_MOBILE_AGENT_ORB,
+} from "@zzyzxlabs/super-chat-ui/mobile-agent";
 ```
 
 ## Develop

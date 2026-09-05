@@ -21,7 +21,7 @@ CLI or worker installs it alone.
 | --- | --- |
 | [`@zzyzxlabs/super-chat-core`](packages/core/README.md) | provider-agnostic engine — no React, isomorphic |
 | [`@zzyzxlabs/super-chat-react`](packages/react/README.md) | thread state, run control, card actions |
-| [`@zzyzxlabs/super-chat-ui`](packages/ui/README.md) | card renderers, chat primitives, context inspector |
+| [`@zzyzxlabs/super-chat-ui`](packages/ui/README.md) | card renderers, chat primitives, context inspector, portable Mobile Agent assets |
 | [`apps/playground`](apps/playground/README.md) | Next.js dev panels — one per capability, **no API key needed** |
 
 **Try it without a key first.** The playground runs the real adapter, runtime,
@@ -35,6 +35,7 @@ at is the framework, not a mock of it. See [Run it](#run-it).
 | [docs/guide](docs/guide/README.md) | How to build with it — install, proxy route, first turn, context assembly |
 | [docs/HANDOFF.md](docs/HANDOFF.md) | Changing superchat itself: load-bearing decisions, and what will bite you |
 | [docs/UI-SPEC.md](docs/UI-SPEC.md) | Design tokens, breakpoints, theming — the spec `packages/ui` implements |
+| [packages/ui/MOBILE-AGENT.md](packages/ui/MOBILE-AGENT.md) | Native port contract — actions, model choices and Orb motion assets |
 
 ---
 

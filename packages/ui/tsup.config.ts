@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: { index: "src/index.ts" },
+  entry: { index: "src/index.ts", "mobile-agent": "src/mobile-agent.ts" },
   format: ["esm"],
   dts: true,
   sourcemap: true,
