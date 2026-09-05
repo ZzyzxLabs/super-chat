@@ -1,7 +1,11 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: { index: "src/index.ts", "mobile-agent": "src/mobile-agent.ts" },
+  entry: {
+    index: "src/index.ts",
+    "mobile-agent": "src/mobile-agent.ts",
+    "mobile-agent-react-native": "src/mobile-agent-rn.ts",
+  },
   format: ["esm"],
   dts: true,
   sourcemap: true,

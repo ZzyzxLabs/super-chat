@@ -17,9 +17,11 @@ theming and the full component spec live in
 - `ContextInspector.tsx` — renders a context-build trace (what was included/truncated/dropped and why).
 - `markdown.ts`, `format.ts`, `export.ts` — supporting utilities for message rendering and card export.
 - `styles.css` — the token baseline. Import it from source (`@zzyzxlabs/super-chat-ui/styles.css`), not from `dist`.
-- `mobile-agent` — framework-neutral action, model-selection and Orb motion
-  contracts for native ports. It has no DOM, React Native or animation-library
-  dependency; see [MOBILE-AGENT.md](MOBILE-AGENT.md).
+- `mobile-agent` — framework-neutral action, model-selection, loading and Orb
+  contracts for native ports.
+- `mobile-agent/react-native` — RN-specific window-class, small-screen,
+  accessibility and skeleton recipes. Neither entry forces an animation or
+  navigation library; see [MOBILE-AGENT.md](MOBILE-AGENT.md).
 
 ## Install
 
@@ -38,6 +40,11 @@ import {
   SUPERCHAT_MOBILE_AGENT_ACTIONS,
   SUPERCHAT_MOBILE_AGENT_ORB,
 } from "@zzyzxlabs/super-chat-ui/mobile-agent";
+
+import {
+  resolveSuperChatMobileAgentRNLayout,
+  resolveSuperChatMobileAgentRNSkeleton,
+} from "@zzyzxlabs/super-chat-ui/mobile-agent/react-native";
 ```
 
 ## Develop

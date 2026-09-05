@@ -35,7 +35,7 @@ at is the framework, not a mock of it. See [Run it](#run-it).
 | [docs/guide](docs/guide/README.md) | How to build with it — install, proxy route, first turn, context assembly |
 | [docs/HANDOFF.md](docs/HANDOFF.md) | Changing superchat itself: load-bearing decisions, and what will bite you |
 | [docs/UI-SPEC.md](docs/UI-SPEC.md) | Design tokens, breakpoints, theming — the spec `packages/ui` implements |
-| [packages/ui/MOBILE-AGENT.md](packages/ui/MOBILE-AGENT.md) | Native port contract — actions, model choices and Orb motion assets |
+| [packages/ui/MOBILE-AGENT.md](packages/ui/MOBILE-AGENT.md) | Native port contract — RN layout, loading states, actions and Orb motion assets |
 
 ---
 

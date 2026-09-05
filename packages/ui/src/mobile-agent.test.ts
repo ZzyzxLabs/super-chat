@@ -4,9 +4,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   SUPERCHAT_MOBILE_AGENT_ACTIONS,
+  SUPERCHAT_MOBILE_AGENT_CONTRACT_VERSION,
+  SUPERCHAT_MOBILE_AGENT_LOADING,
   SUPERCHAT_MOBILE_AGENT_ORB,
   SUPERCHAT_MOBILE_AGENT_ORB_ACTIVITY,
+  normalizeSuperChatMobileAgentLoadingHint,
   resolveSuperChatMobileAgentModel,
+  resolveSuperChatMobileAgentStreamingPhase,
   superChatMobileAgentRingPhaseOffset,
 } from "./mobile-agent";
 
@@ -14,6 +18,10 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const read = (path: string) => readFileSync(new URL(path, `file://${here}/`), "utf8");
 
 describe("SuperChat Mobile Agent contract", () => {
+  it("versions the expanded design contract", () => {
+    expect(SUPERCHAT_MOBILE_AGENT_CONTRACT_VERSION).toBe(2);
+  });
+
   it("ships one unique semantic action vocabulary", () => {
     const ids = SUPERCHAT_MOBILE_AGENT_ACTIONS.map((action) => action.id);
     expect(new Set(ids).size).toBe(ids.length);
@@ -46,6 +54,30 @@ describe("SuperChat Mobile Agent contract", () => {
     });
   });
 
+  it("normalizes bounded loading geometry for native skeletons", () => {
+    expect(normalizeSuperChatMobileAgentLoadingHint({
+      kind: "media",
+      label: "  Generating image  ",
+      count: 20,
+      aspectRatio: " 16 / 9 ",
+    })).toEqual({
+      kind: "media",
+      label: "Generating image",
+      count: 10,
+      aspectRatio: "16 / 9",
+    });
+    expect(normalizeSuperChatMobileAgentLoadingHint({ kind: "invalid" as "generic", label: "" }))
+      .toEqual({ kind: "generic", label: "Preparing result", count: 1 });
+  });
+
+  it("keeps the streaming caret solid until a real quiet gap", () => {
+    const input = { active: true, lastDeltaAt: 1000, now: 1419 };
+    expect(resolveSuperChatMobileAgentStreamingPhase(input)).toBe("receiving");
+    expect(resolveSuperChatMobileAgentStreamingPhase({ ...input, now: 1420 })).toBe("paused");
+    expect(resolveSuperChatMobileAgentStreamingPhase({ ...input, active: false })).toBe("idle");
+    expect(SUPERCHAT_MOBILE_AGENT_LOADING.streamingQuietMs).toBe(420);
+  });
+
   it("keeps the checked Web Orb geometry, phases and reduced-motion frame", () => {
     expect(SUPERCHAT_MOBILE_AGENT_ORB.geometry).toEqual({
       stage: 28, glyph: 20, dot: 3, ringRadius: 8, ringCount: 8,
@@ -70,7 +102,10 @@ describe("SuperChat Mobile Agent contract", () => {
   it("remains portable and is exported as its own build entry", () => {
     const source = read("./mobile-agent.ts");
     expect(source).not.toMatch(/from ["'](?:react|react-native|@zzyzxlabs)/);
+    const rnSource = read("./mobile-agent-rn.ts");
+    expect(rnSource).not.toMatch(/from ["'](?:react|react-native|@zzyzxlabs)/);
     const pkg = JSON.parse(read("../../package.json")) as { exports: Record<string, unknown> };
     expect(pkg.exports["./mobile-agent"]).toBeDefined();
+    expect(pkg.exports["./mobile-agent/react-native"]).toBeDefined();
   });
 });

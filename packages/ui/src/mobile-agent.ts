@@ -6,7 +6,7 @@
  * stable action vocabulary, state semantics and reference motion values.
  */
 
-export const SUPERCHAT_MOBILE_AGENT_CONTRACT_VERSION = 1 as const;
+export const SUPERCHAT_MOBILE_AGENT_CONTRACT_VERSION = 2 as const;
 
 export type SuperChatMobileAgentZone =
   | "thread"
@@ -178,4 +178,98 @@ export function superChatMobileAgentRingPhaseOffset(
       ? 0
       : 0.5
     : (count - 1 - normalizedIndex) / count;
+}
+
+/**
+ * Native mirror of a tool's predictable output geometry. Keep this shape
+ * dependency-free so an RN app can consume it without importing the Web UI or
+ * core runtime into its view layer.
+ */
+export type SuperChatMobileAgentLoadingKind =
+  | "media"
+  | "chart"
+  | "table"
+  | "document"
+  | "generic";
+
+export interface SuperChatMobileAgentLoadingHint {
+  kind: SuperChatMobileAgentLoadingKind;
+  label: string;
+  count?: number;
+  /** Portable ratio expression, for example `1024 / 1536`. */
+  aspectRatio?: string;
+}
+
+export type SuperChatMobileAgentStreamingPhase =
+  | "idle"
+  | "receiving"
+  | "paused";
+
+export type SuperChatMobileAgentMediaPhase =
+  | "loading"
+  | "ready"
+  | "error";
+
+/** Values shared with the Web design, expressed without CSS assumptions. */
+export const SUPERCHAT_MOBILE_AGENT_LOADING = {
+  skeletonDelayMs: 200,
+  shimmerDurationMs: 1200,
+  mediaDecodeFadeMs: 160,
+  streamingQuietMs: 420,
+  caretBlinkDurationMs: 1000,
+  maxPreviewCount: 10,
+  genericLineCount: 2,
+  documentLineCount: 4,
+  chartHeight: 180,
+} as const;
+
+/**
+ * Sanitizes model/tool supplied geometry before it reaches a native layout.
+ * Presentation metadata must never fail a run or allocate an unbounded number
+ * of placeholder views.
+ */
+export function normalizeSuperChatMobileAgentLoadingHint(
+  hint?: Partial<SuperChatMobileAgentLoadingHint>,
+): SuperChatMobileAgentLoadingHint {
+  const kind: SuperChatMobileAgentLoadingKind =
+    hint?.kind === "media" ||
+    hint?.kind === "chart" ||
+    hint?.kind === "table" ||
+    hint?.kind === "document"
+      ? hint.kind
+      : "generic";
+  const count = Math.max(
+    1,
+    Math.min(
+      SUPERCHAT_MOBILE_AGENT_LOADING.maxPreviewCount,
+      Math.floor(Number.isFinite(hint?.count) ? hint?.count ?? 1 : 1),
+    ),
+  );
+  const label = hint?.label?.trim() || "Preparing result";
+
+  return {
+    kind,
+    label,
+    count,
+    ...(hint?.aspectRatio?.trim()
+      ? { aspectRatio: hint.aspectRatio.trim() }
+      : {}),
+  };
+}
+
+/**
+ * A native write-head stays solid while deltas arrive and blinks only after a
+ * quiet gap. RN hosts can evaluate this from their animation clock without a
+ * Web timer or DOM pseudo-element.
+ */
+export function resolveSuperChatMobileAgentStreamingPhase(input: {
+  active: boolean;
+  lastDeltaAt?: number;
+  now: number;
+  quietMs?: number;
+}): SuperChatMobileAgentStreamingPhase {
+  if (!input.active) return "idle";
+  if (input.lastDeltaAt === undefined) return "receiving";
+  const quietMs = Math.max(0, input.quietMs ?? SUPERCHAT_MOBILE_AGENT_LOADING.streamingQuietMs);
+  return input.now - input.lastDeltaAt >= quietMs ? "paused" : "receiving";
 }
