@@ -7,8 +7,18 @@
 // bug you can see, whereas a card that vanishes is a bug you find in a support
 // ticket three weeks later.
 
-import { Component, createContext, useContext, useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
-import type { Card, CardAction, CardSpec } from "@zzyzxlabs/super-chat-core";
+import {
+  Component,
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ComponentType,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import type { Card, CardAction, CardSpec, ToolLoadingHint } from "@zzyzxlabs/super-chat-core";
 
 export type CardRendererProps<S extends CardSpec = CardSpec> = {
   spec: S;
@@ -67,21 +77,61 @@ export class CardBoundary extends Component<{ children: ReactNode; label?: strin
  * than no skeleton at all, so it waits before showing itself. Hosts render this
  * directly — a card with no spec yet has no kind to dispatch on.
  */
-export function CardSkeleton({ lines = 2 }: { lines?: number }) {
+export type CardSkeletonProps = {
+  lines?: number;
+  hint?: ToolLoadingHint;
+  /** Primarily useful in a component catalogue; live output should keep the anti-flicker default. */
+  delayMs?: number;
+};
+
+export function CardSkeleton({ lines = 2, hint, delayMs = 200 }: CardSkeletonProps) {
   const [show, setShow] = useState(false);
   useEffect(() => {
-    const t = setTimeout(() => setShow(true), 200);
+    const t = setTimeout(() => setShow(true), delayMs);
     return () => clearTimeout(t);
-  }, []);
+  }, [delayMs]);
 
   if (!show) return null;
+  const kind = hint?.kind ?? "generic";
+  const label = hint?.label ?? "Preparing result";
+  const count = Math.max(1, Math.min(10, hint?.count ?? 1));
+  const bodyLines = kind === "document" ? Math.max(lines, 4) : lines;
+  const style = hint?.aspectRatio
+    ? ({ "--sc-skeleton-ratio": hint.aspectRatio } as CSSProperties)
+    : undefined;
+
   return (
-    <div className="sc-card sc-skeleton" aria-busy="true" aria-live="polite">
-      <span className="sc-sr-only">Loading…</span>
-      <div className="sc-skeleton__bar sc-skeleton__bar--title" />
-      {Array.from({ length: lines }, (_, i) => (
-        <div key={i} className="sc-skeleton__bar" style={i === lines - 1 ? { width: "80%" } : undefined} />
-      ))}
+    <div className={`sc-card sc-skeleton sc-skeleton--${kind}`} style={style} role="status" aria-busy="true" aria-live="polite">
+      <div className="sc-skeleton__label">
+        <span className="sc-spinner" aria-hidden />
+        <span>{label}…</span>
+      </div>
+      {kind === "media" ? (
+        <div className={`sc-skeleton__media${count === 1 ? " sc-skeleton__media--single" : ""}`} aria-hidden>
+          {Array.from({ length: count }, (_, i) => <div key={i} className="sc-skeleton__surface sc-skeleton__mediaitem" />)}
+        </div>
+      ) : kind === "chart" ? (
+        <div className="sc-skeleton__surface sc-skeleton__chart" aria-hidden>
+          <span style={{ height: "34%" }} /><span style={{ height: "62%" }} /><span style={{ height: "48%" }} /><span style={{ height: "78%" }} /><span style={{ height: "57%" }} />
+        </div>
+      ) : kind === "table" ? (
+        <div className="sc-skeleton__table" aria-hidden>
+          {Array.from({ length: 4 }, (_, row) => (
+            <div key={row} className="sc-skeleton__tablerow">
+              <span className="sc-skeleton__surface" />
+              <span className="sc-skeleton__surface" />
+              <span className="sc-skeleton__surface" />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="sc-skeleton__body" aria-hidden>
+          <div className="sc-skeleton__bar sc-skeleton__bar--title" />
+          {Array.from({ length: bodyLines }, (_, i) => (
+            <div key={i} className="sc-skeleton__bar" style={i === bodyLines - 1 ? { width: "72%" } : undefined} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

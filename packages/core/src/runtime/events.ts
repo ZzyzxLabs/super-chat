@@ -9,6 +9,8 @@ import type { Card, CardAction, CardSpec } from "../cards/types.js";
 import type { ContentPart, FinishReason, Usage } from "../content/types.js";
 import type { ContextTrace } from "../context/types.js";
 import type { JobHandle, JobStatus } from "../providers/types.js";
+import type { MeteringRecord } from "./metering.js";
+import type { ToolLoadingHint } from "../tools/types.js";
 
 export type RunEvent =
   | { type: "run-start"; runId: string; mode: RunMode }
@@ -17,7 +19,7 @@ export type RunEvent =
   | { type: "step-start"; step: number }
   | { type: "text-delta"; delta: string }
   | { type: "reasoning-delta"; delta: string }
-  | { type: "tool-call"; callId: string; name: string; input: unknown; repaired?: boolean }
+  | { type: "tool-call"; callId: string; name: string; input: unknown; repaired?: boolean; loading?: ToolLoadingHint }
   /** A `confirm`-side tool, or an interactive card, is waiting on the user. */
   | { type: "awaiting-user"; callId: string; card: Card }
   | { type: "user-responded"; callId: string; action: CardAction }
@@ -30,6 +32,8 @@ export type RunEvent =
   | { type: "job-started"; handle: JobHandle }
   | { type: "job-status"; handle: JobHandle; status: JobStatus }
   | { type: "message"; parts: ContentPart[] }
+  /** Canonical, idempotent per-step and per-run usage observation. */
+  | { type: "metering"; record: MeteringRecord }
   | { type: "usage"; usage: Usage }
   | { type: "run-finish"; runId: string; finishReason: FinishReason; usage: Usage; steps: number }
   | { type: "error"; error: unknown; recoverable: boolean };
@@ -45,6 +49,8 @@ export type RunState = {
   cards: Card[];
   usage: Usage;
   steps: number;
+  /** Live tool output slots, removed as their correlated result arrives. */
+  pendingTools: Record<string, { callId: string; name: string; loading?: ToolLoadingHint }>;
   trace?: ContextTrace;
   /**
    * Tool names actually exposed to the model this run — the base presets PLUS
@@ -60,7 +66,7 @@ export type RunState = {
 };
 
 export function initialRunState(runId: string, mode: RunMode): RunState {
-  return { runId, mode, status: "idle", parts: [], cards: [], usage: {}, steps: 0 };
+  return { runId, mode, status: "idle", parts: [], cards: [], usage: {}, steps: 0, pendingTools: {} };
 }
 
 function mergeUsage(a: Usage, b?: Usage): Usage {
@@ -106,6 +112,14 @@ export function reduceRunEvent(state: RunState, event: RunEvent): RunState {
     case "tool-call":
       return {
         ...state,
+        pendingTools: {
+          ...state.pendingTools,
+          [event.callId]: {
+            callId: event.callId,
+            name: event.name,
+            ...(event.loading ? { loading: event.loading } : {}),
+          },
+        },
         parts: [
           ...state.parts,
           { type: "tool-call", callId: event.callId, name: event.name, input: event.input, status: "running", ...(event.repaired ? { repaired: true } : {}) },
@@ -123,9 +137,12 @@ export function reduceRunEvent(state: RunState, event: RunEvent): RunState {
         pendingCard: undefined,
         cards: state.cards.map((c) => (c.callId === event.callId ? { ...c, action: event.action } : c)),
       };
-    case "tool-result":
+    case "tool-result": {
+      const pendingTools = { ...state.pendingTools };
+      delete pendingTools[event.callId];
       return {
         ...state,
+        pendingTools,
         parts: [
           ...markCallDone(state.parts, event.callId, event.failure ? "error" : "done"),
           {
@@ -138,6 +155,7 @@ export function reduceRunEvent(state: RunState, event: RunEvent): RunState {
           },
         ],
       };
+    }
     case "card":
       return { ...state, cards: upsertCard(state.cards, event.card) };
     case "card-updated":
@@ -151,6 +169,11 @@ export function reduceRunEvent(state: RunState, event: RunEvent): RunState {
       return { ...state, job: { handle: event.handle, status: event.status } };
     case "message":
       return { ...state, parts: [...state.parts, ...event.parts] };
+    case "metering":
+      // Metering is an observation event. The legacy `usage` event remains the
+      // sole live accumulator so adding this event is backwards compatible and
+      // cannot double-count a turn.
+      return state;
     // ── usage: exactly one event accumulates ──────────────────────────────
     // runAgent reports a step's cost three times: `usage` (live), `step-finish`
     // (the same numbers again, for consumers that only watch step boundaries)
@@ -170,6 +193,7 @@ export function reduceRunEvent(state: RunState, event: RunEvent): RunState {
       return {
         ...state,
         status: event.finishReason === "error" ? "error" : "done",
+        pendingTools: {},
         finishReason: event.finishReason,
         // REPLACE, not merge. This is runAgent's own total across every step,
         // so it is the authoritative figure — and taking it wholesale also
@@ -179,7 +203,12 @@ export function reduceRunEvent(state: RunState, event: RunEvent): RunState {
         steps: event.steps,
       };
     case "error":
-      return { ...state, status: event.recoverable ? state.status : "error", error: event.error };
+      return {
+        ...state,
+        status: event.recoverable ? state.status : "error",
+        ...(event.recoverable ? {} : { pendingTools: {} }),
+        error: event.error,
+      };
     default:
       return state;
   }

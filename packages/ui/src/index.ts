@@ -6,6 +6,7 @@ export {
   useCardRenderers,
   type CardRendererProps,
   type CardRendererMap,
+  type CardSkeletonProps,
 } from "./renderer-registry.js";
 
 export {

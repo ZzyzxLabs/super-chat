@@ -133,7 +133,7 @@ export default function AppStatePanel() {
 
     const bindings: (AppStateBinding<Card[]> | AppStateBinding<string | null>)[] = [boardBinding, selectionBinding];
     return new AgentClient({
-      provider: buildProvider(buildTransport("demo", "openai"), "demo"),
+    provider: buildProvider(buildTransport("demo"), "demo"),
       model: "gpt-5.2",
       tools: registry,
       toolResolution: { presets: ["observer", "executor"] },

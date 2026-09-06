@@ -1,6 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  devIndicators: false,
   // The workspace packages ship untranspiled ESM with .js specifiers; Next needs
   // to run them through its own compiler rather than treating them as externals.
   transpilePackages: ["@zzyzxlabs/super-chat-core", "@zzyzxlabs/super-chat-react", "@zzyzxlabs/super-chat-ui"],

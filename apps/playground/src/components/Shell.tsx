@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
+import { playgroundPath } from "@/agent/deployment";
 
 // Panels, not pages of an app. Each one isolates a single capability so a
 // developer evaluating the framework can see what is available without reading
@@ -22,16 +23,18 @@ const PANELS = [
 
 export function Shell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const isExperience = pathname === "/" || pathname.startsWith("/experiences");
+  const panels = PANELS.map((panel) => ({ ...panel, href: playgroundPath(panel.href) }));
 
   return (
-    <div className="dev">
-      <aside className="dev__nav">
+    <div className={`dev${isExperience ? " dev--experience" : ""}`}>
+      {isExperience ? null : <aside className="dev__nav">
         <div className="dev__brand">
           superchat
           <span>dev panels</span>
         </div>
         <nav>
-          {PANELS.map((p) => {
+          {panels.map((p) => {
             const active = p.href === "/" ? pathname === "/" : pathname.startsWith(p.href);
             return (
               <Link key={p.href} href={p.href} className={`dev__link${active ? " dev__link--on" : ""}`}>
@@ -46,7 +49,7 @@ export function Shell({ children }: { children: ReactNode }) {
           <code className="sc-mono">@zzyzxlabs/super-chat-react</code>
           <code className="sc-mono">@zzyzxlabs/super-chat-ui</code>
         </div>
-      </aside>
+      </aside>}
       <main className="dev__main">{children}</main>
     </div>
   );

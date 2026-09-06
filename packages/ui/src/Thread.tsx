@@ -28,7 +28,7 @@ import {
   useTools,
   type TurnMeta,
 } from "@zzyzxlabs/super-chat-react";
-import { CardRenderer } from "./renderer-registry.js";
+import { CardRenderer, CardSkeleton } from "./renderer-registry.js";
 import { renderMarkdown } from "./markdown.js";
 import { useDocumentQuotes } from "./quotes.js";
 import {
@@ -365,7 +365,13 @@ function MediaParts({ parts }: { parts: Extract<ContentPart, { type: "image" | "
             </span>
           );
         }
-        return (
+        const src = mediaSrc(p.source, p.mediaType);
+        return src ? (
+          <span key={i} className="sc-media__audio">
+            <audio src={src} controls preload="metadata" aria-label="Attached audio" />
+            {p.transcript ? <span className="sc-muted">{p.transcript.slice(0, 60)}{p.transcript.length > 60 ? "…" : ""}</span> : null}
+          </span>
+        ) : (
           <span key={i} className="sc-pill">
             🔊 audio{p.transcript ? ` — “${p.transcript.slice(0, 60)}${p.transcript.length > 60 ? "…" : ""}”` : ""}
           </span>
@@ -513,6 +519,31 @@ function useFrameThrottled<T>(value: T, active: boolean): T {
   return active ? display : value;
 }
 
+/**
+ * A write-head is steady while deltas are arriving and blinks only after a
+ * short quiet gap. The gap is deliberately longer than a normal token cadence:
+ * blinking should mean "the stream is open but waiting", never "text is moving".
+ */
+function useStreamingPulse(value: string, active: boolean, quietMs = 420): "receiving" | "paused" {
+  const [phase, setPhase] = useState<"receiving" | "paused">("receiving");
+  const previous = useRef(value);
+
+  useEffect(() => {
+    if (!active) {
+      previous.current = value;
+      setPhase("receiving");
+      return;
+    }
+    if (value === previous.current) return;
+    previous.current = value;
+    setPhase("receiving");
+    const timer = setTimeout(() => setPhase("paused"), quietMs);
+    return () => clearTimeout(timer);
+  }, [value, active, quietMs]);
+
+  return phase;
+}
+
 /** The live turn: streamed text, cards as they arrive, and any blocking card. */
 export function LiveTurn() {
   const run = useRun();
@@ -529,6 +560,7 @@ export function LiveTurn() {
   const throttledText = useFrameThrottled(text, run.status === "running");
   const html = useMemo(() => renderMarkdown(throttledText), [throttledText]);
   const thoughtFor = useThinkingDuration(run.runId, run.parts.some((p) => p.type === "reasoning"), Boolean(text));
+  const streamPhase = useStreamingPulse(text, run.status === "running");
 
   if (run.status === "idle" || run.status === "done") return null;
 
@@ -538,6 +570,9 @@ export function LiveTurn() {
   const providerTools = run.parts
     .filter((p): p is Extract<ContentPart, { type: "artifact" }> => p.type === "artifact" && p.kind.startsWith("provider-tool:"))
     .map((p) => ({ id: p.id, kind: p.kind.slice("provider-tool:".length) }));
+  const visibleCards = cards.filter((c) => c.id !== pending?.id);
+  const callIds = new Set(calls.map((call) => call.callId));
+  const uncorrelatedCards = visibleCards.filter((card) => !card.callId || !callIds.has(card.callId));
 
   return (
     <div className="sc-msg sc-msg--assistant">
@@ -555,17 +590,28 @@ export function LiveTurn() {
       ) : null}
       {providerTools.length ? <ProviderToolChips items={providerTools} /> : null}
       {calls.length ? <ToolActivity calls={calls} results={results} /> : null}
-      {cards
-        .filter((c) => c.id !== pending?.id)
-        .map((c) => (
-          <CardRenderer key={c.id} card={c} />
-        ))}
+      {/* A known tool output owns one stable slot from call → skeleton → card.
+          Keeping the wrapper keyed by callId prevents a generated image or
+          chart from jumping to a new position when its real card arrives. */}
+      {calls.map((call) => {
+        const correlated = visibleCards.filter((card) => card.callId === call.callId);
+        const loading = run.pendingTools?.[call.callId]?.loading;
+        if (!correlated.length && !loading) return null;
+        return (
+          <div className="sc-tooloutput" key={call.callId} data-call-id={call.callId}>
+            {correlated.length
+              ? correlated.map((card) => <CardRenderer key={card.id} card={card} />)
+              : <CardSkeleton hint={loading} />}
+          </div>
+        );
+      })}
+      {uncorrelatedCards.map((card) => <CardRenderer key={card.id} card={card} />)}
       {/* The blocking card renders last and un-collapsed — it is the thing the
           user must act on, so nothing may hide it. */}
       {pending ? <CardRenderer key={pending.id} card={pending} respond={respond} /> : null}
       {text ? (
         <div
-          className={`sc-prose sc-msg__text${run.status === "running" ? " sc-msg__text--streaming" : ""}`}
+          className={`sc-prose sc-msg__text${run.status === "running" ? ` sc-msg__text--streaming sc-msg__text--${streamPhase}` : ""}`}
           dangerouslySetInnerHTML={{ __html: html }}
         />
       ) : null}

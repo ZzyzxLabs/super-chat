@@ -3,7 +3,7 @@ import { BUILTIN_CARDS } from "./builtin.js";
 import { CardRegistry } from "./registry.js";
 import { createVisualizeTool } from "../tools/builtin.js";
 import { ToolRegistry } from "../tools/registry.js";
-import type { ToolDefinition } from "../tools/types.js";
+import { resolveToolLoading, type ToolDefinition } from "../tools/types.js";
 
 const cards = new CardRegistry(BUILTIN_CARDS);
 
@@ -127,6 +127,14 @@ describe("visualize tool", () => {
     const limited = createVisualizeTool({ cards, kinds: ["table", "stats"] });
     expect(limited.inputSchema.properties?.["kind"]?.enum).toEqual(["table", "stats"]);
     expect(limited.description).not.toContain("- confirm");
+  });
+
+  it("describes known passive card geometry but never skeletonizes a decision", () => {
+    expect(resolveToolLoading(tool.loading, { kind: "chart", spec: {} })).toEqual({
+      kind: "chart",
+      label: "Preparing chart card",
+    });
+    expect(resolveToolLoading(tool.loading, { kind: "choice", spec: {} })).toBeUndefined();
   });
 });
 

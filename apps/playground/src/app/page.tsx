@@ -1,118 +1,132 @@
 import Link from "next/link";
-import { BUILTIN_CARDS } from "@zzyzxlabs/super-chat-core";
-import { PanelHeader } from "@/components/Shell";
+import { playgroundPath } from "@/agent/deployment";
+import styles from "./page.module.css";
 
-const RESOURCES = [
-  {
-    href: "/cards",
-    title: "Agent cards",
-    body: `${BUILTIN_CARDS.length} built-in card kinds the agent can choose from — tables, comparisons, funnels, gauges, citations, checklists, trees, documents, and the interactive kinds that pause the run for an answer. Each shown with the spec that produced it.`,
-    tag: "@zzyzxlabs/super-chat-core + /ui",
-  },
-  {
-    href: "/agent-ui",
-    title: "Agent surfaces",
-    body: "The chrome around a turn: thinking that streams and collapses, status orbs, code blocks, to-do lists and the composer. The parts of an agent UI that are not cards.",
-    tag: "@zzyzxlabs/super-chat-ui",
-  },
-  {
-    href: "/dev-ani",
-    title: "Animations",
-    body: "Every motion primitive in the stylesheet, grouped by the job it does — loading, streaming, entrance, status — instead of by component. Named, timed, and replayable on demand.",
-    tag: "styles.css",
-  },
-  {
-    href: "/skills",
-    title: "Skills",
-    body: "Retrievable operating knowledge with three delivery modes: always-on, matched by relevance, or pulled on demand by the model. Type a query and watch the scoring decide what enters context.",
-    tag: "SkillRegistry",
-  },
-  {
-    href: "/tools",
-    title: "Tools & presets",
-    body: "The tool registry with explicit capability allowlists. See every tool's JSON Schema, which presets grant it, and what the model is actually shown for a given preset selection.",
-    tag: "ToolRegistry",
-  },
-  {
-    href: "/requests",
-    title: "Wire requests",
-    body: "The same normalized request rendered into both OpenAI dialects, side by side. This is where the framework earns its keep — the two shapes disagree about almost everything.",
-    tag: "providers/openai",
-  },
-  {
-    href: "/app-state",
-    title: "App state",
-    body: "The agent reading and driving the host's own UI — a board it can see every turn and act on, through the same context-source and preset machinery everything else uses.",
-    tag: "createAppStateSource()",
-  },
-  {
-    href: "/documents",
-    title: "Documents",
-    body: "The sixth seam: an artifact the user keeps, a previewer they can quote from, and an edit protocol whose more important half is refusing. Drive the refusals yourself — no model needed.",
-    tag: "documents/",
-  },
-  {
-    href: "/run",
-    title: "Run & events",
-    body: "A live agent turn with the raw RunEvent stream beside it. Tool calls, card emission, human-in-the-loop suspension and context assembly, as they happen.",
-    tag: "runAgent()",
-  },
+const INTERNALS = [
+  ["Agent cards", "/cards", "23 validated visual forms"],
+  ["Skills", "/skills", "matched operating knowledge"],
+  ["Tools & presets", "/tools", "explicit capability gates"],
+  ["Wire requests", "/requests", "provider-correct payloads"],
+  ["Run & events", "/run", "scripted turns and event traces"],
 ];
 
-const FACTS = [
-  ["Provider adapters", "Hand-rolled. OpenAI Responses + Chat Completions, no LLM SDK."],
-  ["Async", "Background mode as a first-class run mode, polled and resumable across reloads."],
-  ["Transport", "Pluggable. Server-proxy by default; BYOK-direct and scripted-demo also ship."],
-  ["Context", "Rebuilt every turn under a token budget, with an inspectable trace."],
-  ["Card kinds", `${BUILTIN_CARDS.length} built in, ${BUILTIN_CARDS.filter((c) => c.interactive).length} of them interactive.`],
-  ["Documents", "A sixth persistence seam, with an edit protocol that refuses an ambiguous anchor rather than guessing."],
-  ["Tests", "367 unit, plus a browser suite across four viewports."],
-];
+const Arrow = () => (
+  <svg viewBox="0 0 16 16" aria-hidden="true">
+    <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 
-export default function OverviewPanel() {
+export default function ExperienceGallery() {
   return (
-    <div className="dev__page">
-      <PanelHeader title="superchat">
-        A frontend framework for agent services. It assembles contexts, skills and I/O content into requests that are
-        correct on the wire for each provider, and gives the agent a visual vocabulary to answer with. These panels
-        show what is available, one capability at a time — nothing here is a finished product.
-      </PanelHeader>
+    <div className={styles.page}>
+      <header className={styles.nav}>
+        <Link href="/" className={styles.brand}>
+          <span className={styles.mark} aria-hidden="true"><i /><i /><i /></span>
+          superchat
+        </Link>
+        <nav aria-label="Primary navigation">
+          <a href="#experiences">Experiences</a>
+          <a href="#runtime">The runtime</a>
+          <Link href={playgroundPath("/cards")}>Under the hood</Link>
+        </nav>
+        <Link href={playgroundPath("/run")} className={styles.open}>Open playground <Arrow /></Link>
+      </header>
 
-      <div className="dev__grid">
-        {RESOURCES.map((r) => (
-          <Link key={r.href} href={r.href} className="dev__tile">
-            <h3>{r.title}</h3>
-            <p>{r.body}</p>
-            <p style={{ marginTop: 8 }}>
-              <code className="sc-mono">{r.tag}</code>
+      <main>
+        <section className={styles.hero}>
+          <div className={styles.heroCopy}>
+            <h1>Build domain agents that don’t all look like chat.</h1>
+            <p>
+              One provider-neutral runtime for multimodal content, scoped tools, agent-chosen UI, and the visual
+              personality your product actually needs.
             </p>
-          </Link>
-        ))}
-      </div>
-
-      <section className="dev__section">
-        <h2 className="dev__section-title">At a glance</h2>
-        <p className="dev__section-note">
-          The framework is domain-neutral. The demo agent in these panels covers contract review, marketing analytics
-          and market data through the same registry — different skills and tools, identical machinery.
-        </p>
-        <dl className="sc-kv">
-          {FACTS.map(([k, v]) => (
-            <div key={k} className="sc-kv__row">
-              <dt>{k}</dt>
-              <dd style={{ textAlign: "left", maxWidth: "62ch" }}>{v}</dd>
+            <div className={styles.heroActions}>
+              <Link href="/experiences/legal">Explore working demos <Arrow /></Link>
             </div>
-          ))}
-        </dl>
-      </section>
+          </div>
+          <div className={styles.mechanism} aria-label="SuperChat agent pipeline">
+            <div><span>01</span><strong>Domain</strong><small>skills + context</small></div>
+            <i />
+            <div><span>02</span><strong>Authority</strong><small>tools + presets</small></div>
+            <i />
+            <div><span>03</span><strong>Expression</strong><small>cards + renderers</small></div>
+          </div>
+        </section>
 
-      <section className="dev__section">
-        <h2 className="dev__section-title">Install</h2>
-        <pre className="sc-pre">{`pnpm add @zzyzxlabs/super-chat-core @zzyzxlabs/super-chat-react @zzyzxlabs/super-chat-ui`}</pre>
-        <p className="dev__section-note" style={{ marginTop: 12 }}>
-          Core is isomorphic and React-free. React and UI are optional — a server-side agent needs only core.
-        </p>
-      </section>
+        <section className={styles.worlds} id="experiences" aria-label="Experience demos">
+          <Link className={`${styles.world} ${styles.legal}`} href="/experiences/legal">
+            <div className={styles.worldHead}>
+              <div><h2>Counsel Workspace</h2><p>Formal document intelligence</p></div>
+              <Arrow />
+            </div>
+            <div className={styles.paper}>
+              <span>VERTEX MASTER SERVICES AGREEMENT</span>
+              <b>7.2 Limitation of liability</b>
+              <p>In no event shall either party’s aggregate liability exceed fees paid in the preceding twelve months.</p>
+              <mark>One-way carve-out detected</mark>
+            </div>
+            <footer><span>PDF</span><span>citations</span><span>edit review</span></footer>
+          </Link>
+
+          <Link className={`${styles.world} ${styles.companion}`} href="/experiences/companion">
+            <div className={styles.orbit} aria-hidden="true"><i /></div>
+            <div className={styles.companionCopy}>
+              <h2>Milo</h2>
+              <p>You kept the promise you made to yourself this morning.</p>
+              <span className={styles.fakeButton}>Celebrate this moment</span>
+            </div>
+            <footer><span>memory</span><span>generated effects</span></footer>
+          </Link>
+
+          <Link className={`${styles.world} ${styles.defi}`} href="/experiences/defi">
+            <div className={styles.worldHead}>
+              <div><h2>SupWallet</h2><p>Agentic portfolio operations</p></div>
+              <Arrow />
+            </div>
+            <div className={styles.trade}>
+              <span>SupWallet agent</span>
+              <b>Rebalance volatile exposure</b>
+              <p>14.20 ETH → 48,972 USDC</p>
+              <em>29.4% → 17.6% · within policy</em>
+            </div>
+            <footer><span>agent card</span><span>simulate</span><span>execute</span></footer>
+          </Link>
+        </section>
+
+        <section className={styles.runtime} id="runtime">
+          <div>
+            <h2>Different products. The same inspectable machinery.</h2>
+            <p>
+              Switch the domain pack, visual theme, and selected renderers. Keep the provider adapters, event loop,
+              content model, tool authority, and metering contract.
+            </p>
+          </div>
+          <pre><code>{`defineExperience({
+  domain: legalDomain,
+  theme: formalDocument,
+  renderers: legalCards,
+  provider: bringYourOwnKey()
+})`}</code></pre>
+        </section>
+
+        <section className={styles.internals}>
+          <h2>Inspect every layer</h2>
+          <div>
+            {INTERNALS.map(([title, href, detail]) => (
+              <Link href={playgroundPath(href)} key={href}>
+                <span><strong>{title}</strong><small>{detail}</small></span>
+                <Arrow />
+              </Link>
+            ))}
+          </div>
+        </section>
+      </main>
+
+      <footer className={styles.foot}>
+        <strong>SuperChat</strong>
+        <span>A frontend framework for agent services.</span>
+        <code>Apache-2.0 · scripted demo data</code>
+      </footer>
     </div>
   );
 }

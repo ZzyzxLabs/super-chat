@@ -22,11 +22,16 @@ CLI or worker installs it alone.
 | [`@zzyzxlabs/super-chat-core`](packages/core/README.md) | provider-agnostic engine — no React, isomorphic |
 | [`@zzyzxlabs/super-chat-react`](packages/react/README.md) | thread state, run control, card actions |
 | [`@zzyzxlabs/super-chat-ui`](packages/ui/README.md) | card renderers, chat primitives, context inspector, portable Mobile Agent assets |
-| [`apps/playground`](apps/playground/README.md) | Next.js dev panels — one per capability, **no API key needed** |
+| [`apps/playground`](apps/playground/README.md) | Three product-shaped agent experiences plus inspectable dev panels, **no API key needed** |
 
 **Try it without a key first.** The playground runs the real adapter, runtime,
 tools and context builder against a scripted transport — so what you are looking
 at is the framework, not a mock of it. See [Run it](#run-it).
+
+The landing page proves the same runtime through three deliberately different
+products: a legal document workspace, an expressive companion, and SupWallet's
+simulated DeFi operations. Each demo can reveal the skill, tools, card, provider,
+token use and timing behind its run.
 
 ## Documentation
 
@@ -290,6 +295,83 @@ export const POST = createProxyHandler({
 Verified in tests: unlisted paths 403, `..` traversal 403, client-supplied
 `Authorization` headers ignored.
 
+### Provider profiles: official and compatible endpoints
+
+A profile is public, serializable endpoint metadata — never a credential. The
+same OpenAI adapter serves official Responses and OpenAI-compatible Chat
+Completions endpoints; the profile selects the dialect and the transport owns
+the key:
+
+```ts
+const profile = createOpenAICompatibleProfile({
+  id: "oneapi",
+  label: "Company oneAPI",
+  baseUrl: "https://oneapi.example.com/v1",
+  capabilities: { backgroundJobs: false, fileUpload: false },
+});
+
+const transport = createDirectTransportForProfile(profile, {
+  apiKey,
+  dangerouslyAllowBrowser: true,
+});
+const provider = createProviderFromProfile(profile, transport);
+```
+
+For a server proxy, register `oneapi` in `createProxyHandler.providers` with
+that server's Base URL, secret and `POST /chat/completions` allowlist. Do not
+accept an arbitrary client-supplied Base URL in a server proxy — that turns a
+provider setting into SSRF access to the server's network.
+
+### Media generation
+
+Media generation is a parallel provider seam rather than extra methods on the
+chat Provider. OpenAI-compatible `/images/generations` is implemented and can
+be exposed to the agent as a normal tool:
+
+```ts
+const images = createOpenAIImageProvider({
+  transport,
+  id: profile.id,
+  defaultModel: "gpt-image-1",
+});
+
+tools.register(createGenerateImageTool(images), ["executor"]);
+```
+
+The model receives compact asset metadata; image bytes and URLs render in a
+`media` card instead of being copied into the next prompt. `MediaProvider`
+also defines speech, transcription and async video job seams. Their provider
+adapters are not implemented yet; the media renderer already handles image,
+audio and video URLs. The image tool also declares its expected output count
+and aspect ratio through `ToolDefinition.loading`, so the UI can reserve the
+right geometry before the provider returns and keep it reserved until the
+browser decodes the result.
+
+### Metering: usage facts, not a billing system
+
+Every attempted provider step and every completed run emits one canonical,
+idempotent `metering` record. Records include requested and provider-reported
+models, mode, outcome, token usage, timing and optional host metadata:
+
+```ts
+const meter = {
+  record: async (record: MeteringRecord) => usageStore.put(record.id, record),
+  onError: (error: unknown) => logger.warn(error),
+};
+
+for await (const event of runAgent(messages, {
+  ...config,
+  meter,
+  meteringMetadata: { workspaceId },
+})) {
+  if (event.type === "metering") renderReceipt(event.record);
+}
+```
+
+Meter delivery is awaited to preserve order but fail-open, so an observability
+outage does not fail the agent run. Core records provider facts only: pricing,
+credits, ledgers, persistence and settlement remain host responsibilities.
+
 ---
 
 ## Capability presets
@@ -317,14 +399,16 @@ pnpm install && pnpm build
 pnpm dev
 ```
 
-The playground is a set of **dev panels**, not a finished app — each isolates one
-capability so you can see what is available without reading the source. It runs
-with **no API key**: a scripted demo transport replaces the network while the
-real adapter, runtime, tools and context builder do the actual work.
+The playground combines **product-shaped experiences** with focused dev panels.
+It runs with **no API key**: scripted demo transports replace the network while
+the real adapter, runtime, tools and context builder do the actual work.
 
 | panel | what it shows |
 | --- | --- |
-| `/` | Overview — what's in the box |
+| `/` | Product gallery — three domain agents on one runtime |
+| `/experiences/legal` | Counsel Workspace — clause highlights, citations and an editable legal brief |
+| `/experiences/companion` | Milo — a memory-aware companion with generated keepsakes and effects |
+| `/experiences/defi` | SupWallet — simulated portfolio analysis and execution through agent cards |
 | `/cards` | All 23 card kinds, each beside the spec that produced it |
 | `/agent-ui` | The chrome around a turn: thinking, orbs, code, to-dos, composer |
 | `/skills` | Live match scoring, and the context a query assembles |
@@ -334,9 +418,12 @@ real adapter, runtime, tools and context builder do the actual work.
 | `/documents` | The previewer, quoting, and the edit refusals — driven by hand |
 | `/run` | A live turn with the raw event stream and context trace beside it |
 
-The demo agent covers **contract review, marketing analytics and market data**
-through one registry — different skills and tools, identical machinery. Watch
-`/run` and note that a legal question exposes only the legal tools.
+The experience flows use synthetic data and expose an **Inspect run** drawer for
+their shared skills, tools, cards and metering. The x402 view is explicitly a
+protocol preview: it opens no wallet and settles no payment. The lower-level
+demo agent still covers **contract review, marketing analytics and market data**
+through one registry; watch `/run` and note that a legal question exposes only
+the legal tools.
 
 For a live model, add `OPENAI_API_KEY` to `apps/playground/.env.local` and switch
 the transport selector to **Server proxy**, or pick **BYOK direct** and paste a key.
@@ -345,16 +432,16 @@ the transport selector to **Server proxy**, or pick **BYOK direct** and paste a 
 pnpm test
 ```
 
-359 tests. The runtime suite drives the real OpenAI and Anthropic adapters
+387 tests. The runtime suite drives the real OpenAI and Anthropic adapters
 against mocked transports, so the tool loop, card suspension, thinking replay,
-background polling and concurrent proxy streaming are all exercised with no key
-and no network.
+background polling, provider profiles, metering, media generation and concurrent
+proxy streaming are all exercised with no key and no network.
 
 ---
 
 ## Status
 
-v0.1. Working and tested; API not frozen.
+v0.2. Working and tested; API not frozen.
 
 **Built:** OpenAI adapter (Responses + Chat Completions + background jobs) and
 Anthropic adapter (`/v1/messages`, thinking-signature replay), transport layer
@@ -375,10 +462,14 @@ activity surfaced in the transcript), **responsive support** (two
 container-query tiers for width, media queries for device traits — a phone can
 hold a conversation end to end), and the **document seam** (artifacts, a
 quotable previewer, an anchored edit protocol with hunk-by-hunk approval, and
-`.eml` as the way out).
+`.eml` as the way out), **provider profiles** for official and OpenAI-compatible
+endpoints, **per-step and per-run metering**, an OpenAI-compatible image provider
+with agent-tool bridge, stable geometry-aware loading states, and three complete
+product-shaped playground experiences backed by the same runtime.
 
-**Not built yet:** a Gemini adapter, and voice / image generation (out of scope
-for a framework — they belong to the host's own product surface).
+**Not built yet:** a Gemini adapter, speech/transcription provider adapters,
+and video-generation provider adapters. Image generation is available through
+the OpenAI-compatible media provider and agent-tool bridge.
 
 **Known gaps**, kept here rather than in a tracker so they are read: `undo`
 walks one step back and then ping-pongs between two revisions; a document quote

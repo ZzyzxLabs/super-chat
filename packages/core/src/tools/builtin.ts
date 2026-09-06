@@ -64,6 +64,31 @@ export function createVisualizeTool(opts: VisualizeToolOptions): ToolDefinition 
       },
       additionalProperties: false,
     },
+    loading: (input) => {
+      const { kind, spec } = (input ?? {}) as { kind?: string; spec?: Record<string, unknown> };
+      if (!kind || cards.get(kind)?.interactive) return undefined;
+      const outputKind = kind === "media"
+        ? "media"
+        : ["chart", "funnel", "gauge"].includes(kind)
+          ? "chart"
+          : ["table", "comparison"].includes(kind)
+            ? "table"
+            : ["document", "markdown", "code", "diff", "email"].includes(kind)
+              ? "document"
+              : "generic";
+      const mediaItems = kind === "media" && Array.isArray(spec?.["items"])
+        ? spec["items"] as Record<string, unknown>[]
+        : [];
+      const first = mediaItems[0];
+      const width = typeof first?.["width"] === "number" ? first["width"] : undefined;
+      const height = typeof first?.["height"] === "number" ? first["height"] : undefined;
+      return {
+        kind: outputKind,
+        label: `Preparing ${kind} card`,
+        ...(mediaItems.length ? { count: mediaItems.length } : {}),
+        ...(width && height ? { aspectRatio: `${width} / ${height}` } : {}),
+      };
+    },
     async execute(input, ctx) {
       const { kind, spec } = (input ?? {}) as { kind?: string; spec?: Record<string, unknown> };
       if (!kind) return { output: { ok: false, error: "`kind` is required." }, failure: "invalid-input" as const };

@@ -47,6 +47,23 @@ import {
 } from "@zzyzxlabs/super-chat-ui/mobile-agent/react-native";
 ```
 
+## Loading states
+
+`LiveTurn` distinguishes uncertain prose from predictable output geometry:
+
+- streamed prose renders real text with a steady caret while deltas arrive and
+  blinks only after a 420 ms quiet gap;
+- a tool with `ToolDefinition.loading` gets a delayed, kind-specific card
+  skeleton in a stable `callId` slot;
+- generated media keeps that slot through the provider response, then retains a
+  media skeleton until image decode or audio/video metadata completes;
+- `prefers-reduced-motion` keeps the status and geometry but stops the shimmer,
+  blink, and decode fade.
+
+Use `CardSkeleton` directly for host-managed work. Pass `hint.kind` as `media`,
+`chart`, `table`, `document`, or `generic`; include a real media `count` and
+`aspectRatio` whenever the request already determines them.
+
 ## Develop
 
 ```bash

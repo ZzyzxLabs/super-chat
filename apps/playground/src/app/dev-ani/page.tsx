@@ -12,6 +12,7 @@
 import { type ReactNode, useEffect, useState } from "react";
 import {
   Caret,
+  CardSkeleton,
   HELIX_VARIANTS,
   LATTICE_VARIANTS,
   LENS_VARIANTS,
@@ -434,6 +435,21 @@ export default function DevAniPanel() {
 
           <ValueMotionDemo />
         </div>
+
+        <div className="dev__anigrid" style={{ marginTop: 12 }}>
+          <AniTile name="CardSkeleton · media" timing="200ms delay · geometry-preserving">
+            <CardSkeleton delayMs={0} hint={{ kind: "media", label: "Generating 2 images", count: 2, aspectRatio: "4 / 3" }} />
+          </AniTile>
+          <AniTile name="CardSkeleton · chart" timing="200ms delay · geometry-preserving">
+            <CardSkeleton delayMs={0} hint={{ kind: "chart", label: "Building chart" }} />
+          </AniTile>
+          <AniTile name="CardSkeleton · table" timing="200ms delay · geometry-preserving">
+            <CardSkeleton delayMs={0} hint={{ kind: "table", label: "Preparing comparison" }} />
+          </AniTile>
+          <AniTile name="CardSkeleton · document" timing="200ms delay · geometry-preserving">
+            <CardSkeleton delayMs={0} hint={{ kind: "document", label: "Drafting document" }} />
+          </AniTile>
+        </div>
       </section>
 
       {/* ── streaming text & carets ────────────────────────────────────── */}
@@ -462,7 +478,7 @@ export default function DevAniPanel() {
             </div>
           </AniTile>
 
-          <AniTile name=".sc-msg__text--streaming::after" timing="1s · step-end · infinite">
+          <AniTile name=".sc-msg__text--streaming::after" timing="steady on delta · blink after 420ms quiet">
             <div style={{ width: "100%" }}>
               <div className="sc-bubble" style={{ maxWidth: "100%" }}>
                 <div className={"sc-msg__text" + (streamOn ? " sc-msg__text--streaming" : "")}>

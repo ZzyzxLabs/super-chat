@@ -13,6 +13,8 @@ html, body {
 /* ── dev shell ────────────────────────────────────────────────────────────── */
 
 .dev { display: grid; grid-template-columns: 232px minmax(0, 1fr); height: 100dvh; overflow: hidden; }
+.dev--experience { grid-template-columns: minmax(0, 1fr); }
+.dev--experience .dev__main { height: 100dvh; }
 
 .dev__nav {
   display: flex;

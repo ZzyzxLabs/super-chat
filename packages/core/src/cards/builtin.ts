@@ -313,7 +313,7 @@ export const progressCard: CardKindDefinition = {
 
 export const mediaCard: CardKindDefinition = {
   kind: "media",
-  summary: "Images or figures with captions.",
+  summary: "Images, audio, or video with captions.",
   estimateTokens: tokensOf,
   schema: {
     type: "object",
@@ -327,7 +327,15 @@ export const mediaCard: CardKindDefinition = {
         items: {
           type: "object",
           required: ["url"],
-          properties: { url: { type: "string" }, alt: { type: "string" }, caption: { type: "string" }, mediaType: { type: "string" } },
+          properties: {
+            url: { type: "string" },
+            alt: { type: "string" },
+            caption: { type: "string" },
+            mediaType: { type: "string" },
+            width: { type: "number" },
+            height: { type: "number" },
+            durationMs: { type: "number" },
+          },
         },
       },
     },

@@ -98,6 +98,8 @@ export type AgentClientConfig = {
   store?: boolean;
   metadata?: Record<string, string>;
   providerOptions?: RunConfig["providerOptions"];
+  meter?: RunConfig["meter"];
+  meteringMetadata?: RunConfig["meteringMetadata"];
   jobStore?: JobStore;
   /** When set, the thread is saved after each user and assistant turn. */
   threadStore?: ThreadStore;
@@ -312,6 +314,8 @@ export class AgentClient {
       store: this.config.store,
       metadata: this.config.metadata,
       providerOptions: this.config.providerOptions,
+      meter: this.config.meter,
+      meteringMetadata: this.config.meteringMetadata,
       signal: this.controller.signal,
       forceSkillIds: opts.forceSkillIds,
       onHostTool: this.config.onHostTool,

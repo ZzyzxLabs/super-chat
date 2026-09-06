@@ -7,23 +7,27 @@ import {
   BUILTIN_CARDS,
   CardRegistry,
   ContextBuilder,
+  ANTHROPIC_OFFICIAL_PROFILE,
+  OPENAI_OFFICIAL_PROFILE,
   SkillRegistry,
   ToolRegistry,
-  createAnthropicProvider,
   createBuiltinTools,
-  createDirectTransport,
+  createDirectTransportForProfile,
   createKeywordRetriever,
   createLocalFileStore,
   createLocalJobStore,
   createLocalMemoryStore,
   createLocalThreadStore,
   createMemorySource,
+  createOpenAICompatibleProfile,
   createOpenAIProvider,
+  createProviderFromProfile,
   createProxyTransport,
   createRememberTool,
   createRestThreadStore,
   createRetrievalSource,
   type Provider,
+  type ProviderProfile,
   type Transport,
   createDocumentTools,
   createEmailDraftTool,
@@ -35,7 +39,23 @@ import { LEGAL_TOOLS, MARKETING_TOOLS } from "./tools-domains";
 import { SKILLS } from "./skills";
 
 export type TransportMode = "demo" | "proxy" | "direct";
-export type Vendor = "openai" | "anthropic";
+export type ProviderId = "openai" | "oneapi" | "anthropic";
+
+export const PROVIDER_PROFILES: Record<ProviderId, ProviderProfile> = {
+  openai: OPENAI_OFFICIAL_PROFILE,
+  oneapi: createOpenAICompatibleProfile({
+    id: "oneapi",
+    label: "OpenAI-compatible / oneAPI",
+    baseUrl: "https://oneapi.example.com/v1",
+    capabilities: {
+      backgroundJobs: false,
+      resumableStreams: false,
+      serverSideHistory: false,
+      fileUpload: false,
+    },
+  }),
+  anthropic: ANTHROPIC_OFFICIAL_PROFILE,
+};
 
 export const cards = new CardRegistry(BUILTIN_CARDS);
 export const skills = new SkillRegistry(SKILLS, { maxMatched: 3 });
@@ -109,18 +129,26 @@ function populateToolRegistry(registry: ToolRegistry): void {
  */
 export const toolRegistry = buildToolRegistry();
 
-export function buildTransport(mode: TransportMode, vendor: Vendor = "openai", apiKey?: string): Transport {
+const missingCredentialTransport = (): Transport => ({
+  kind: "custom",
+  credentialSafe: true,
+  async fetch() {
+    return new Response(JSON.stringify({ error: { message: "Enter an API key before sending a BYOK request." } }), {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    });
+  },
+});
+
+export function buildTransport(mode: TransportMode, profile: ProviderProfile = PROVIDER_PROFILES.openai, apiKey?: string): Transport {
   // Demo replaces only the network. The adapter, runtime, tools, cards and
   // context builder above it are the real ones. (The demo script speaks the
   // OpenAI Responses shape, so demo mode always pairs with the OpenAI adapter.)
   if (mode === "demo") return createDemoTransport();
   if (mode === "direct") {
-    if (!apiKey) throw new Error("BYOK mode needs an API key.");
-    return createDirectTransport({
-      baseUrl: vendor === "anthropic" ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1",
+    if (!apiKey) return missingCredentialTransport();
+    return createDirectTransportForProfile(profile, {
       apiKey,
-      // Anthropic authenticates with x-api-key, not a Bearer header.
-      ...(vendor === "anthropic" ? { authStyle: "x-api-key" as const } : {}),
       // Named to make the trade-off explicit: this ships the key to the client.
       dangerouslyAllowBrowser: true,
     });
@@ -128,14 +156,17 @@ export function buildTransport(mode: TransportMode, vendor: Vendor = "openai", a
   return createProxyTransport({ url: "/api/agent" });
 }
 
-export function buildProvider(transport: Transport, mode: TransportMode = "proxy", vendor: Vendor = "openai"): Provider {
+export function buildProvider(
+  transport: Transport,
+  mode: TransportMode = "proxy",
+  profile: ProviderProfile = PROVIDER_PROFILES.openai,
+): Provider {
   // Demo gets its OWN provider id: providerFile refs are stamped with the id
   // that minted them, so a fake `file_demo_N` attached in demo mode degrades
   // to a readable placeholder when the thread is replayed against real
   // OpenAI, instead of 400ing the thread forever.
   if (mode === "demo") return createOpenAIProvider({ transport, dialect: "responses", id: "demo" });
-  if (vendor === "anthropic") return createAnthropicProvider({ transport });
-  return createOpenAIProvider({ transport, dialect: "responses" });
+  return createProviderFromProfile(profile, transport);
 }
 
 /**
@@ -220,12 +251,13 @@ export const threadStore = localThreads;
  * the search inside its own response. Presets gate what OUR executors may do,
  * so a host that wants to gate this gates it here, at configuration time.
  */
-export const WEB_SEARCH_TOOLS: Record<string, ({ type: string } & Record<string, unknown>)[]> = {
+export const WEB_SEARCH_TOOLS: Partial<Record<ProviderId, ({ type: string } & Record<string, unknown>)[]>> = {
   openai: [{ type: "web_search_20260209", name: "web_search" }],
   anthropic: [{ type: "web_search_20260209", name: "web_search", max_uses: 5 }],
 };
 
-export const MODELS: Record<Vendor, string[]> = {
+export const MODELS: Record<ProviderId, string[]> = {
   openai: ["gpt-5.2", "gpt-5.2-mini", "gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini"],
+  oneapi: ["gpt-4o-mini"],
   anthropic: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
 };

@@ -4,6 +4,8 @@ import { useMemo, useState, useSyncExternalStore } from "react";
 import { McpClient, createHttpTransport, createMcpSkill, importMcpTools } from "@zzyzxlabs/super-chat-core";
 import { PanelHeader } from "@/components/Shell";
 import { skills, toolRegistry } from "@/agent/setup";
+import { createDemoMcpTransport } from "@/agent/demo-mcp";
+import { IS_STATIC_DEMO } from "@/agent/deployment";
 
 const PRESETS = ["observer", "executor"] as const;
 
@@ -18,7 +20,7 @@ export default function ToolsPanel() {
   const [enabled, setEnabled] = useState<string[]>(["observer"]);
   const [open, setOpen] = useState<string | null>(null);
 
-  const [mcpUrl, setMcpUrl] = useState("/api/mcp");
+  const [mcpUrl, setMcpUrl] = useState(IS_STATIC_DEMO ? "browser-local mock" : "/api/mcp");
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState<string[]>([]);
   const [allowImported, setAllowImported] = useState(false);
@@ -28,7 +30,9 @@ export default function ToolsPanel() {
     setImporting(true);
     setImportError(null);
     try {
-      const client = new McpClient({ transport: createHttpTransport({ baseUrl: mcpUrl }) });
+      const client = new McpClient({
+        transport: IS_STATIC_DEMO ? createDemoMcpTransport() : createHttpTransport({ baseUrl: mcpUrl }),
+      });
       const { serverInfo } = await client.connect();
       const defs = await importMcpTools(client);
       // NO preset: imported tools are skill-gated/private, like every other
@@ -165,7 +169,9 @@ export default function ToolsPanel() {
           (private — import grants existence, never authority), and <code className="sc-mono">createMcpSkill()</code>{" "}
           registers a matched skill naming them — so on <code className="sc-mono">/run</code>, asking about e.g. a word
           count surfaces and unlocks them like any domain tool. The allow toggle below simulates that match manually.
-          The default URL is this playground&apos;s own mock MCP route — no key, real HTTP.
+          {IS_STATIC_DEMO
+            ? " This public showcase runs that same protocol against a browser-local mock, so no request leaves your device."
+            : " The default URL is this playground&apos;s own mock MCP route — no key, real HTTP."}
         </p>
         <div className="dev__row">
           <input
@@ -174,6 +180,7 @@ export default function ToolsPanel() {
             value={mcpUrl}
             onChange={(e) => setMcpUrl(e.target.value)}
             placeholder="/api/mcp"
+            readOnly={IS_STATIC_DEMO}
           />
           <button type="button" className="sc-btn sc-btn--sm" disabled={importing || !mcpUrl.trim()} onClick={() => void importFromMcp()}>
             {importing ? "Connecting…" : imported.length ? "Re-import" : "Connect & import"}

@@ -46,6 +46,21 @@ export type {
   FileUploadRequest,
   ProviderFileRef,
 } from "./providers/types.js";
+export {
+  OPENAI_OFFICIAL_PROFILE,
+  ANTHROPIC_OFFICIAL_PROFILE,
+  createOpenAICompatibleProfile,
+  normalizeProviderProfile,
+  createProviderFromProfile,
+  createDirectTransportForProfile,
+  type ProviderProtocol,
+  type ProviderProfile,
+  type ProfileDirectTransportConfig,
+} from "./providers/profile.js";
+
+// media generation — parallel to chat providers because the wire APIs, job
+// lifecycle and persisted outputs are materially different from a chat turn.
+export * from "./media/index.js";
 
 // tokens
 export { estimateTokens, estimateJsonTokens, MESSAGE_OVERHEAD_TOKENS, type TokenCounter } from "./tokens/estimate.js";
@@ -103,6 +118,7 @@ export { createVisualizeTool, createLoadSkillTool, createUpdateCardTool, createB
 
 // runtime
 export * from "./runtime/events.js";
+export * from "./runtime/metering.js";
 export { runAgent, type RunConfig } from "./runtime/run.js";
 export { executeToolCall, executeToolCalls, compactError, type ToolCallRequest, type ToolCallOutcome, type ExecuteToolOptions } from "./runtime/execute-tools.js";
 export * from "./runtime/stop.js";

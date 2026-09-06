@@ -201,6 +201,43 @@ describe("RunConfig pass-throughs reach the wire", () => {
   });
 });
 
+describe("tool loading hints", () => {
+  it("surfaces host-only output geometry and clears the pending slot on result", async () => {
+    const tool: ToolDefinition = {
+      name: "buildChart",
+      description: "Build a chart.",
+      inputSchema: { type: "object" },
+      loading: { kind: "chart", label: "Building chart" },
+      execute: () => ({ output: { ok: true } }),
+    };
+    const registry = new ToolRegistry().register(tool, ["observer"]);
+    const provider = createOpenAIProvider({
+      transport: mockTransport([respondToolCall("buildChart", {}, "call_chart"), respondText("Done.")]),
+    });
+    const events = await collect(
+      runAgent([userMessage("chart it")], {
+        provider,
+        model: "gpt-5.2",
+        contextBuilder: new ContextBuilder({ identity: "Test.", contextWindow: 32_000 }),
+        tools: registry,
+        toolResolution: { presets: ["observer"] },
+        mode: "sync",
+      }),
+    );
+
+    const callIndex = events.findIndex((event) => event.type === "tool-call");
+    const resultIndex = events.findIndex((event) => event.type === "tool-result");
+    const call = events[callIndex] as Extract<RunEvent, { type: "tool-call" }>;
+    expect(call.loading).toEqual({ kind: "chart", label: "Building chart" });
+
+    const pending = events.slice(0, callIndex + 1).reduce(reduceRunEvent, initialRunState("run", "sync"));
+    expect(pending.pendingTools.call_chart?.loading?.kind).toBe("chart");
+
+    const settled = events.slice(0, resultIndex + 1).reduce(reduceRunEvent, initialRunState("run", "sync"));
+    expect(settled.pendingTools.call_chart).toBeUndefined();
+  });
+});
+
 describe("capability enforcement", () => {
   it("rejects image parts on a provider that declares images: false", async () => {
     const transport = mockTransport([respondText("ok")]);

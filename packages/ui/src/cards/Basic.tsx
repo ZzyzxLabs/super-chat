@@ -2,7 +2,7 @@
 
 // The read-only card renderers.
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type SyntheticEvent } from "react";
 import type {
   CodeCard,
   DiffCard,
@@ -230,18 +230,69 @@ export function ProgressCardView({ spec }: CardRendererProps<ProgressCard>) {
   );
 }
 
+type MediaItem = MediaCard["items"][number];
+
+function MediaItemView({ item }: { item: MediaItem }) {
+  const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+  const type = item.mediaType?.toLowerCase() ?? "image/*";
+  const label = item.alt ?? item.caption ?? (type.startsWith("audio/") ? "Generated audio" : type.startsWith("video/") ? "Generated video" : "Generated image");
+  const ratio = item.width && item.height ? `${item.width} / ${item.height}` : undefined;
+
+  const imageReady = (event: SyntheticEvent<HTMLImageElement>) => {
+    const image = event.currentTarget;
+    if (typeof image.decode === "function") {
+      void image.decode().catch(() => undefined).then(() => setState("ready"));
+    } else {
+      setState("ready");
+    }
+  };
+
+  return (
+    <figure className={`sc-media__item sc-media__item--${state}`}>
+      <div
+        className={`sc-media__viewport${type.startsWith("audio/") ? " sc-media__viewport--audio" : ""}`}
+        style={ratio ? { aspectRatio: ratio } : undefined}
+      >
+        {state === "loading" ? (
+          <div className="sc-media__decode sc-skeleton__surface" role="status" aria-live="polite">
+            <span className="sc-sr-only">Loading generated media…</span>
+          </div>
+        ) : null}
+        {state === "error" ? <div className="sc-media__error" role="alert">Media could not be loaded.</div> : null}
+        {type.startsWith("audio/") ? (
+          <audio
+            src={item.url}
+            controls
+            preload="metadata"
+            aria-label={label}
+            onLoadedMetadata={() => setState("ready")}
+            onError={() => setState("error")}
+          />
+        ) : type.startsWith("video/") ? (
+          <video
+            src={item.url}
+            controls
+            preload="metadata"
+            aria-label={label}
+            onLoadedMetadata={() => setState("ready")}
+            onError={() => setState("error")}
+          />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={item.url} alt={item.alt ?? item.caption ?? ""} loading="lazy" onLoad={imageReady} onError={() => setState("error")} />
+        )}
+      </div>
+      {item.caption ? <figcaption className="sc-muted">{item.caption}</figcaption> : null}
+    </figure>
+  );
+}
+
 export function MediaCardView({ spec }: CardRendererProps<MediaCard>) {
   return (
     <div className="sc-card">
       {spec.title ? <div className="sc-card__title">{spec.title}</div> : null}
       <div className={spec.layout === "single" ? "sc-media sc-media--single" : "sc-media"}>
-        {spec.items.map((item, i) => (
-          <figure key={i} className="sc-media__item">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={item.url} alt={item.alt ?? item.caption ?? ""} loading="lazy" />
-            {item.caption ? <figcaption className="sc-muted">{item.caption}</figcaption> : null}
-          </figure>
-        ))}
+        {spec.items.map((item, i) => <MediaItemView key={`${item.url}:${i}`} item={item} />)}
       </div>
     </div>
   );

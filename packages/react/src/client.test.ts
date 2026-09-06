@@ -59,6 +59,25 @@ function makeClient(
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe("AgentClient + ThreadStore", () => {
+  it("passes the full metering controls through to runAgent", async () => {
+    const records: import("@zzyzxlabs/super-chat-core").MeteringRecord[] = [];
+    const client = makeClient([respondText("metered")], {
+      meter: { record: (record) => { records.push(record); } },
+      meteringMetadata: { tenantId: "tenant-1" },
+    });
+
+    await client.send("measure this");
+
+    expect(records.map((record) => record.scope)).toEqual(["step", "run"]);
+    expect(records.every((record) => record.metadata?.tenantId === "tenant-1")).toBe(true);
+    expect(records[0]).toMatchObject({
+      provider: "openai",
+      requestedModel: "gpt-5.2",
+      reportedModel: "gpt-5.2",
+      usage: { totalTokens: 120 },
+    });
+  });
+
   it("saves after the user turn and again after the assistant turn", async () => {
     const store = createMemoryThreadStore();
     const saves: number[] = [];

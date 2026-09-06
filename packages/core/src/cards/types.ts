@@ -133,7 +133,16 @@ export type ProgressCard = {
 export type MediaCard = {
   kind: "media";
   title?: string;
-  items: { url: string; alt?: string; caption?: string; mediaType?: string }[];
+  items: {
+    url: string;
+    alt?: string;
+    caption?: string;
+    mediaType?: string;
+    /** Known intrinsic geometry keeps generated media from shifting on decode. */
+    width?: number;
+    height?: number;
+    durationMs?: number;
+  }[];
   layout?: "grid" | "single";
 };
 

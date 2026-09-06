@@ -2,6 +2,7 @@ node_modules/
 .npmrc
 dist/
 .next/
+apps/site/out/
 .turbo/
 *.tsbuildinfo
 .env
@@ -11,3 +12,4 @@ coverage/
 # Playwright (layer 2 of the responsive tests)
 test-results/
 playwright-report/
+apps/playground/.impeccable/

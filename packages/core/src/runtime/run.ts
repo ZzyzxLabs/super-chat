@@ -19,11 +19,19 @@ import type { ContextBuilder } from "../context/builder.js";
 import { AgentError, toAgentError } from "../errors.js";
 import type { GenerateResult, NormalizedRequest, Provider, StreamEvent } from "../providers/types.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import type { ToolResolution } from "../tools/types.js";
+import { resolveToolLoading, type ToolResolution } from "../tools/types.js";
 import { awaitJob } from "./jobs.js";
 import { executeToolCalls, type ToolCallRequest } from "./execute-tools.js";
 import { EventChannel } from "./channel.js";
 import type { RunEvent, RunMode } from "./events.js";
+import {
+  combineMeteringSources,
+  deliverMetering,
+  usageSource,
+  type MeterSink,
+  type MeteringRecord,
+  type MeteringSource,
+} from "./metering.js";
 import { shouldStop, type StopCondition } from "./stop.js";
 
 export type RunConfig = {
@@ -50,6 +58,10 @@ export type RunConfig = {
   /** Provider-side conversation storage opt-out (OpenAI `store`). */
   store?: boolean;
   metadata?: Record<string, string>;
+  /** Usage delivery target. Pricing and persistence belong to the host. */
+  meter?: MeterSink;
+  /** Host-only dimensions copied onto metering records, never sent upstream. */
+  meteringMetadata?: Readonly<Record<string, string>>;
   /** The per-provider escape hatch, keyed by provider id. */
   providerOptions?: NormalizedRequest["providerOptions"];
   toolTimeoutMs?: number;
@@ -81,6 +93,7 @@ export async function* runAgent(
   const mode = config.mode ?? "stream";
   const maxSteps = config.maxSteps ?? 8;
   const vars = config.vars ?? {};
+  const runStartedAt = Date.now();
 
   yield { type: "run-start", runId, mode };
 
@@ -93,7 +106,10 @@ export async function* runAgent(
   let totalUsage: Usage = {};
   let finishReason: FinishReason = "unknown";
   let step = 0;
+  let attemptedSteps = 0;
   let previousResponseId: string | undefined;
+  const meteringSources: MeteringSource[] = [];
+  const reportedModels = new Set<string>();
 
   try {
     // ── context, built once per run ────────────────────────────────────────
@@ -122,6 +138,8 @@ export async function* runAgent(
     while (step < maxSteps) {
       if (config.signal?.aborted) throw new AgentError("cancelled", "Run was cancelled.");
       yield { type: "step-start", step };
+      attemptedSteps += 1;
+      const stepStartedAt = Date.now();
 
       const request: NormalizedRequest = {
         model: config.model,
@@ -149,54 +167,105 @@ export async function* runAgent(
       let stepFinish: FinishReason = "unknown";
       let stepUsage: Usage | undefined;
       let responseId: string | undefined;
+      let reportedModel: string | undefined;
+      let streamSnapshot: (() => GenerateResult) | undefined;
 
-      if (mode === "stream" && config.provider.capabilities.streaming) {
-        const collected = collectStream(config.provider.stream(request, { signal: config.signal }));
-        for await (const event of collected.events()) {
-          if (event.type === "text-delta") yield { type: "text-delta", delta: event.delta };
-          else if (event.type === "reasoning-delta") yield { type: "reasoning-delta", delta: event.delta };
-          else if (event.type === "error") throw toAgentError(event.error, config.provider.id);
-        }
-        const done = collected.result();
-        parts = done.parts;
-        stepFinish = done.finishReason;
-        stepUsage = done.usage;
-        responseId = done.responseId;
-      } else if (mode === "background") {
-        if (!config.provider.startJob || !config.provider.capabilities.backgroundJobs) {
-          throw new AgentError(
-            "not-supported",
-            `Provider "${config.provider.id}" has no background mode. Use mode "stream" or "sync".`,
-          );
-        }
-        const handle = await config.provider.startJob({ ...request, background: true }, { signal: config.signal });
-        yield { type: "job-started", handle };
+      try {
+        if (mode === "stream" && config.provider.capabilities.streaming) {
+          const collected = collectStream(config.provider.stream(request, { signal: config.signal }));
+          streamSnapshot = collected.result;
+          for await (const event of collected.events()) {
+            if (event.type === "text-delta") yield { type: "text-delta", delta: event.delta };
+            else if (event.type === "reasoning-delta") yield { type: "reasoning-delta", delta: event.delta };
+            else if (event.type === "error") throw toAgentError(event.error, config.provider.id);
+          }
+          const done = collected.result();
+          parts = done.parts;
+          stepFinish = done.finishReason;
+          stepUsage = done.usage;
+          responseId = done.responseId;
+          reportedModel = done.modelId || undefined;
+        } else if (mode === "background") {
+          if (!config.provider.startJob || !config.provider.capabilities.backgroundJobs) {
+            throw new AgentError(
+              "not-supported",
+              `Provider "${config.provider.id}" has no background mode. Use mode "stream" or "sync".`,
+            );
+          }
+          const handle = await config.provider.startJob({ ...request, background: true }, { signal: config.signal });
+          reportedModel = handle.model || undefined;
+          responseId = handle.id;
+          yield { type: "job-started", handle };
 
-        // Polling, not streaming: the entire value of background mode is that it
-        // survives a dropped connection, and a stream does not.
-        const snapshot = await awaitJob(config.provider, handle, { signal: config.signal });
-        yield { type: "job-status", handle, status: snapshot.status };
+          // Polling, not streaming: the entire value of background mode is that it
+          // survives a dropped connection, and a stream does not.
+          const snapshot = await awaitJob(config.provider, handle, { signal: config.signal });
+          yield { type: "job-status", handle, status: snapshot.status };
 
-        if (snapshot.status === "failed" || !snapshot.result) {
-          throw new AgentError("unknown", snapshot.error?.message ?? "Background job failed.", {
-            provider: config.provider.id,
-          });
+          if (snapshot.status === "cancelled") {
+            throw new AgentError("cancelled", snapshot.error?.message ?? "Background job was cancelled.", {
+              provider: config.provider.id,
+            });
+          }
+          if (snapshot.status === "failed" || !snapshot.result) {
+            throw new AgentError("unknown", snapshot.error?.message ?? `Background job ended as ${snapshot.status}.`, {
+              provider: config.provider.id,
+            });
+          }
+          parts = snapshot.result.parts;
+          stepFinish = snapshot.result.finishReason;
+          stepUsage = snapshot.result.usage;
+          responseId = snapshot.result.responseId ?? responseId;
+          reportedModel = snapshot.result.modelId || reportedModel;
+          // Deltas never streamed, so surface the text as one block.
+          const textParts = parts.filter((p) => p.type === "text");
+          if (textParts.length) yield { type: "message", parts: textParts };
+        } else {
+          const result = await config.provider.generate(request, { signal: config.signal });
+          parts = result.parts;
+          stepFinish = result.finishReason;
+          stepUsage = result.usage;
+          responseId = result.responseId;
+          reportedModel = result.modelId || undefined;
+          const textParts = parts.filter((p) => p.type === "text");
+          if (textParts.length) yield { type: "message", parts: textParts };
         }
-        parts = snapshot.result.parts;
-        stepFinish = snapshot.result.finishReason;
-        stepUsage = snapshot.result.usage;
-        responseId = snapshot.result.responseId;
-        // Deltas never streamed, so surface the text as one block.
-        const textParts = parts.filter((p) => p.type === "text");
-        if (textParts.length) yield { type: "message", parts: textParts };
-      } else {
-        const result = await config.provider.generate(request, { signal: config.signal });
-        parts = result.parts;
-        stepFinish = result.finishReason;
-        stepUsage = result.usage;
-        responseId = result.responseId;
-        const textParts = parts.filter((p) => p.type === "text");
-        if (textParts.length) yield { type: "message", parts: textParts };
+      } catch (cause) {
+        const error = toAgentError(cause, config.provider.id);
+        const partial = streamSnapshot?.();
+        stepUsage = partial?.usage ?? stepUsage ?? {};
+        responseId = partial?.responseId ?? responseId;
+        reportedModel = partial?.modelId || reportedModel;
+        const source = usageSource(stepUsage);
+        meteringSources.push(source);
+        if (reportedModel) reportedModels.add(reportedModel);
+        if (source !== "unavailable") {
+          totalUsage = addUsage(totalUsage, stepUsage);
+          yield { type: "usage", usage: stepUsage };
+        }
+        const finishedAt = Date.now();
+        const record: MeteringRecord = {
+          scope: "step",
+          id: `${runId}:step:${step}`,
+          runId,
+          step,
+          provider: config.provider.id,
+          requestedModel: config.model,
+          ...(reportedModel ? { reportedModel } : {}),
+          mode,
+          status: error.kind === "cancelled" ? "cancelled" : "failed",
+          usage: stepUsage,
+          source,
+          startedAt: stepStartedAt,
+          finishedAt,
+          durationMs: finishedAt - stepStartedAt,
+          ...(responseId ? { responseId } : {}),
+          ...(config.meteringMetadata ? { metadata: config.meteringMetadata } : {}),
+          error: { kind: error.kind, message: error.message },
+        };
+        await deliverMetering(config.meter, record);
+        yield { type: "metering", record };
+        throw error;
       }
 
       previousResponseId = responseId;
@@ -204,6 +273,31 @@ export async function* runAgent(
         totalUsage = addUsage(totalUsage, stepUsage);
         yield { type: "usage", usage: stepUsage };
       }
+      const source = usageSource(stepUsage ?? {});
+      meteringSources.push(source);
+      if (reportedModel) reportedModels.add(reportedModel);
+      const finishedAt = Date.now();
+      const record: MeteringRecord = {
+        scope: "step",
+        id: `${runId}:step:${step}`,
+        runId,
+        step,
+        provider: config.provider.id,
+        requestedModel: config.model,
+        ...(reportedModel ? { reportedModel } : {}),
+        mode,
+        status: meteringStatus(stepFinish),
+        usage: stepUsage ?? {},
+        source,
+        startedAt: stepStartedAt,
+        finishedAt,
+        durationMs: finishedAt - stepStartedAt,
+        ...(responseId ? { responseId } : {}),
+        finishReason: stepFinish,
+        ...(config.meteringMetadata ? { metadata: config.meteringMetadata } : {}),
+      };
+      await deliverMetering(config.meter, record);
+      yield { type: "metering", record };
       yield { type: "step-finish", step, finishReason: stepFinish, ...(stepUsage ? { usage: stepUsage } : {}) };
 
       const assistant = assistantMessage(parts);
@@ -223,12 +317,14 @@ export async function* runAgent(
         const source = parts.find((p) => p.type === "tool-call" && p.callId === call.callId) as
           | Extract<ContentPart, { type: "tool-call" }>
           | undefined;
+        const loading = resolveToolLoading(config.tools.get(call.name)?.loading, call.input);
         yield {
           type: "tool-call",
           callId: call.callId,
           name: call.name,
           input: call.input,
           ...(source?.repaired ? { repaired: true } : {}),
+          ...(loading ? { loading } : {}),
         };
       }
 
@@ -333,11 +429,55 @@ export async function* runAgent(
       };
     }
 
-    yield { type: "run-finish", runId, finishReason, usage: totalUsage, steps: step };
+    const finishedAt = Date.now();
+    const record: MeteringRecord = {
+      scope: "run",
+      id: `${runId}:run`,
+      runId,
+      provider: config.provider.id,
+      requestedModel: config.model,
+      mode,
+      status: meteringStatus(finishReason),
+      usage: totalUsage,
+      source: combineMeteringSources(meteringSources),
+      startedAt: runStartedAt,
+      finishedAt,
+      durationMs: finishedAt - runStartedAt,
+      steps: attemptedSteps,
+      finishReason,
+      ...(reportedModels.size ? { reportedModels: [...reportedModels] } : {}),
+      ...(config.meteringMetadata ? { metadata: config.meteringMetadata } : {}),
+    };
+    await deliverMetering(config.meter, record);
+    yield { type: "metering", record };
+    yield { type: "run-finish", runId, finishReason, usage: totalUsage, steps: attemptedSteps };
   } catch (e) {
     const error = toAgentError(e, config.provider.id);
     yield { type: "error", error, recoverable: false };
-    yield { type: "run-finish", runId, finishReason: error.kind === "cancelled" ? "cancelled" : "error", usage: totalUsage, steps: step };
+    const terminalReason: FinishReason = error.kind === "cancelled" ? "cancelled" : "error";
+    const finishedAt = Date.now();
+    const record: MeteringRecord = {
+      scope: "run",
+      id: `${runId}:run`,
+      runId,
+      provider: config.provider.id,
+      requestedModel: config.model,
+      mode,
+      status: error.kind === "cancelled" ? "cancelled" : "failed",
+      usage: totalUsage,
+      source: combineMeteringSources(meteringSources),
+      startedAt: runStartedAt,
+      finishedAt,
+      durationMs: finishedAt - runStartedAt,
+      steps: attemptedSteps,
+      finishReason: terminalReason,
+      ...(reportedModels.size ? { reportedModels: [...reportedModels] } : {}),
+      ...(config.meteringMetadata ? { metadata: config.meteringMetadata } : {}),
+      error: { kind: error.kind, message: error.message },
+    };
+    await deliverMetering(config.meter, record);
+    yield { type: "metering", record };
+    yield { type: "run-finish", runId, finishReason: terminalReason, usage: totalUsage, steps: attemptedSteps };
   }
 }
 
@@ -353,12 +493,14 @@ function collectStream(stream: AsyncIterable<StreamEvent>) {
   let finishReason: FinishReason = "unknown";
   let usage: Usage | undefined;
   let responseId: string | undefined;
+  let modelId = "";
 
   async function* events(): AsyncGenerator<StreamEvent> {
     for await (const event of stream) {
       switch (event.type) {
         case "start":
           responseId = event.responseId;
+          modelId = event.modelId;
           break;
         case "text-delta": {
           const last = parts[parts.length - 1];
@@ -410,7 +552,7 @@ function collectStream(stream: AsyncIterable<StreamEvent>) {
       parts,
       finishReason,
       usage: usage ?? {},
-      modelId: "",
+      modelId,
       ...(responseId ? { responseId } : {}),
     }),
   };
@@ -425,4 +567,10 @@ function addUsage(a: Usage, b: Usage): Usage {
     cachedInputTokens: add(a.cachedInputTokens, b.cachedInputTokens),
     reasoningTokens: add(a.reasoningTokens, b.reasoningTokens),
   };
+}
+
+function meteringStatus(reason: FinishReason): "completed" | "failed" | "cancelled" {
+  if (reason === "cancelled") return "cancelled";
+  if (reason === "error") return "failed";
+  return "completed";
 }

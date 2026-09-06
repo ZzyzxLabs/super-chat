@@ -17,6 +17,23 @@ import type { Card, CardSpec } from "../cards/types.js";
 
 export type ToolSide = "read" | "write" | "confirm";
 
+/**
+ * A truthful preview of the output geometry while a tool is still running.
+ *
+ * This is host-only metadata: providers never see it. A function is useful for
+ * tools such as image generation where count and aspect ratio come from the
+ * call input rather than from the tool definition alone.
+ */
+export type ToolLoadingHint = {
+  kind: "media" | "chart" | "table" | "document" | "generic";
+  label: string;
+  count?: number;
+  /** CSS-compatible ratio, for example `1024 / 1536`. */
+  aspectRatio?: string;
+};
+
+export type ToolLoading = ToolLoadingHint | ((input: unknown) => ToolLoadingHint | undefined);
+
 export type ToolExecutionContext = {
   /** Host-supplied per-run values: user id, session, network, locale. */
   vars: Record<string, unknown>;
@@ -72,7 +89,19 @@ export type ToolDefinition = {
   render?: string;
   /** Rough token cost of a typical result, for budgeting. */
   costHint?: number;
+  /** Live-only output placeholder. Omit when the result's shape is unknown. */
+  loading?: ToolLoading;
 };
+
+/** Resolve a static or input-derived loading hint without leaking a function into run events. */
+export function resolveToolLoading(loading: ToolLoading | undefined, input: unknown): ToolLoadingHint | undefined {
+  try {
+    return typeof loading === "function" ? loading(input) : loading;
+  } catch {
+    // Presentation metadata must never be able to fail the tool call itself.
+    return undefined;
+  }
+}
 
 export type PresetName = string;
 

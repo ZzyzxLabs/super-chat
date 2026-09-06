@@ -3,9 +3,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AgentClient, AgentProvider, useAgentClient, useAgentState, useAttachments, useJobs, useThread, useThreadList } from "@zzyzxlabs/super-chat-react";
 import { BUILTIN_RENDERERS, CardRendererProvider, ContextInspector, Composer, DocumentQuoteProvider, Thread } from "@zzyzxlabs/super-chat-ui";
-import type { RunEvent, RunMode, StoredFile } from "@zzyzxlabs/super-chat-core";
+import {
+  ToolRegistry,
+  createGenerateImageTool,
+  createOpenAIImageProvider,
+  type RunEvent,
+  type RunMode,
+  type StoredFile,
+} from "@zzyzxlabs/super-chat-core";
 import {
   MODELS,
+  PROVIDER_PROFILES,
   WEB_SEARCH_TOOLS,
   buildContextBuilder,
   buildProvider,
@@ -16,8 +24,9 @@ import {
   toolRegistry,
   type ThreadBackend,
   type TransportMode,
-  type Vendor,
+  type ProviderId,
 } from "@/agent/setup";
+import { IS_STATIC_DEMO } from "@/agent/deployment";
 
 const EXAMPLES = [
   { title: "Legal — clause review", prompt: "Review the Vertex MSA for liability exposure." },
@@ -31,36 +40,62 @@ const EXAMPLES = [
 
 export default function RunPanel() {
   const [transportMode, setTransportMode] = useState<TransportMode>("demo");
-  const [vendor, setVendor] = useState<Vendor>("openai");
+  const [providerId, setProviderId] = useState<ProviderId>("openai");
+  const [customBaseUrl, setCustomBaseUrl] = useState(PROVIDER_PROFILES.oneapi.baseUrl);
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(MODELS.openai[0]!);
+  const [imageModel, setImageModel] = useState("gpt-image-1");
   const [mode, setMode] = useState<RunMode>("stream");
   const [presets, setPresets] = useState<string[]>(["observer", "executor"]);
   const [threadBackend, setThreadBackend] = useState<ThreadBackend>("local");
   const [webSearch, setWebSearch] = useState(false);
-  const threadStore = threadStores[threadBackend];
+  const effectiveThreadBackend: ThreadBackend = IS_STATIC_DEMO ? "local" : threadBackend;
+  const threadStore = threadStores[effectiveThreadBackend];
 
-  // The SHARED registry singleton — tools imported on /tools are callable here.
-  const tools = toolRegistry;
   const contextBuilder = useMemo(() => buildContextBuilder(), []);
+  const customBaseUrlValid = /^https?:\/\/[^\s]+$/i.test(customBaseUrl);
+  const profile = useMemo(
+    () =>
+      providerId === "oneapi" && customBaseUrlValid
+        ? { ...PROVIDER_PROFILES.oneapi, baseUrl: customBaseUrl }
+        : PROVIDER_PROFILES[providerId],
+    [providerId, customBaseUrl, customBaseUrlValid],
+  );
 
   // BYOK with an empty key falls back to demo — track that as a VISIBLE fact,
   // not a silent one, so nobody attaches a demo-minted file id believing it is
   // real. The demo script speaks OpenAI's wire shape, so Anthropic has no demo
   // mode: it falls back to the proxy instead.
-  const effectiveMode: TransportMode =
-    transportMode === "direct" && !apiKey.trim()
-      ? vendor === "anthropic"
-        ? "proxy"
-        : "demo"
-      : transportMode === "demo" && vendor === "anthropic"
+  const effectiveMode: TransportMode = IS_STATIC_DEMO
+    ? "demo"
+    : transportMode === "direct" && !apiKey.trim() && providerId === "openai"
+      ? "demo"
+      : transportMode === "demo" && providerId !== "openai"
         ? "proxy"
         : transportMode;
 
   const provider = useMemo(() => {
-    return buildProvider(buildTransport(effectiveMode, vendor, apiKey || undefined), effectiveMode, vendor);
+    const directKey = providerId === "oneapi" && !customBaseUrlValid ? undefined : apiKey || undefined;
+    return buildProvider(buildTransport(effectiveMode, profile, directKey), effectiveMode, profile);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transportMode, vendor, transportMode === "direct" ? apiKey : "static"]);
+  }, [transportMode, profile, transportMode === "direct" ? apiKey : "static"]);
+
+  // Clone the shared catalogue (including its preset grants) so this client can
+  // add a provider-bound media tool without mutating every other dev panel.
+  const tools = useMemo(() => {
+    const registry = new ToolRegistry();
+    for (const tool of toolRegistry.list()) registry.register(tool, toolRegistry.presetsFor(tool.name));
+    if (effectiveMode !== "demo" && profile.protocol !== "anthropic-messages") {
+      const images = createOpenAIImageProvider({
+        transport: provider.transport,
+        id: provider.id,
+        label: `${provider.label} Images`,
+        ...(imageModel.trim() ? { defaultModel: imageModel.trim() } : {}),
+      });
+      registry.register(createGenerateImageTool(images), ["executor"]);
+    }
+    return registry;
+  }, [effectiveMode, profile.protocol, provider, imageModel]);
 
   const client = useMemo(() => {
     return new AgentClient({
@@ -77,7 +112,7 @@ export default function RunPanel() {
     // Rebuilt when the persistence backend changes too — the thread list and
     // hydration both read through the store the client holds.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [provider, threadBackend]);
+  }, [provider, effectiveThreadBackend]);
 
   // The outgoing client's in-flight run does not stop on its own just because
   // a new one replaced it in the provider — without this, switching provider
@@ -162,40 +197,84 @@ export default function RunPanel() {
         <div className="dev__run">
           <div className="dev__runmain">
             <div className="dev__runbar">
-              <select
+              {IS_STATIC_DEMO ? null : <select
                 className="dev__select"
-                value={vendor}
+                aria-label="Chat provider"
+                value={providerId}
                 onChange={(e) => {
-                  const v = e.target.value as Vendor;
-                  setVendor(v);
+                  const v = e.target.value as ProviderId;
+                  setProviderId(v);
                   setModel(MODELS[v][0]!);
+                  setImageModel(v === "openai" ? "gpt-image-1" : v === "oneapi" ? "dall-e-3" : "");
+                  setWebSearch(false);
+                  if (v !== "openai" && mode === "background") setMode("stream");
+                  if (v !== "openai" && transportMode === "demo") setTransportMode("proxy");
                 }}
               >
                 <option value="openai">OpenAI</option>
+                <option value="oneapi">OpenAI-compatible / oneAPI</option>
                 <option value="anthropic">Anthropic</option>
-              </select>
-              <select className="dev__select" value={transportMode} onChange={(e) => setTransportMode(e.target.value as TransportMode)}>
-                <option value="demo" disabled={vendor === "anthropic"}>
+              </select>}
+              {IS_STATIC_DEMO ? null : <select
+                className="dev__select"
+                aria-label="Transport mode"
+                value={transportMode}
+                onChange={(e) => setTransportMode(e.target.value as TransportMode)}
+              >
+                <option value="demo" disabled={providerId !== "openai"}>
                   Demo transport
                 </option>
                 <option value="proxy">Server proxy</option>
                 <option value="direct">BYOK direct</option>
-              </select>
-              {transportMode === "direct" ? (
-                <input className="dev__select" type="password" placeholder="sk-…" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+              </select>}
+              {!IS_STATIC_DEMO && transportMode === "direct" ? (
+                <>
+                  {providerId === "oneapi" ? (
+                    <input
+                      className="dev__select"
+                      type="url"
+                      aria-label="Provider base URL"
+                      title={customBaseUrlValid ? "OpenAI-compatible API root" : "Enter an absolute http(s) URL"}
+                      value={customBaseUrl}
+                      onChange={(e) => setCustomBaseUrl(e.target.value)}
+                    />
+                  ) : null}
+                  <input
+                    className="dev__select"
+                    type="password"
+                    aria-label="Provider API key"
+                    placeholder="API key"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                  />
+                </>
               ) : null}
-              <select className="dev__select" value={model} onChange={(e) => setModel(e.target.value)}>
-                {MODELS[vendor].map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-              <select className="dev__select" value={mode} onChange={(e) => setMode(e.target.value as RunMode)}>
+              {IS_STATIC_DEMO ? null : providerId === "oneapi" ? (
+                <input className="dev__select" aria-label="Model id" placeholder="Model id" value={model} onChange={(e) => setModel(e.target.value)} />
+              ) : (
+                <select className="dev__select" aria-label="Model id" value={model} onChange={(e) => setModel(e.target.value)}>
+                  {MODELS[providerId].map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {!IS_STATIC_DEMO && profile.protocol !== "anthropic-messages" && effectiveMode !== "demo" ? (
+                <input
+                  className="dev__select"
+                  aria-label="Image model id"
+                  title="Default model used by the generateImage agent tool"
+                  placeholder="Image model id"
+                  value={imageModel}
+                  onChange={(e) => setImageModel(e.target.value)}
+                />
+              ) : null}
+              {IS_STATIC_DEMO ? null : <select className="dev__select" aria-label="Run mode" value={mode} onChange={(e) => setMode(e.target.value as RunMode)}>
                 <option value="stream">stream</option>
                 <option value="sync">sync</option>
-                <option value="background">background</option>
-              </select>
+                <option value="background" disabled={!provider.capabilities.backgroundJobs}>background</option>
+              </select>}
               {(["observer", "executor"] as const).map((p) => (
                 <label key={p} className="dev__toggle">
                   <input
@@ -206,15 +285,15 @@ export default function RunPanel() {
                   {p}
                 </label>
               ))}
-              <label className="dev__toggle" title="Provider-hosted web search — no executor, no preset">
+              {IS_STATIC_DEMO ? null : <label className="dev__toggle" title="Provider-hosted web search — no executor, no preset">
                 <input
                   type="checkbox"
                   checked={webSearch}
-                  disabled={effectiveMode === "demo"}
+                  disabled={effectiveMode === "demo" || !WEB_SEARCH_TOOLS[providerId]}
                   onChange={(e) => setWebSearch(e.target.checked)}
                 />
                 web search
-              </label>
+              </label>}
               <ReattachPicker providerId={provider.id} />
               <ClearButton />
             </div>
@@ -223,8 +302,21 @@ export default function RunPanel() {
               <p className="dev__banner">
                 {transportMode === "direct"
                   ? "No API key entered — running on the DEMO transport until you paste one. Uploads mint demo ids, not real ones."
-                  : "Demo transport: replies are scripted, but everything below the provider is real — request building, the tool loop, card suspension and context assembly. Switch to proxy or BYOK for a live model."}
+                  : IS_STATIC_DEMO
+                    ? "Public demo: replies are scripted and all state stays in this browser. The adapter, tool loop, cards and context assembly are real."
+                    : "Demo transport: replies are scripted, but everything below the provider is real — request building, the tool loop, card suspension and context assembly. Switch to proxy or BYOK for a live model."}
               </p>
+            ) : null}
+            {!IS_STATIC_DEMO && providerId === "oneapi" && transportMode === "proxy" ? (
+              <p className="dev__banner">
+                Server proxy uses OPENAI_COMPATIBLE_BASE_URL and OPENAI_COMPATIBLE_API_KEY. The browser never sends either value.
+              </p>
+            ) : null}
+            {!IS_STATIC_DEMO && providerId === "oneapi" && transportMode === "direct" && !customBaseUrlValid ? (
+              <p className="dev__banner">Enter an absolute http(s) Base URL before using this provider.</p>
+            ) : null}
+            {!IS_STATIC_DEMO && providerId !== "openai" && transportMode === "direct" && !apiKey.trim() ? (
+              <p className="dev__banner">Enter an API key before sending a BYOK request.</p>
             ) : null}
 
             <Thread empty={<Examples />} />
@@ -232,7 +324,7 @@ export default function RunPanel() {
           </div>
 
           <aside className="dev__runside">
-            <ThreadsPanel backend={{ value: threadBackend, onChange: setThreadBackend }} />
+            <ThreadsPanel backend={IS_STATIC_DEMO ? undefined : { value: threadBackend, onChange: setThreadBackend }} />
             <EventStream />
             <ContextInspector />
           </aside>

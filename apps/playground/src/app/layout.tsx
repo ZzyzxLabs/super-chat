@@ -4,8 +4,8 @@ import "./globals.css";
 import { Shell } from "@/components/Shell";
 
 export const metadata: Metadata = {
-  title: "superchat — dev panels",
-  description: "Contexts, skills, tools and cards — assembled into provider-correct requests.",
+  title: "SuperChat — domain agents beyond chat",
+  description: "A provider-neutral runtime for multimodal domain agents, scoped tools and agent-chosen visual UI.",
 };
 
 // interactiveWidget is the part that matters on a phone: by default the

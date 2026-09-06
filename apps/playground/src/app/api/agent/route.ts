@@ -29,10 +29,22 @@ const handler = createProxyHandler({
         "/responses/*/cancel",
         "/chat/completions",
         "/models",
+        "POST /images/generations",
         // Method-scoped on purpose: uploads only. A bare "/files" would also
         // open GET /files (list every file on the account) and DELETE.
         "POST /files",
       ],
+    },
+    oneapi: {
+      // Deliberately server-configured. Accepting an arbitrary browser-supplied
+      // Base URL here would turn this route into an SSRF primitive.
+      baseUrl: process.env.OPENAI_COMPATIBLE_BASE_URL ?? "https://oneapi.example.com/v1",
+      apiKey: () => {
+        const key = process.env.OPENAI_COMPATIBLE_API_KEY;
+        if (!key) throw new Error("OPENAI_COMPATIBLE_API_KEY is not set. Add one to .env.local.");
+        return key;
+      },
+      allowPaths: ["POST /chat/completions", "/models", "POST /images/generations"],
     },
     anthropic: {
       baseUrl: process.env.ANTHROPIC_BASE_URL ?? "https://api.anthropic.com/v1",
@@ -49,10 +61,17 @@ const handler = createProxyHandler({
   // A real deployment authenticates the session and meters here. The playground
   // is single-user and local, so it only refuses when the key is missing.
   authorize: (_req, envelope) => {
-    const key = envelope.provider === "anthropic" ? process.env.ANTHROPIC_API_KEY : process.env.OPENAI_API_KEY;
-    const name = envelope.provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
+    const credentials = {
+      openai: [Boolean(process.env.OPENAI_API_KEY), "OPENAI_API_KEY"],
+      oneapi: [
+        Boolean(process.env.OPENAI_COMPATIBLE_API_KEY && process.env.OPENAI_COMPATIBLE_BASE_URL),
+        "OPENAI_COMPATIBLE_BASE_URL and OPENAI_COMPATIBLE_API_KEY",
+      ],
+      anthropic: [Boolean(process.env.ANTHROPIC_API_KEY), "ANTHROPIC_API_KEY"],
+    } as const;
+    const [configured, name] = credentials[envelope.provider as keyof typeof credentials] ?? [false, "provider API key"];
     return (
-      Boolean(key) ||
+      configured ||
       new Response(
         JSON.stringify({ error: { message: `Server has no ${name}. Add one to .env.local, or switch this page to BYOK mode.` } }),
         { status: 503, headers: { "content-type": "application/json" } },
