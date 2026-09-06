@@ -33,6 +33,29 @@ products: a legal document workspace, an expressive companion, and SupWallet's
 simulated DeFi operations. Each demo can reveal the skill, tools, card, provider,
 token use and timing behind its run.
 
+## Playground experiences
+
+### Counsel Workspace
+
+Document review with clause-level findings, counsel analysis, and staged
+redlines.
+
+![Counsel Workspace reviewing a master services agreement](docs/assets/playground-counsel.png)
+
+### Milo
+
+A memory-aware companion with calm, product-specific interactions that do not
+look or behave like a generic chat surface.
+
+![Milo companion guiding a quiet breathing moment](docs/assets/playground-companion.png)
+
+### SupWallet
+
+A professional DeFi workspace where the agent can explain, simulate, confirm,
+and execute portfolio operations through validated cards.
+
+![SupWallet agent preparing a lending operation](docs/assets/playground-supwallet.png)
+
 ## Documentation
 
 | | |
