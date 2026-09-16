@@ -333,6 +333,10 @@ export async function* runAgent(
       // it pushes into a channel that we drain CONCURRENTLY. Draining afterwards
       // would deadlock the human-in-the-loop path: the tool waits on the user,
       // the user waits to see the card, and the card waits on the tool.
+      //
+      // Results go through the same channel, in COMPLETION order: yielding them
+      // after `await running` made every result in a step land together, when
+      // the slowest tool finished. History below stays in CALL order.
       const channel = new EventChannel<RunEvent>();
       const running = executeToolCalls(calls, {
         tools: activeTools,
@@ -340,6 +344,15 @@ export async function* runAgent(
         signal: config.signal,
         timeoutMs: config.toolTimeoutMs,
         onCard: (card) => channel.push({ type: "card", card }),
+        onOutcome: (outcome) =>
+          channel.push({
+            type: "tool-result",
+            callId: outcome.callId,
+            name: outcome.name,
+            output: outcome.output,
+            ...(outcome.failure ? { failure: outcome.failure } : {}),
+            ms: outcome.ms,
+          }),
         onHostTool: config.onHostTool,
         requestCard: config.onUserDecision
           ? async (callId, spec: CardSpec) => {
@@ -358,27 +371,18 @@ export async function* runAgent(
       const outcomes = await running;
 
       // Two versions of each tool result, deliberately:
-      //   • the EVENT carries the full output, card payload included, so the UI
-      //     can render it and the host can persist it;
+      //   • the EVENT (already sent via `onOutcome`) carries the full output,
+      //     card payload included, so the UI can render it and the host can
+      //     persist it;
       //   • the message fed back to the provider has the card stripped. The
       //     model already read the surrounding data, and re-sending a chart
       //     spec on every subsequent step of the same turn is pure waste.
+      // No events here: every card and every result already went out through
+      // the channel. Re-yielding would double-count in any host recording the
+      // stream.
       const providerParts: ContentPart[] = [];
       const persistedParts: ContentPart[] = [];
       for (const outcome of outcomes) {
-        yield {
-          type: "tool-result",
-          callId: outcome.callId,
-          name: outcome.name,
-          output: outcome.output,
-          ...(outcome.failure ? { failure: outcome.failure } : {}),
-          ms: outcome.ms,
-        };
-        // No `card` event here: every card — emitted, returned, or embedded —
-        // already went out through the channel via `onCard`, ahead of this
-        // result. Re-yielding it would double-count in any host recording the
-        // stream (the reducer dedupes by id, so it looked harmless).
-
         const base = {
           type: "tool-result" as const,
           callId: outcome.callId,

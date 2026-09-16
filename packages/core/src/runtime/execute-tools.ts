@@ -56,6 +56,12 @@ export type ExecuteToolOptions = {
   /** Host-executed tools (no `execute`) are delegated here. */
   onHostTool?: (call: ToolCallRequest) => Promise<unknown>;
   /**
+   * `executeToolCalls` only: fires as each call settles, in COMPLETION order,
+   * exactly once per call — failures and timeouts included. This is how a
+   * fast result reaches the UI without waiting on the slowest call in the step.
+   */
+  onOutcome?: (outcome: ToolCallOutcome) => void;
+  /**
    * Precomputed name→tool index. `executeToolCalls` builds this once per
    * batch and reuses it here instead of a linear `tools.find` per call; a
    * standalone `executeToolCall` caller can leave it unset and pay the scan.
@@ -83,16 +89,28 @@ export async function executeToolCall(call: ToolCallRequest, opts: ExecuteToolOp
   }
 
   let emittedCard: Card | undefined;
+  // A timed-out tool keeps running in the background. Once its outcome is
+  // decided, anything it surfaces would land AFTER its own tool-result — a
+  // progress card for a finished call, or a dialog nobody is waiting on.
+  let settled = false;
   const ctx: ToolExecutionContext = {
     vars: opts.vars,
     signal: opts.signal,
     callId: call.callId,
     emitCard: (spec) => {
+      if (settled) return;
       const card = makeCard(spec, call.callId);
       emittedCard = card;
       opts.onCard?.(card);
     },
-    ...(opts.requestCard ? { requestCard: (spec: CardSpec) => opts.requestCard!(call.callId, spec) } : {}),
+    ...(opts.requestCard
+      ? {
+          requestCard: (spec: CardSpec) =>
+            settled
+              ? Promise.reject(new AgentError("cancelled", `Tool "${call.name}" already finished.`))
+              : opts.requestCard!(call.callId, spec),
+        }
+      : {}),
   };
 
   try {
@@ -145,6 +163,8 @@ export async function executeToolCall(call: ToolCallRequest, opts: ExecuteToolOp
       failure: err.kind === "cancelled" ? "denied" : "execution-error",
       ms: Date.now() - started,
     };
+  } finally {
+    settled = true;
   }
 }
 
@@ -152,9 +172,11 @@ export async function executeToolCall(call: ToolCallRequest, opts: ExecuteToolOp
  * Execute a step's calls concurrently.
  *
  * Parallel because models emit independent calls in one step and running them
- * serially triples the latency of a three-lookup turn. Order of RESULTS is
- * preserved to match the calls, since providers correlate by call_id but humans
- * read the transcript top to bottom.
+ * serially triples the latency of a three-lookup turn. Two orders, on purpose:
+ * `onOutcome` reports each call as it FINISHES, so a 50ms lookup is not held
+ * hostage by a 900ms one; the returned array is in CALL order, since that is
+ * what gets written back to history and humans read the transcript top to
+ * bottom.
  */
 export async function executeToolCalls(
   calls: readonly ToolCallRequest[],
@@ -171,9 +193,17 @@ export async function executeToolCalls(
   const interactive = calls.filter((c) => toolIndex.get(c.name)?.side === "confirm");
   const concurrent = calls.filter((c) => !interactive.includes(c));
 
-  const concurrentResults = await Promise.all(concurrent.map((c) => executeToolCall(c, callOpts)));
+  // executeToolCall never rejects — every failure is already an outcome — so
+  // this reports each call exactly once.
+  const settle = async (c: ToolCallRequest) => {
+    const outcome = await executeToolCall(c, callOpts);
+    opts.onOutcome?.(outcome);
+    return outcome;
+  };
+
+  const concurrentResults = await Promise.all(concurrent.map(settle));
   const serialResults: ToolCallOutcome[] = [];
-  for (const c of interactive) serialResults.push(await executeToolCall(c, callOpts));
+  for (const c of interactive) serialResults.push(await settle(c));
 
   const byId = new Map([...concurrentResults, ...serialResults].map((r) => [r.callId, r]));
   return calls.map((c) => byId.get(c.callId)!).filter(Boolean);

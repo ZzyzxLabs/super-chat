@@ -4,6 +4,19 @@
 // Modelled as events rather than a promise because the interesting parts of an
 // agent turn happen BEFORE it finishes — the context trace, the tool calls, the
 // card that needs an answer. A promise-shaped API hides all of it.
+//
+// Ordering guarantees for a step's tools (correlate by `callId`, never by
+// position):
+//   1. Every `tool-call` of the step is emitted before any tool runs.
+//   2. Per callId: `tool-call` → its `card` / `awaiting-user` /
+//      `user-responded` → exactly one `tool-result`, failures, timeouts and
+//      aborts included.
+//   3. `tool-result`s arrive in COMPLETION order, not call order. `confirm`
+//      tools still run one at a time after the parallel ones, so their results
+//      come last.
+//   4. All of a step's `tool-result`s arrive before the next `step-start`.
+//   5. The `role: "tool"` message runAgent writes back to history keeps CALL
+//      order.
 
 import type { Card, CardAction, CardSpec } from "../cards/types.js";
 import type { ContentPart, FinishReason, Usage } from "../content/types.js";

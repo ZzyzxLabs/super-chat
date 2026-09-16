@@ -140,6 +140,11 @@ The full event union is in [`runtime/events.ts`](../../packages/core/src/runtime
 `context-built` is the one worth wiring first, because it is the entire "why did
 it send that" answer.
 
+When a step calls several tools, they run in parallel and each `tool-result`
+arrives as soon as its tool finishes, so results come in completion order, not
+call order. Match a result to its call by `callId`, never by position. The
+history written back for the next step keeps call order.
+
 ## 4. Or render it
 
 In React, `AgentClient` owns the thread and drives `runAgent` for you; the hooks

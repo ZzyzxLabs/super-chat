@@ -401,7 +401,7 @@ export class AgentClient {
       };
 
       const linked: Message = {
-        ...assistantMessage([...parts, ...cardParts]),
+        ...assistantMessage([...toolResultsInCallOrder(parts), ...cardParts]),
         parentId: s.headId,
         metadata: { turn: meta },
       };
@@ -601,4 +601,34 @@ export class AgentClient {
       }),
     );
   }
+}
+
+/**
+ * Run state appends tool results as they finish; a committed turn keeps them in
+ * the order they were called, the same order runAgent writes back to history.
+ * Only results that sit next to each other move, and only among themselves.
+ */
+function toolResultsInCallOrder(parts: readonly ContentPart[]): ContentPart[] {
+  const callAt = new Map<string, number>();
+  parts.forEach((p, i) => {
+    if (p.type === "tool-call") callAt.set(p.callId, i);
+  });
+  const rank = (p: ContentPart) =>
+    p.type === "tool-result" ? (callAt.get(p.callId) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+
+  const out: ContentPart[] = [];
+  let batch: ContentPart[] = [];
+  const flush = () => {
+    out.push(...batch.sort((a, b) => rank(a) - rank(b)));
+    batch = [];
+  };
+  for (const p of parts) {
+    if (p.type === "tool-result") batch.push(p);
+    else {
+      flush();
+      out.push(p);
+    }
+  }
+  flush();
+  return out;
 }

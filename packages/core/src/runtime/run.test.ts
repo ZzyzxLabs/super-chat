@@ -16,6 +16,7 @@ import { ToolRegistry } from "../tools/registry.js";
 import { createVisualizeTool } from "../tools/builtin.js";
 import { userMessage } from "../content/parts.js";
 import { isCardCarrier, withCard } from "../cards/types.js";
+import { AgentError } from "../errors.js";
 import { runAgent } from "./run.js";
 import { initialRunState, reduceRunEvent, type RunEvent } from "./events.js";
 import type { ContentPart } from "../content/types.js";
@@ -778,5 +779,228 @@ describe("tool duration reaches the rendered part", () => {
     expect(part).toBeDefined();
     expect(typeof part!.ms).toBe("number");
     expect(part!.ms).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("parallel tool results arrive as each tool finishes", () => {
+  const respondToolCalls = (calls: { callId: string; name: string; args?: unknown }[], id = "resp_1") => ({
+    id,
+    object: "response",
+    created_at: 0,
+    model: "gpt-5.2",
+    status: "completed",
+    output: calls.map((c) => ({ type: "function_call", call_id: c.callId, name: c.name, arguments: JSON.stringify(c.args ?? {}) })),
+    usage: { input_tokens: 100, output_tokens: 30, total_tokens: 130 },
+  });
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  const timed = (name: string, ms: number, finished: string[] = []): ToolDefinition => ({
+    name,
+    description: name,
+    inputSchema: { type: "object" },
+    execute: async () => {
+      await sleep(ms);
+      finished.push(name);
+      return { output: { name } };
+    },
+  });
+
+  const config = (h: ReturnType<typeof harness>, over: Partial<Parameters<typeof runAgent>[1]> = {}) => ({
+    provider: h.provider,
+    model: "gpt-5.2",
+    contextBuilder: h.contextBuilder,
+    tools: h.registry,
+    toolResolution: { presets: ["observer" as const] },
+    mode: "sync" as const,
+    ...over,
+  });
+
+  const results = (events: RunEvent[]) =>
+    events.filter((e): e is Extract<RunEvent, { type: "tool-result" }> => e.type === "tool-result");
+
+  it("sends each result when its tool finishes, not when the slowest one does", async () => {
+    // The regression: results were yielded after awaiting the whole batch, so
+    // a 30ms lookup reached the UI only when the 300ms one finished.
+    const finished: string[] = [];
+    const h = harness(
+      [
+        respondToolCalls([
+          { callId: "c_slow", name: "slow" },
+          { callId: "c_mid", name: "mid" },
+          { callId: "c_fast", name: "fast" },
+        ]),
+        respondText("done"),
+      ],
+      [timed("slow", 300, finished), timed("mid", 150, finished), timed("fast", 30, finished)],
+    );
+
+    const events: RunEvent[] = [];
+    const finishedWhenSeen = new Map<string, string[]>();
+    for await (const e of runAgent([userMessage("go")], config(h))) {
+      events.push(e);
+      if (e.type === "tool-result") finishedWhenSeen.set(e.name, [...finished]);
+    }
+
+    expect(results(events).map((r) => r.name)).toEqual(["fast", "mid", "slow"]);
+    expect(finishedWhenSeen.get("fast")).toEqual(["fast"]);
+    expect(finishedWhenSeen.get("mid")).toEqual(["fast", "mid"]);
+
+    // Every result of the step still lands before the next step starts.
+    const nextStep = events.findIndex((e) => e.type === "step-start" && e.step === 1);
+    const lastResult = events.map((e) => e.type).lastIndexOf("tool-result");
+    expect(lastResult).toBeGreaterThan(-1);
+    expect(lastResult).toBeLessThan(nextStep);
+  });
+
+  it("writes results back to history in call order, not completion order", async () => {
+    const h = harness(
+      [
+        respondToolCalls([
+          { callId: "c_slow", name: "slow" },
+          { callId: "c_fast", name: "fast" },
+        ]),
+        respondText("done"),
+      ],
+      [timed("slow", 120), timed("fast", 10)],
+    );
+
+    const events = await collect(runAgent([userMessage("go")], config(h)));
+    expect(results(events).map((r) => r.callId)).toEqual(["c_fast", "c_slow"]);
+
+    const input = (h.transport.sent[1]!.body as { input: { type: string; call_id?: string }[] }).input;
+    const outputs = input.filter((i) => i.type === "function_call_output").map((i) => i.call_id);
+    expect(outputs).toEqual(["c_slow", "c_fast"]);
+  });
+
+  it("sends exactly one result per call when tools fail, time out, or succeed", async () => {
+    const boom: ToolDefinition = {
+      name: "boom",
+      description: "throws",
+      inputSchema: { type: "object" },
+      execute: () => {
+        throw new Error("kaboom");
+      },
+    };
+    const h = harness(
+      [
+        respondToolCalls([
+          { callId: "c_hang", name: "hang" },
+          { callId: "c_boom", name: "boom" },
+          { callId: "c_ok", name: "ok" },
+        ]),
+        respondText("done"),
+      ],
+      [timed("hang", 250), boom, timed("ok", 20)],
+    );
+
+    const events = await collect(runAgent([userMessage("go")], config(h, { toolTimeoutMs: 80 })));
+    const byId = new Map<string, Extract<RunEvent, { type: "tool-result" }>[]>();
+    for (const r of results(events)) byId.set(r.callId, [...(byId.get(r.callId) ?? []), r]);
+
+    expect([...byId.keys()].sort()).toEqual(["c_boom", "c_hang", "c_ok"]);
+    expect([...byId.values()].every((list) => list.length === 1)).toBe(true);
+    expect(byId.get("c_boom")![0]!.failure).toBe("execution-error");
+    expect(byId.get("c_hang")![0]!.failure).toBe("execution-error");
+    expect(JSON.stringify(byId.get("c_hang")![0]!.output)).toContain("timed out");
+    expect(byId.get("c_ok")![0]!.failure).toBeUndefined();
+    expect(results(events).map((r) => r.callId)).toEqual(["c_boom", "c_ok", "c_hang"]);
+  });
+
+  it("keeps a long tool's cards ahead of its own result while siblings finish", async () => {
+    const progress: ToolDefinition = {
+      name: "progress",
+      description: "emits progress",
+      inputSchema: { type: "object" },
+      execute: async (_input, ctx) => {
+        ctx.emitCard?.({ kind: "progress", steps: [{ label: "one", status: "done" }] });
+        await sleep(120);
+        ctx.emitCard?.({ kind: "progress", steps: [{ label: "two", status: "done" }] });
+        return { output: { ok: true } };
+      },
+    };
+    const h = harness(
+      [
+        respondToolCalls([
+          { callId: "c_progress", name: "progress" },
+          { callId: "c_echo", name: "echo" },
+        ]),
+        respondText("done"),
+      ],
+      [progress, echoTool],
+    );
+
+    const events = await collect(runAgent([userMessage("go")], config(h)));
+    const sequence = events.flatMap((e) =>
+      e.type === "card" ? [`card:${e.card.callId}`] : e.type === "tool-result" ? [`result:${e.callId}`] : [],
+    );
+    expect(sequence).toEqual(["card:c_progress", "result:c_echo", "card:c_progress", "result:c_progress"]);
+  });
+
+  it("still runs confirm tools one at a time after the parallel ones", async () => {
+    const confirm: ToolDefinition = {
+      name: "confirm",
+      description: "instant, but interactive",
+      inputSchema: { type: "object" },
+      side: "confirm",
+      execute: () => ({ output: { confirmed: true } }),
+    };
+    const h = harness(
+      [
+        respondToolCalls([
+          { callId: "c_confirm", name: "confirm" },
+          { callId: "c_slow", name: "slow" },
+        ]),
+        respondText("done"),
+      ],
+      [confirm, timed("slow", 80)],
+    );
+
+    const events = await collect(runAgent([userMessage("go")], config(h)));
+    expect(results(events).map((r) => r.callId)).toEqual(["c_slow", "c_confirm"]);
+  });
+
+  it("does not drop or repeat results when the run is aborted mid-step", async () => {
+    const controller = new AbortController();
+    const abortable = (name: string): ToolDefinition => ({
+      name,
+      description: name,
+      inputSchema: { type: "object" },
+      execute: (_input, ctx) =>
+        new Promise((_resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error("should have been aborted")), 5_000);
+          ctx.signal?.addEventListener("abort", () => {
+            clearTimeout(timer);
+            reject(new AgentError("cancelled", `${name} aborted`));
+          });
+        }),
+    });
+    const h = harness(
+      [
+        respondToolCalls([
+          { callId: "c_a", name: "a" },
+          { callId: "c_fast", name: "fast" },
+          { callId: "c_b", name: "b" },
+        ]),
+        respondText("never seen"),
+      ],
+      [abortable("a"), timed("fast", 20), abortable("b")],
+    );
+
+    const events: RunEvent[] = [];
+    for await (const e of runAgent([userMessage("go")], config(h, { signal: controller.signal }))) {
+      events.push(e);
+      if (e.type === "tool-result" && e.callId === "c_fast") controller.abort();
+    }
+
+    const ids = results(events).map((r) => r.callId);
+    expect(ids[0]).toBe("c_fast");
+    expect([...ids].sort()).toEqual(["c_a", "c_b", "c_fast"]);
+    expect(results(events).filter((r) => r.callId !== "c_fast").every((r) => r.failure === "denied")).toBe(true);
+
+    const errorAt = events.findIndex((e) => e.type === "error");
+    expect(errorAt).toBeGreaterThan(events.map((e) => e.type).lastIndexOf("tool-result"));
+    expect(events.at(-1)).toMatchObject({ type: "run-finish", finishReason: "cancelled" });
+    expect(h.transport.sent).toHaveLength(1);
   });
 });

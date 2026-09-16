@@ -7,6 +7,8 @@
 //     tool resolves deadlocks: the tool waits for the user, the user waits for
 //     the card, and the card waits for the tool.
 //   • `card` — progress updates from a long-running tool.
+//   • `tool-result` — each call as it finishes, so a fast lookup is not held
+//     back until the slowest call in the same step is done.
 //
 // Collecting events into an array and yielding them afterwards looks equivalent
 // and is not. This is the fix.

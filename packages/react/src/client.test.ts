@@ -416,3 +416,48 @@ describe("AgentClient + document quotes", () => {
     expect(user?.metadata).toBeUndefined();
   });
 });
+
+describe("AgentClient commit order", () => {
+  it("shows results as they finish but commits them in call order", async () => {
+    const timed = (name: string, ms: number) => ({
+      name,
+      description: name,
+      inputSchema: { type: "object" },
+      execute: async () => {
+        await new Promise((r) => setTimeout(r, ms));
+        return { output: { name } };
+      },
+    });
+    const respondToolCalls = {
+      id: "resp_1",
+      object: "response",
+      created_at: 0,
+      model: "gpt-5.2",
+      status: "completed",
+      output: [
+        { type: "function_call", call_id: "c_slow", name: "slow", arguments: "{}" },
+        { type: "function_call", call_id: "c_fast", name: "fast", arguments: "{}" },
+      ],
+      usage: { input_tokens: 100, output_tokens: 30, total_tokens: 130 },
+    };
+    const client = makeClient([respondToolCalls, respondText("done")], {
+      tools: new ToolRegistry().registerAll([timed("slow", 80), timed("fast", 10)], ["observer"]),
+      toolResolution: { presets: ["observer"] },
+    });
+
+    const live: string[] = [];
+    const unsubscribe = client.store.subscribe(() => {
+      for (const p of client.store.get().run.parts) {
+        if (p.type === "tool-result" && !live.includes(p.callId)) live.push(p.callId);
+      }
+    });
+    await client.send("go");
+    await flush();
+    unsubscribe();
+
+    expect(live).toEqual(["c_fast", "c_slow"]);
+    const assistant = client.store.get().messages.find((m) => m.role === "assistant");
+    const committed = assistant!.parts.flatMap((p) => (p.type === "tool-call" || p.type === "tool-result" ? [`${p.type}:${p.callId}`] : []));
+    expect(committed).toEqual(["tool-call:c_slow", "tool-call:c_fast", "tool-result:c_slow", "tool-result:c_fast"]);
+  });
+});
