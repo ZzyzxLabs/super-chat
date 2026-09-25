@@ -1,18 +1,54 @@
-// applyEdits against the code it replaced.
+// applyEdits, searchBlocks and outlineOf against the code they replaced.
 //
 // The rewrite changed how results are built — one splice instead of a re-slice
-// per edit, hits counted instead of collected — and none of what they are. The
-// reference below is that earlier code, kept only for this file, and every
-// generated case has to come out identical: the same text, offsets and blocks,
-// and the same refusals with the same messages.
+// per edit, hits counted instead of collected, one block split instead of two —
+// and none of what they are. The reference below is that earlier code, kept
+// only for this file, and every generated case has to come out identical: the
+// same text, offsets and blocks, and the same refusals with the same messages.
 
 import { isDeepStrictEqual } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { splitBlocks, type MarkdownBlock } from "../content/blocks.js";
-import { applyEdits, hunksOf } from "./edit.js";
-import type { AppliedEdit, DocumentEdit, EditResult } from "./types.js";
+import { applyEdits, hunksOf, outlineOf, searchBlocks } from "./edit.js";
+import type { AppliedEdit, DocumentEdit, DocumentOutlineEntry, EditResult } from "./types.js";
+
+// Pass-through, so the split can be counted.
+vi.mock("../content/blocks.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../content/blocks.js")>();
+  return { ...actual, splitBlocks: vi.fn(actual.splitBlocks) };
+});
 
 // ── Pre-fix reference: documents/edit.ts at 6a965ed. Test-only. ─────────────
+
+const referenceHeadingLevel = (line: string): number | undefined => {
+  const m = /^ {0,3}(#{1,6})\s/.exec(line);
+  return m ? m[1]!.length : undefined;
+};
+
+function referenceOutlineOf(markdown: string): DocumentOutlineEntry[] {
+  return splitBlocks(markdown).map((block, i) => {
+    const raw = markdown.slice(block.start, block.end);
+    const firstLine = raw.split("\n", 1)[0] ?? "";
+    const level = block.kind === "text" ? referenceHeadingLevel(firstLine) : undefined;
+    return {
+      block: i,
+      kind: block.kind,
+      ...(level ? { level } : {}),
+      preview: firstLine.trim().slice(0, 100),
+      chars: raw.length,
+    };
+  });
+}
+
+function referenceSearchBlocks(markdown: string, query: string): DocumentOutlineEntry[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [];
+  const blocks = splitBlocks(markdown);
+  return referenceOutlineOf(markdown).filter((entry) => {
+    const b = blocks[entry.block]!;
+    return markdown.slice(b.start, b.end).toLowerCase().includes(needle);
+  });
+}
 
 function referenceOccurrences(haystack: string, needle: string, offset = 0): number[] {
   const out: number[] = [];
@@ -264,6 +300,29 @@ describe("applyEdits matches the pre-fix implementation", () => {
   });
 });
 
+describe("searchBlocks and outlineOf match the pre-fix implementation", () => {
+  it("on 20,000 generated documents and queries", () => {
+    const r = prng(0x5ea7c4);
+    const mismatches: unknown[] = [];
+    let found = 0;
+    for (let n = 0; n < 20_000; n += 1) {
+      const md = text(r, 40);
+      const start = int(r, md.length + 1);
+      let query = md.slice(start, start + 1 + int(r, 10));
+      const k = int(r, 8);
+      if (k === 0) query = pick(r, ["", "   ", "\n", "σ", "Σ", "ς", "i̇", "😀", "THE CAP", "zz"]);
+      else if (k === 1) query = query.toUpperCase();
+      else if (k === 2) query = `  ${query}\t`;
+      const got = searchBlocks(md, query);
+      if (!isDeepStrictEqual(got, referenceSearchBlocks(md, query))) mismatches.push({ md, query });
+      if (!isDeepStrictEqual(outlineOf(md), referenceOutlineOf(md))) mismatches.push({ md, outline: true });
+      if (got.length) found += 1;
+    }
+    expect(mismatches.slice(0, 3)).toEqual([]);
+    expect(found).toBeGreaterThan(5_000);
+  });
+});
+
 describe("applyEdits edge cases", () => {
   const check = (md: string, edits: DocumentEdit[]) => {
     const got = applyEdits(md, edits);
@@ -383,5 +442,12 @@ describe("editing cost", () => {
     const { result, pushes } = arrayPushes(() => applyEdits("a".repeat(20_000), [{ find: "a", replace: "b" }]));
     expect(result).toMatchObject({ ok: false, message: expect.stringMatching(/appears 20000 times/) });
     expect(pushes).toBeLessThan(100);
+  });
+
+  it("splits the document once to search it", () => {
+    const md = "# Title\n\nThe cap is 12 months.\n\n- one\n- two\n\nThe cap again.";
+    vi.mocked(splitBlocks).mockClear();
+    expect(searchBlocks(md, "cap").map((m) => m.block)).toEqual([1, 3]);
+    expect(splitBlocks).toHaveBeenCalledTimes(1);
   });
 });

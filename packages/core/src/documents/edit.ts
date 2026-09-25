@@ -28,18 +28,21 @@ const headingLevel = (line: string): number | undefined => {
  * document, and the whole document is what this design exists to avoid.
  */
 export function outlineOf(markdown: string): DocumentOutlineEntry[] {
-  return splitBlocks(markdown).map((block, i) => {
-    const raw = markdown.slice(block.start, block.end);
-    const firstLine = raw.split("\n", 1)[0] ?? "";
-    const level = block.kind === "text" ? headingLevel(firstLine) : undefined;
-    return {
-      block: i,
-      kind: block.kind,
-      ...(level ? { level } : {}),
-      preview: firstLine.trim().slice(0, 100),
-      chars: raw.length,
-    };
-  });
+  return splitBlocks(markdown).map((block, i) => entryOf(markdown, block, i));
+}
+
+/** The outline entry for one block, which is block `i` of `markdown`. */
+function entryOf(markdown: string, block: MarkdownBlock, i: number): DocumentOutlineEntry {
+  const raw = markdown.slice(block.start, block.end);
+  const firstLine = raw.split("\n", 1)[0] ?? "";
+  const level = block.kind === "text" ? headingLevel(firstLine) : undefined;
+  return {
+    block: i,
+    kind: block.kind,
+    ...(level ? { level } : {}),
+    preview: firstLine.trim().slice(0, 100),
+    chars: raw.length,
+  };
 }
 
 /** Source text of a block range, inclusive. Out-of-range yields "". */
@@ -55,11 +58,16 @@ export function spanOf(markdown: string, from: number, to = from): string {
 export function searchBlocks(markdown: string, query: string): DocumentOutlineEntry[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return [];
-  const blocks = splitBlocks(markdown);
-  return outlineOf(markdown).filter((entry) => {
-    const b = blocks[entry.block]!;
-    return markdown.slice(b.start, b.end).toLowerCase().includes(needle);
+  // One split, and an outline entry only for the blocks that match. Going
+  // through outlineOf split the document a second time and described every
+  // block only to throw most of them away.
+  const out: DocumentOutlineEntry[] = [];
+  splitBlocks(markdown).forEach((block, i) => {
+    if (markdown.slice(block.start, block.end).toLowerCase().includes(needle)) {
+      out.push(entryOf(markdown, block, i));
+    }
   });
+  return out;
 }
 
 /**
