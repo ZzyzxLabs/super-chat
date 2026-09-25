@@ -9,6 +9,12 @@
   `data:` line (a base64 image) in 16 KB chunks: 3.3 s → 26 ms on Bun,
   2.4 s → 17 ms on Node. Events, the reads they follow and errors are
   unchanged.
+- **core:** `bytesToBase64` and `base64ToBytes` hand the work to the platform
+  codec (`Uint8Array` `toBase64` / `fromBase64` where the runtime has them,
+  else `btoa` / `atob`) instead of a per-byte loop. 20 MB encode: 325 ms →
+  7 ms on Bun, 1 s → 82 ms on Node; decode: 42 ms → 8 ms on Bun, 132 ms →
+  43 ms on Node. Output and error messages are unchanged, including for input
+  that is not a `Uint8Array`.
 
 ## 0.3.0
 
