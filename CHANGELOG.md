@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+Timings are bun medians on a desktop shared with other jobs. Absolute times
+moved by as much as 3.5x between runs; every speedup reproduced.
+
+- **core:** `applyEdits` splices every edit into the document in one pass.
+  It used to re-slice the rewritten document once per edit, so the cost grew
+  with edits × length: on a 1 MB document, 200 block-scoped edits went from
+  176 ms to 20 ms and 1,000 from 579 ms to 28 ms. Results are the same for any
+  edit whose `find` is a string.
+
 ## 0.3.0
 
 ### Changed

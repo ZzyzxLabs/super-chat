@@ -62,14 +62,20 @@ export function searchBlocks(markdown: string, query: string): DocumentOutlineEn
   });
 }
 
-/** Every index at which `needle` occurs in `haystack`. */
-function occurrences(haystack: string, needle: string, offset = 0): number[] {
-  const out: number[] = [];
-  if (!needle) return out;
+/**
+ * Where `needle` first occurs in `haystack`, and how many times it occurs in
+ * all, overlaps included. Only the count is needed past the first hit — it is
+ * what the ambiguity message reports — so the hits are counted, not collected.
+ */
+function occurrences(haystack: string, needle: string, offset = 0): { first: number; count: number } {
+  let first = -1;
+  let count = 0;
+  if (!needle) return { first, count };
   for (let i = haystack.indexOf(needle); i !== -1; i = haystack.indexOf(needle, i + 1)) {
-    out.push(i + offset);
+    if (count === 0) first = i + offset;
+    count += 1;
   }
-  return out;
+  return { first, count };
 }
 
 const blockOf = (blocks: MarkdownBlock[], index: number): number =>
@@ -89,9 +95,9 @@ const blockOf = (blocks: MarkdownBlock[], index: number): number =>
  * rejections with a reason the model can act on, exactly as tools/repair.ts
  * treats malformed arguments: an invalid input to retry, not a result.
  *
- * Edits are resolved against the ORIGINAL text and applied back-to-front, so
- * earlier edits cannot shift the offsets of later ones. Two edits that overlap
- * are a contradiction rather than a merge, and are refused.
+ * Edits are resolved against the ORIGINAL text and spliced into it in one pass,
+ * so earlier edits cannot shift the offsets of later ones. Two edits that
+ * overlap are a contradiction rather than a merge, and are refused.
  */
 export function applyEdits(markdown: string, edits: readonly DocumentEdit[]): EditResult {
   if (!edits.length) return { ok: true, markdown, applied: [] };
@@ -104,7 +110,7 @@ export function applyEdits(markdown: string, edits: readonly DocumentEdit[]): Ed
       return { ok: false, reason: "not-found", message: "An edit needs a non-empty `find`.", edit };
     }
 
-    let hits: number[];
+    let hits: { first: number; count: number };
     if (edit.block === undefined) {
       hits = occurrences(markdown, edit.find);
     } else {
@@ -120,7 +126,7 @@ export function applyEdits(markdown: string, edits: readonly DocumentEdit[]): Ed
       hits = occurrences(markdown.slice(block.start, block.end), edit.find, block.start);
     }
 
-    if (hits.length === 0) {
+    if (hits.count === 0) {
       return {
         ok: false,
         reason: "not-found",
@@ -130,17 +136,17 @@ export function applyEdits(markdown: string, edits: readonly DocumentEdit[]): Ed
         edit,
       };
     }
-    if (hits.length > 1) {
+    if (hits.count > 1) {
       return {
         ok: false,
         reason: "ambiguous",
         message:
-          `That text appears ${hits.length} times. Include more surrounding text, or name the block.`,
+          `That text appears ${hits.count} times. Include more surrounding text, or name the block.`,
         edit,
       };
     }
 
-    const start = hits[0]!;
+    const start = hits.first;
     const end = start + edit.find.length;
     const clash = applied.find((a) => start < a.end && end > a.start);
     if (clash) {
@@ -155,13 +161,17 @@ export function applyEdits(markdown: string, edits: readonly DocumentEdit[]): Ed
     applied.push({ edit, start, end, block: blockOf(blocks, start) });
   }
 
-  // Back to front: rewriting from the end leaves every earlier offset valid.
-  let out = markdown;
-  for (const a of [...applied].sort((x, y) => y.start - x.start)) {
-    out = out.slice(0, a.start) + a.edit.replace + out.slice(a.end);
+  // Front to back, cutting every unchanged stretch straight from the original.
+  // Overlaps were refused above, so no edit needs text another one produced —
+  // and re-slicing the rewritten string once per edit made this quadratic.
+  let out = "";
+  let from = 0;
+  for (const a of [...applied].sort((x, y) => x.start - y.start)) {
+    out += markdown.slice(from, a.start) + a.edit.replace;
+    from = a.end;
   }
 
-  return { ok: true, markdown: out, applied };
+  return { ok: true, markdown: out + markdown.slice(from), applied };
 }
 
 /** Line-level view of one edit, for the approval card. */
