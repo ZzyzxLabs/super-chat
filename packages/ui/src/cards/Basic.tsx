@@ -371,41 +371,248 @@ export function DiffCardView({ spec }: CardRendererProps<DiffCard>) {
   );
 }
 
-// Above this many lines on either side, the classic (n+1)×(m+1) LCS matrix
-// gets big enough to matter (a 5000-line file is 25M cells) — fall back to a
-// cheap linear diff instead of allocating it.
+type DiffRow = { kind: "same" | "add" | "del"; text: string };
+
+// Above this many lines on either side, even a minimal diff costs more than
+// the linear fallback below (a 5000-line file with 5% of its lines edited:
+// ~2.4 ms against ~0.08 ms), and that fallback is what such inputs have always
+// shown.
 const DIFF_LCS_LINE_CAP = 2000;
 
-function diffLines(a: string[], b: string[]): { kind: "same" | "add" | "del"; text: string }[] {
+/**
+ * Line diff, row for row what the old (n+1)×(m+1) LCS table produced, without
+ * the table: that cost O(n·m) time and memory whatever the edit, 4M cells and
+ * 20–45 ms for two 2000-line texts that differ in a single line.
+ *
+ * The old walk went forward, took a matching line whenever it could, and
+ * otherwise deleted a[i] if that kept the diff minimal, else inserted b[j].
+ * matchLines() replays exactly that walk, answering "does deleting keep it
+ * minimal?" from a Myers search instead of the table, so the cost is
+ * O((n+m)·D) for D changed lines. Rows are then laid out the way the old walk
+ * emitted them: between two kept lines, every deletion before any insertion.
+ *
+ * The search is bounded. First it runs on the lines themselves with a small
+ * budget, which covers ordinary edits. Failing that, it runs again on only the
+ * lines that occur on BOTH sides: a line only one side has can never be kept,
+ * so dropping it does not change which lines the walk keeps (matchLines
+ * minds where the dropped ones were), and two texts that mostly differ shrink
+ * to almost nothing. That second run may take a sixteenth as many steps as a
+ * table over those lines has cells. Past that (shared lines, blank and brace
+ * lines included, added, removed or moved in many places) lcsPairs() fills
+ * that table and walks it the old way, so the rows are the same either way. A
+ * grid the search cannot beat goes to the table directly: a tiny one, or one
+ * side much longer than the other.
+ */
+export function diffLines(a: string[], b: string[]): DiffRow[] {
   if (a.length > DIFF_LCS_LINE_CAP || b.length > DIFF_LCS_LINE_CAP) return diffLinesFast(a, b);
 
   const n = a.length;
   const m = b.length;
-  const lcs: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i -= 1) {
-    for (let j = m - 1; j >= 0; j -= 1) {
-      lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+  // A table no bigger than the first search's budget is the cheaper of the two.
+  let pairs = n * m <= 16 * (n + m) ? lcsPairs(a, b, n, m) : searchPays(n, m) ? matchLines(a, b, 16 * (n + m)) : null;
+  if (!pairs) {
+    const idOf = new Map<string, number>();
+    const bId = new Int32Array(m);
+    for (let j = 0; j < m; j += 1) {
+      let id = idOf.get(b[j]!);
+      if (id === undefined) idOf.set(b[j]!, (id = idOf.size));
+      bId[j] = id;
+    }
+    const inA = new Uint8Array(idOf.size);
+    const aAt: number[] = [];
+    const aKept: number[] = [];
+    for (let i = 0; i < n; i += 1) {
+      const id = idOf.get(a[i]!);
+      if (id === undefined) continue;
+      inA[id] = 1;
+      aAt.push(i);
+      aKept.push(id);
+    }
+    const bAt: number[] = [];
+    const bKept: number[] = [];
+    for (let j = 0; j < m; j += 1) {
+      if (!inA[bId[j]!]) continue;
+      bAt.push(j);
+      bKept.push(bId[j]!);
+    }
+    const n2 = aKept.length;
+    const m2 = bKept.length;
+    pairs = (searchPays(n2, m2) && matchLines(aKept, bKept, (n2 * m2) >> 4, bAt)) || lcsPairs(aKept, bKept, n, m, aAt, bAt);
+    for (let q = 0; q < pairs.length; q += 2) {
+      pairs[q] = aAt[pairs[q]!]!;
+      pairs[q + 1] = bAt[pairs[q + 1]!]!;
     }
   }
-  const out: { kind: "same" | "add" | "del"; text: string }[] = [];
+
+  const out: DiffRow[] = [];
   let i = 0;
   let j = 0;
-  while (i < n && j < m) {
-    if (a[i] === b[j]) {
-      out.push({ kind: "same", text: a[i]! });
-      i += 1;
-      j += 1;
-    } else if (lcs[i + 1]![j]! >= lcs[i]![j + 1]!) {
-      out.push({ kind: "del", text: a[i]! });
-      i += 1;
-    } else {
-      out.push({ kind: "add", text: b[j]! });
-      j += 1;
-    }
+  for (let q = 0; q < pairs.length; q += 2) {
+    while (i < pairs[q]!) out.push({ kind: "del", text: a[i++]! });
+    while (j < pairs[q + 1]!) out.push({ kind: "add", text: b[j++]! });
+    out.push({ kind: "same", text: a[i++]! });
+    j += 1;
   }
   while (i < n) out.push({ kind: "del", text: a[i++]! });
   while (j < m) out.push({ kind: "add", text: b[j++]! });
   return out;
+}
+
+// The search needs at least |n − m| rounds and round d takes d + 1 steps, so
+// once (n − m)²/2 reaches the table's n·m cells it cannot win: one side much
+// longer than the other (a new file, a few lines against a long text).
+function searchPays(n: number, m: number): boolean {
+  return (n - m) * (n - m) < 2 * n * m;
+}
+
+/**
+ * The kept lines of the old LCS walk over `a` and `b`, as flat [i, j, …]
+ * index pairs, or null once the search has taken more than `budget` steps.
+ *
+ * `bAt` is set when `a` and `b` are the filtered id sequences: bAt[j] is b[j]'s
+ * index in the original text, so a gap in it marks lines only the new side
+ * had. The old walk, standing on such a line, had nothing to match: it
+ * deleted a[x] if that stayed minimal and otherwise inserted the line. Without
+ * this the replay would pair a[x] with b[y] early — equally short, but not
+ * the pairing the card used to show.
+ */
+function matchLines<T>(a: ArrayLike<T>, b: ArrayLike<T>, budget: number, bAt?: ArrayLike<number>): number[] | null {
+  const pairs: number[] = [];
+  let p = 0;
+  let next = 0; // original index of the first new-side line the walk has not passed
+  while (p < a.length && p < b.length && (!bAt || bAt[p] === next) && a[p] === b[p]) {
+    pairs.push(p, p);
+    if (bAt) next = bAt[p]! + 1;
+    p += 1;
+  }
+
+  // Myers, run backwards from the end of both texts. After round d,
+  // trace[d(d+1)/2 + i] holds, for diagonal k = kEnd - d + 2i (k = x - y), the
+  // smallest x on it from which the rest of the texts is at most d edits away
+  // (none = no such point). The first round's snake eats the common suffix,
+  // which is why it is not trimmed up front: trimming would pair trailing
+  // equal lines differently from the old walk (before [x, s], after [s, y, s]).
+  const n = a.length - p;
+  const m = b.length - p;
+  const kEnd = n - m;
+  const none = n + 1;
+  let trace = new Int32Array(64);
+  let work = 0;
+  let d = 0;
+  for (; ; d += 1) {
+    const base = (d * (d + 1)) >> 1;
+    work += d + 1;
+    if (work > budget) return null;
+    if (base + d + 1 > trace.length) {
+      const grown = new Int32Array(Math.max(base + d + 1, Math.min(trace.length * 2, budget)));
+      grown.set(trace);
+      trace = grown;
+    }
+    const prev = base - d;
+    for (let i = 0; i <= d; i += 1) {
+      const k = kEnd - d + 2 * i;
+      let x = d === 0 ? n : none;
+      if (i < d) {
+        // Step to (x+1, y) on diagonal k+1, a deletion.
+        const s = trace[prev + i]!;
+        const c = s > 0 ? s : 1;
+        if (c <= n && c <= m + k + 1) x = c - 1;
+      }
+      if (i > 0) {
+        // Step to (x, y+1) on diagonal k-1, an insertion.
+        const s = trace[prev + i - 1]!;
+        const c = s > k ? s : k;
+        if (c <= n && c <= m + k - 1 && c < x) x = c;
+      }
+      if (i > 0 && i < d) {
+        // Already within d-2 edits.
+        const s = trace[prev - d + i]!;
+        if (s < x) x = s;
+      }
+      if (x !== none) {
+        let y = x - k;
+        while (x > 0 && y > 0 && a[p + x - 1] === b[p + y - 1]) {
+          x -= 1;
+          y -= 1;
+          work += 1;
+        }
+        if (work > budget) return null;
+      }
+      trace[base + i] = x;
+    }
+    const at = d - kEnd; // twice diagonal 0's index this round
+    if (at >= 0 && at <= 2 * d && (at & 1) === 0 && trace[base + (at >> 1)] === 0) break;
+  }
+
+  // Replay the old walk. At (x, y) the rest is exactly r+1 edits away, so
+  // deleting keeps the diff minimal iff (x+1, y) is within r.
+  let x = 0;
+  let y = 0;
+  let r = d - 1;
+  while (x < n && y < m) {
+    const pending = bAt !== undefined && bAt[p + y] !== next;
+    if (!pending && a[p + x] === b[p + y]) {
+      pairs.push(p + x, p + y);
+      if (bAt) next = bAt[p + y]! + 1;
+      x += 1;
+      y += 1;
+      continue;
+    }
+    const at = x + 1 - y - kEnd + r;
+    if (at >= 0 && at <= 2 * r && x + 1 >= trace[((r * (r + 1)) >> 1) + (at >> 1)]!) {
+      x += 1;
+      r -= 1;
+    } else if (pending) {
+      next = bAt![p + y]!; // the dropped lines are inserted; nothing else moves
+    } else {
+      if (bAt) next = bAt[p + y]! + 1;
+      y += 1;
+      r -= 1;
+    }
+  }
+  return pairs;
+}
+
+/**
+ * The old table walk itself, for what the search cannot do cheaply; same
+ * [i, j, …] pairs as matchLines. With `aAt`/`bAt`, `a` and `b` are the lines
+ * both sides share (aAt[i] is a[i]'s index in the n-line old text, bAt[j]
+ * b[j]'s in the m-line new one). Leaving the other lines out of the table
+ * changes no LCS length, so the walk still steps over all n and m lines,
+ * reading each length at the shared line it has reached. The cap keeps every
+ * length under 2^16.
+ */
+function lcsPairs<T>(a: ArrayLike<T>, b: ArrayLike<T>, n: number, m: number, aAt?: ArrayLike<number>, bAt?: ArrayLike<number>): number[] {
+  const w = b.length + 1;
+  const lcs = new Uint16Array((a.length + 1) * w);
+  for (let i = a.length - 1; i >= 0; i -= 1) {
+    const ai = a[i];
+    for (let j = b.length - 1, at = i * w + j; j >= 0; j -= 1, at -= 1) {
+      lcs[at] = ai === b[j] ? lcs[at + w + 1]! + 1 : Math.max(lcs[at + w]!, lcs[at + 1]!);
+    }
+  }
+  const pairs: number[] = [];
+  let i = 0;
+  let j = 0;
+  for (let x = 0, y = 0; x < n && y < m; ) {
+    // Whether old line x and new line y are in the table, as a[i] and b[j].
+    const inA = i < a.length && (aAt ? aAt[i] : i) === x;
+    const inB = j < b.length && (bAt ? bAt[j] : j) === y;
+    if (inA && inB && a[i] === b[j]) {
+      pairs.push(i, j);
+      i += 1;
+      j += 1;
+      x += 1;
+      y += 1;
+    } else if (lcs[(inA ? i + 1 : i) * w + j]! >= lcs[i * w + (inB ? j + 1 : j)]!) {
+      if (inA) i += 1;
+      x += 1;
+    } else {
+      if (inB) j += 1;
+      y += 1;
+    }
+  }
+  return pairs;
 }
 
 /**

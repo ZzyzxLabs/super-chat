@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- **ui:** `DiffCardView` finds its line diff with a bounded Myers search
+  instead of filling an n × m table. Two 2000-line texts with 5% of lines
+  changed: 30 ms → 0.38 ms and 34 MB → 1.5 MB peak; two unrelated 2000-line
+  texts: 20 ms → 0.8 ms. Where the search gives up (a reordered file), the
+  old table walk runs over only the lines both sides share: a shuffled
+  2000-line file, 27 ms → 11 ms and 34 MB → 15 MB. The rows are the same as
+  before for every input.
+
 ## 0.3.0
 
 ### Changed
