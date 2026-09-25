@@ -321,6 +321,63 @@ export function renderMarkdown(src: string): string {
   return renderSource(src, 0);
 }
 
+/** What renderMarkdownStream keeps between calls. Start from newMarkdownStream(). */
+export type MarkdownStream = {
+  /** The source the cached blocks were decided on; valid while the text starts with it. */
+  settled: string;
+  /** Rendered HTML of those blocks. */
+  html: string;
+  /** Where the block after them starts looking: the line after the last one. */
+  resume: number;
+};
+
+export const newMarkdownStream = (): MarkdownStream => ({ settled: "", html: "", resume: 0 });
+
+/**
+ * renderMarkdown for text that grows while it is shown — always the same
+ * string renderMarkdown(src) returns, but blocks that can no longer change are
+ * rendered once and reused, so a streamed answer costs its open tail per
+ * frame instead of its whole length.
+ *
+ * Every block renders from its own source slice alone, so the only question
+ * is which blocks later text can still move. splitBlocks decides a block's
+ * extent from its own lines and, at most, the first line of the block after
+ * it: the blank line or fence opener that ends it, and for a list or quote the
+ * next non-blank line, which may continue it. Whether a line is blank, a fence
+ * opener or closer, a list item or a quote can change while it is the last,
+ * unterminated line — `1` becomes `1.`, a closing ``` becomes ```js, ``` gains
+ * a backtick and stops opening a fence, a blank line gets text. Every line
+ * before the last is final. So a block is settled once the block after it
+ * starts before the last line: a setext underline, a loose list's next item,
+ * a table's delimiter row or the rest of an open fence all belong to the
+ * block that is still open. (This renderer has no reference definitions,
+ * footnotes or raw HTML blocks, the other constructs that reach back.) And
+ * splitBlocks never looks behind the line it stands on, so splitting from the
+ * line after the settled blocks yields the same blocks the whole text would.
+ *
+ * Text that does not start with `stream.settled` — a new run, an edit — drops
+ * the cache and renders from scratch.
+ */
+export function renderMarkdownStream(src: string, stream: MarkdownStream): string {
+  if (!src.startsWith(stream.settled)) Object.assign(stream, newMarkdownStream());
+
+  const from = stream.resume;
+  const tail = src.slice(from);
+  const blocks = splitBlocks(tail);
+  const lastLine = src.lastIndexOf("\n") + 1 - from;
+  let html = stream.html;
+  for (let i = 0; i < blocks.length; i += 1) {
+    const rendered = renderBlock(tail, blocks[i]!, 0);
+    html += rendered;
+    if (i + 1 < blocks.length && blocks[i + 1]!.start < lastLine) {
+      stream.html += rendered;
+      stream.resume = from + blocks[i]!.end + 1;
+    }
+  }
+  stream.settled = src.slice(0, lastLine + from);
+  return html;
+}
+
 /**
  * Render for a document previewer: every block carries `data-sc-block`, so a
  * DOM selection resolves to a source span by walking up to the nearest one.
