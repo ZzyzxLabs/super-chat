@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Performance
+
+- **core:** `parseSSE` and `parseSSEJson` no longer rescan a partial line each
+  time a chunk arrives, so a long line costs time linear in its length. A 5 MB
+  `data:` line (a base64 image) in 16 KB chunks: 3.3 s → 26 ms on Bun,
+  2.4 s → 17 ms on Node. Events, the reads they follow and errors are
+  unchanged.
+
 ## 0.3.0
 
 ### Changed
