@@ -15,6 +15,13 @@ moved by as much as 3.5x between runs; every speedup reproduced.
 - **core:** `searchBlocks` splits the document once instead of twice and builds
   outline entries only for the blocks that match: 65 ms to 40 ms on a 2 MB
   document. Results are unchanged.
+- **core:** `repairToolArguments` no longer rebuilds malformed arguments a
+  character at a time, builds each repair only once the one before it has
+  failed, and skips parses that cannot succeed: 1 MB of `createDocument`
+  arguments with a trailing comma went from 410 ms to 7 ms. A long run of
+  whitespace anywhere in the arguments, raw newlines included, no longer makes
+  the closing-fence check quadratic (40,000 spaces: 0.7 s to 0.14 ms; 40,000
+  newlines: 0.8 s to 1.8 ms). Results are unchanged.
 
 ## 0.3.0
 
