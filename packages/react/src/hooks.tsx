@@ -15,7 +15,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  siblingsOf,
   type AppStateBinding,
   type Card,
   type CardAction,
@@ -90,6 +89,44 @@ export function useThread() {
   );
 }
 
+type BranchPosition = { index: number; count: number };
+
+const NOT_IN_TREE: BranchPosition = Object.freeze({ index: -1, count: 0 });
+
+/**
+ * Every message's position among its siblings, one pass per tree.
+ *
+ * A thread renders a BranchNav per message and each reads its position on
+ * every notify — during a stream, every token — so a `siblingsOf` scan each
+ * was O(messages × tree) per token. The tree only changes when a message is
+ * appended or the thread is swapped, and AgentClient replaces the array every
+ * time rather than mutating it, so the array itself versions this cache: a
+ * token reuses the index, a new tree builds a new one.
+ */
+const branchIndexes = new WeakMap<readonly Message[], Map<string, BranchPosition>>();
+
+/** What `siblingsOf` + `findIndex` answer, read from the shared per-tree index. */
+export function branchPosition(tree: readonly Message[], messageId: string): BranchPosition {
+  let index = branchIndexes.get(tree);
+  if (!index) {
+    index = new Map();
+    // Same grouping as siblingsOf: `parentId ?? null`, insertion order, and
+    // the FIRST message with an id is the one whose siblings are counted.
+    const groups = new Map<string | null, BranchPosition[]>();
+    for (const m of tree) {
+      const parentId = m.parentId ?? null;
+      let group = groups.get(parentId);
+      if (!group) groups.set(parentId, (group = []));
+      const position = { index: group.length, count: 0 };
+      group.push(position);
+      if (!index.has(m.id)) index.set(m.id, position);
+    }
+    for (const group of groups.values()) for (const position of group) position.count = group.length;
+    branchIndexes.set(tree, index);
+  }
+  return index.get(messageId) ?? NOT_IN_TREE;
+}
+
 /**
  * Branch position of one message: its index among siblings and the switcher
  * actions. `count === 1` means no branches — render nothing.
@@ -97,10 +134,7 @@ export function useThread() {
 export function useBranches(messageId: string): { index: number; count: number; prev: () => void; next: () => void } {
   const client = useAgentClient();
   const info = useAgentState(
-    (s) => {
-      const siblings = siblingsOf(s.tree, messageId);
-      return { index: siblings.findIndex((m) => m.id === messageId), count: siblings.length };
-    },
+    (s) => branchPosition(s.tree, messageId),
     (a, b) => a.index === b.index && a.count === b.count,
   );
   return useMemo(

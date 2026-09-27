@@ -7,6 +7,18 @@
 Timings are bun medians on a desktop shared with other jobs. Absolute times
 moved by as much as 3.5x between runs; every speedup reproduced.
 
+- **react:** `useBranches` reads each message's sibling position from one
+  index per tree, shared by every `BranchNav`, instead of scanning the whole
+  tree once per message on every store notify. Per streamed token, with a
+  `BranchNav` on each message of the active path: 337-message thread
+  8–46 ms -> 0.01–0.07 ms; 2,000 messages 0.4–0.9 s -> 0.13–0.3 ms. A notify
+  that brings a new tree builds the index once (0.06–0.5 ms at 337). Positions
+  and counts are unchanged for every change `AgentClient` makes. The index is
+  keyed by the `tree` array, so `ThreadState.tree` must be replaced, never
+  mutated in place: a host that edits the array, or a message's `id` or
+  `parentId`, through `client.store` sees stale branch positions until the
+  next replacement.
+
 - **core:** `applyEdits` splices every edit into the document in one pass.
   It used to re-slice the rewritten document once per edit, so the cost grew
   with edits × length: on a 1 MB document, 200 block-scoped edits went from
