@@ -4,6 +4,9 @@
 
 ### Performance
 
+Timings are bun medians on a desktop shared with other jobs. Absolute times
+moved by as much as 3.5x between runs; every speedup reproduced.
+
 - **ui:** `DiffCardView` finds its line diff with a bounded Myers search
   instead of filling an n × m table. Two 2000-line texts with 5% of lines
   changed: 30 ms → 0.38 ms and 34 MB → 1.5 MB peak; two unrelated 2000-line
@@ -17,6 +20,45 @@
   answer: 9.9 ms → 0.06 ms per frame, 5.2 s → 0.13 s over a 1200-frame
   stream. The HTML is identical to rendering the whole text; the browser's
   own DOM update per frame is unchanged.
+
+- **react:** `useBranches` reads each message's sibling position from one
+  index per tree, shared by every `BranchNav`, instead of scanning the whole
+  tree once per message on every store notify. Per streamed token, with a
+  `BranchNav` on each message of the active path: 337-message thread
+  8–46 ms -> 0.01–0.07 ms; 2,000 messages 0.4–0.9 s -> 0.13–0.3 ms. A notify
+  that brings a new tree builds the index once (0.06–0.5 ms at 337). Positions
+  and counts are unchanged for every change `AgentClient` makes. The index is
+  keyed by the `tree` array, so `ThreadState.tree` must be replaced, never
+  mutated in place: a host that edits the array, or a message's `id` or
+  `parentId`, through `client.store` sees stale branch positions until the
+  next replacement.
+
+- **core:** `applyEdits` splices every edit into the document in one pass.
+  It used to re-slice the rewritten document once per edit, so the cost grew
+  with edits × length: on a 1 MB document, 200 block-scoped edits went from
+  176 ms to 20 ms and 1,000 from 579 ms to 28 ms. Results are the same for any
+  edit whose `find` is a string.
+- **core:** `searchBlocks` splits the document once instead of twice and builds
+  outline entries only for the blocks that match: 65 ms to 40 ms on a 2 MB
+  document. Results are unchanged.
+- **core:** `repairToolArguments` no longer rebuilds malformed arguments a
+  character at a time, builds each repair only once the one before it has
+  failed, and skips parses that cannot succeed: 1 MB of `createDocument`
+  arguments with a trailing comma went from 410 ms to 7 ms. A long run of
+  whitespace anywhere in the arguments, raw newlines included, no longer makes
+  the closing-fence check quadratic (40,000 spaces: 0.7 s to 0.14 ms; 40,000
+  newlines: 0.8 s to 1.8 ms). Results are unchanged.
+- **core:** `parseSSE` and `parseSSEJson` no longer rescan a partial line each
+  time a chunk arrives, so a long line costs time linear in its length. A 5 MB
+  `data:` line (a base64 image) in 16 KB chunks: 3.3 s → 26 ms on Bun,
+  2.4 s → 17 ms on Node. Events, the reads they follow and errors are
+  unchanged.
+- **core:** `bytesToBase64` and `base64ToBytes` hand the work to the platform
+  codec (`Uint8Array` `toBase64` / `fromBase64` where the runtime has them,
+  else `btoa` / `atob`) instead of a per-byte loop. 20 MB encode: 325 ms →
+  7 ms on Bun, 1 s → 82 ms on Node; decode: 42 ms → 8 ms on Bun, 132 ms →
+  43 ms on Node. Output and error messages are unchanged, including for input
+  that is not a `Uint8Array`.
 
 ## 0.3.0
 

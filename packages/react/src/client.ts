@@ -48,7 +48,11 @@ export type ThreadState = {
    * consumes. Always derived from `tree` + `headId`; treat as read-only.
    */
   messages: Message[];
-  /** Every message ever sent in this thread, abandoned branches included. */
+  /**
+   * Every message ever sent in this thread, abandoned branches included.
+   * Replaced on every change, never mutated in place — `useBranches` caches
+   * its sibling index per array. Treat as read-only.
+   */
   tree: Message[];
   /** Leaf of the active branch. */
   headId: string | null;
