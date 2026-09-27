@@ -7,6 +7,20 @@
 Timings are bun medians on a desktop shared with other jobs. Absolute times
 moved by as much as 3.5x between runs; every speedup reproduced.
 
+- **ui:** `DiffCardView` finds its line diff with a bounded Myers search
+  instead of filling an n × m table. Two 2000-line texts with 5% of lines
+  changed: 30 ms → 0.38 ms and 34 MB → 1.5 MB peak; two unrelated 2000-line
+  texts: 20 ms → 0.8 ms. Where the search gives up (a reordered file), the
+  old table walk runs over only the lines both sides share: a shuffled
+  2000-line file, 27 ms → 11 ms and 34 MB → 15 MB. The rows are the same as
+  before for every input.
+- **ui:** `LiveTurn` no longer re-renders the whole answer's markdown every
+  frame while it streams: blocks later text can no longer change are kept
+  from earlier frames, and only the open tail is rendered again. An 80 KB
+  answer: 9.9 ms → 0.06 ms per frame, 5.2 s → 0.13 s over a 1200-frame
+  stream. The HTML is identical to rendering the whole text; the browser's
+  own DOM update per frame is unchanged.
+
 - **react:** `useBranches` reads each message's sibling position from one
   index per tree, shared by every `BranchNav`, instead of scanning the whole
   tree once per message on every store notify. Per streamed token, with a

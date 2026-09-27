@@ -29,7 +29,7 @@ import {
   type TurnMeta,
 } from "@zzyzxlabs/super-chat-react";
 import { CardRenderer, CardSkeleton } from "./renderer-registry.js";
-import { renderMarkdown } from "./markdown.js";
+import { newMarkdownStream, renderMarkdown, renderMarkdownStream } from "./markdown.js";
 import { useDocumentQuotes } from "./quotes.js";
 import {
   applyPick,
@@ -556,9 +556,11 @@ export function LiveTurn() {
   // Streamed text arrives token by token; re-running the markdown pipeline on
   // every one of them is O(n²) over the full response. Batch it to once per
   // frame while the run is actually streaming, and snap to the exact final
-  // text the instant it isn't.
+  // text the instant it isn't. Each frame then re-renders only the blocks the
+  // stream can still change; the settled ones are kept from earlier frames.
   const throttledText = useFrameThrottled(text, run.status === "running");
-  const html = useMemo(() => renderMarkdown(throttledText), [throttledText]);
+  const [markdownStream] = useState(newMarkdownStream);
+  const html = useMemo(() => renderMarkdownStream(throttledText, markdownStream), [throttledText, markdownStream]);
   const thoughtFor = useThinkingDuration(run.runId, run.parts.some((p) => p.type === "reasoning"), Boolean(text));
   const streamPhase = useStreamingPulse(text, run.status === "running");
 
