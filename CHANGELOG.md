@@ -22,6 +22,17 @@ moved by as much as 3.5x between runs; every speedup reproduced.
   whitespace anywhere in the arguments, raw newlines included, no longer makes
   the closing-fence check quadratic (40,000 spaces: 0.7 s to 0.14 ms; 40,000
   newlines: 0.8 s to 1.8 ms). Results are unchanged.
+- **core:** `parseSSE` and `parseSSEJson` no longer rescan a partial line each
+  time a chunk arrives, so a long line costs time linear in its length. A 5 MB
+  `data:` line (a base64 image) in 16 KB chunks: 3.3 s → 26 ms on Bun,
+  2.4 s → 17 ms on Node. Events, the reads they follow and errors are
+  unchanged.
+- **core:** `bytesToBase64` and `base64ToBytes` hand the work to the platform
+  codec (`Uint8Array` `toBase64` / `fromBase64` where the runtime has them,
+  else `btoa` / `atob`) instead of a per-byte loop. 20 MB encode: 325 ms →
+  7 ms on Bun, 1 s → 82 ms on Node; decode: 42 ms → 8 ms on Bun, 132 ms →
+  43 ms on Node. Output and error messages are unchanged, including for input
+  that is not a `Uint8Array`.
 
 ## 0.3.0
 
