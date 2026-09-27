@@ -100,27 +100,40 @@ export async function* parseSSE(stream: ReadableStream<Uint8Array>): AsyncGenera
   const decoder = new TextDecoder("utf-8");
   const sse = new SSEDecoder();
   let buffer = "";
+  // Whether `buffer` ends in a "\r" held back as a possible half of "\r\n".
+  let cr = false;
 
   try {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+      const text = decoder.decode(value, { stream: true });
+      // Appending links the two strings (engines build a rope) and copies
+      // nothing until a character is read. So only the new text is scanned,
+      // plus a held "\r" so that a "\r\n" split across chunks still reads as one
+      // terminator, and an unterminated line is copied once, when its terminator
+      // shows up. Scanning `buffer` from the start read, and so copied, the
+      // whole line again with every chunk: quadratic for a long line (a base64
+      // image in one `data:` field).
+      buffer += text;
+      const scan: string = cr ? "\r" + text : text;
+      const shift = buffer.length - scan.length; // where `scan` starts in `buffer`
 
       // Track a read offset instead of slicing the buffer after every line —
       // a chunk with many short lines would otherwise re-copy the (shrinking)
       // remainder once per line. Slice once, after every complete line in
       // this chunk has been extracted.
       let offset = 0;
-      let end = findLineEnd(buffer, offset);
+      let end = findLineEnd(scan);
       while (end) {
-        const line = buffer.slice(offset, end.index);
-        offset = end.index + end.length;
+        const line = buffer.slice(offset, shift + end.index);
+        offset = shift + end.index + end.length;
         const msg = sse.push(line);
         if (msg) yield msg;
-        end = findLineEnd(buffer, offset);
+        end = findLineEnd(scan, offset - shift);
       }
       if (offset > 0) buffer = buffer.slice(offset);
+      cr = scan.endsWith("\r");
     }
 
     // Flush a trailing event that arrived without its final blank line — some
